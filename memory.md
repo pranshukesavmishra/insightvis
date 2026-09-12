@@ -6,7 +6,7 @@
 > whenever a decision is made or a constraint is discovered.** A stale memory is worse than
 > no memory — fix anything here that no longer matches reality.
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 ---
 
@@ -65,48 +65,62 @@ Full topic breakdown lives in `README.md` §3. Keep the two documents consistent
 
 ---
 
-## 4. What is built — Insight Smart Lab v1
+## 4. What is built — Insight Smart Lab v2
 
 **Live artifact:** https://claude.ai/code/artifact/bff145e7-cd07-46c2-85d5-b579094767e6
 **Source:** `smartlab/` in this repository.
 
-Six flagship experiments — two per science subject — chosen for maximum exam weight combined
-with maximum "impossible to picture from a textbook" value.
+**Twelve experiments across six chapters — two per chapter.** The client asked for depth within a
+topic rather than one demo per topic, so every chapter carries a pair.
 
-| # | Subject | Experiment | Chapter | What makes it real |
-|---|---|---|---|---|
-| 1 | Physics | Charged particle in crossed E and B fields | Moving Charges & Magnetism | **Boris pusher** integration — conserves \|v\| exactly under pure B, so the flat speed trace is a proof, not an assertion |
-| 2 | Physics | Young's double slit — path difference to fringe | Wave Optics | True intensity formula with the single-slit sinc² envelope; screen painted in real wavelength→RGB colour |
-| 3 | Chemistry | Hydrogen atomic orbitals | Structure of Atom | Point cloud is **rejection-sampled from \|ψ\|²** using exact R<sub>nl</sub>(r) and real spherical harmonics |
-| 4 | Chemistry | SN1 vs SN2 | Haloalkanes & Haloarenes | Real 3D Walden inversion geometry; barriers computed from substrate/nucleophile/solvent; live racemisation tally |
-| 5 | Biology | Hodgkin–Huxley action potential | Neural Control & Coordination | Full HH equations on a **100-compartment cable** — the spike genuinely propagates |
-| 6 | Biology | Cardiac cycle, PV loop and ECG | Body Fluids & Circulation | **Time-varying elastance** model + Windkessel aorta; valves open purely on pressure gradient |
+| # | Subject · Chapter | Experiment | What makes it real |
+|---|---|---|---|
+| 1 | Physics · Moving Charges | Charged particle in crossed E and B | **Boris pusher** conserves \|v\| exactly under pure B |
+| 2 | Physics · Moving Charges | **The cyclotron** | E acts only in the gap; RF can be detuned out of resonance |
+| 3 | Physics · Wave Optics | Young's double slit | True intensity with the single-slit sinc² envelope; μ immersion |
+| 4 | Physics · Wave Optics | **Diffraction & resolving power** | Real **Airy pattern from Bessel J₁**, Rayleigh verdict |
+| 5 | Chemistry · Structure of Atom | Hydrogen orbitals | Rejection-sampled from \|ψ\|²; signed R(r) graph |
+| 6 | Chemistry · Structure of Atom | **Bohr model & spectrum** | Rydberg for H/He⁺/Li²⁺/Be³⁺; true-colour Balmer lines |
+| 7 | Chemistry · Haloalkanes | SN1 vs SN2 | Walden inversion; live racemisation tally; rate-vs-[Nu] graph |
+| 8 | Chemistry · Haloalkanes | **E1 vs E2 elimination** | **Anti-periplanar dihedral gates the reaction**; Saytzeff/Hofmann |
+| 9 | Biology · Neural Control | Hodgkin–Huxley action potential | Full HH on a 100-compartment cable; gating variables plotted |
+| 10 | Biology · Neural Control | **The synapse** | Real Ca²⁺ fourth-power release law; curare/botox/neostigmine |
+| 11 | Biology · Circulation | Cardiac cycle | Time-varying elastance + Windkessel; PV loop; Frank–Starling curve |
+| 12 | Biology · Circulation | **Cardiac conduction & heart block** | Event-driven SA→AV→His→Purkinje; ladder diagram; Wenckebach |
 
-### Why these six
-Physics 1 and 2 are the two topics where students memorise a result they have never observed.
-Chemistry 3 is the single highest-leverage visual in inorganic (node counting is examined
-relentlessly), and 4 is the highest-weightage organic mechanism. Biology 5 and 6 are the two
-heaviest NEET physiology units, and both are genuinely simulatable from first principles
-rather than merely illustrated.
+### Engine capability (lab-core v2)
+- **Multiple graphs per experiment**, each with a hover crosshair and a live tooltip
+- **Click any control value to type an exact number** (students need exact inputs, not slider guesses)
+- **Ghost overlay** — freeze the current graph and compare the next configuration against it
+- Fullscreen stage; keyboard shortcuts (space play/pause, R reset, L log, ← → walkthrough)
+- **Lab notebook** — record every readout as a table row, the way a real practical is written up
+- **Self-check quizzes** with worked explanations
+- Chapter-grouped navigation (subject → chapter → experiment)
+- `InsightLab.extend(id, patch)` deepens an already-registered sim without touching its module —
+  used by `sims-extend.js` to add controls, second graphs, readouts and quizzes to the original six
 
 ### Architecture that shipped
 ```
 smartlab/
-├── index.html          shell + complete design system (all CSS)
-├── lab-core.js         registry, console shell, control deck, walkthrough engine,
-│                       RK4, 3D camera + projection, canvas plotting library
-├── sims-physics.js     Lorentz force, Young's double slit
-├── sims-chemistry.js   hydrogen orbitals, SN1/SN2
-└── sims-biology.js     action potential, cardiac cycle
+├── index.html           shell + complete design system (all CSS)
+├── lab-core.js          registry, console shell, control deck, multi-plot canvas library with
+│                        hover inspection, walkthrough + quiz engines, lab notebook, RK4,
+│                        3D camera + projection, extend() hook
+├── sims-physics.js      Lorentz force · Young's double slit
+├── sims-physics2.js     cyclotron · diffraction & resolving power
+├── sims-chemistry.js    hydrogen orbitals · SN1/SN2
+├── sims-chemistry2.js   Bohr model & spectrum · E1/E2 elimination
+├── sims-biology.js      action potential · cardiac cycle
+├── sims-biology2.js     synapse · cardiac conduction & heart block
+└── sims-extend.js       depth pass on the original six
 ```
 Zero external JS dependencies. All 3D is a hand-rolled Z-up perspective projection with
 painter's-algorithm sorting and additive ("phosphor") blending on Canvas 2D.
 
 ### Every experiment ships the same anatomy
-**Stage** (the visual) · **Control Deck** (live SI-unit parameters) · **Readout strip**
-(derived quantities) · **Equation pane** (governing relation with values substituted live) ·
-**Graph pane** · **Guided walkthrough** (predict-then-reveal) · **Why this is asked**
-(exam framing + a trap-to-avoid callout).
+**Stage** · **Control Deck** · **Readout strip** · **Equation pane** (values substituted live) ·
+**one or two graphs** · **Guided walkthrough** (predict-then-reveal) · **Check yourself** quiz ·
+**Lab notebook** · **Why this is asked** exam framing with a trap-to-avoid callout.
 
 ---
 
@@ -181,6 +195,23 @@ These were found by direct numerical testing. Changing them will break the teach
   cutoff — framing on `rmax` leaves the cloud tiny.
 - Sampling: inverse-CDF on r²R(r)² for the radius, rejection on |Y|² for direction.
 
+**Cyclotron**
+- Trail points must be pushed **inside** the substep loop (~14 per frame), not once per frame, or
+  the spiral renders as a visible polygon.
+- Readouts run once before the first `step`, so `setup` must initialise every value a readout
+  reads (`S.KE`, `S.r`). This caused a real crash.
+
+**Resolving power**
+- Airy pattern uses Abramowitz & Stegun 9.4.4 / 9.4.6 for J₁ — accurate to ~1e-7, fast enough
+  for a 460-point curve every frame.
+
+**Synapse**
+- Release uses the Dodge–Rahamimoff fourth power: quanta ∝ [Ca²⁺]⁴/([Ca²⁺]⁴ + 1.6⁴).
+- `gmax` 0.004 per synapse gives a ~5 mV single EPSP, so ~4 synapses or ~90 Hz reaches threshold.
+
+**Cardiac conduction**
+- Ladder time window 3.6 s — at 6 s the AV delay slope is too shallow to read.
+
 **Cardiac**
 - Double-Hill elastance, `Emax` default 1.85 mmHg/mL, `V0` 10 mL, Windkessel `Cao` 1.45.
 - Aorta trace is amber `#FFB454` — it must not be red, or it collides visually with the
@@ -204,17 +235,13 @@ These were found by direct numerical testing. Changing them will break the teach
 
 ## 9. Current status
 
-**Insight Smart Lab v1 shipped** — six experiments, published and running.
+**Insight Smart Lab v2 shipped** — twelve experiments, engine v2, published and running.
 
 Next, in rough priority order:
-1. Client review of the six experiments and the visual direction.
-2. Expand Physics (LCR resonance and phasors, photoelectric effect, rotational dynamics).
-3. Expand Chemistry (chemical equilibrium / Le Chatelier, electrochemical cells, VSEPR builder).
-4. Expand Biology (DNA replication & translation, nephron filtration, mitosis/meiosis).
-5. Add Mathematics as the fourth subject rail.
-6. Platform layer: student accounts, progress tracking, teacher/projection mode.
-
----
+1. Client review of the twelve experiments, the lab environment and the visual direction.
+2. Widen to new chapters (see README §9 Phase 2).
+3. Add Mathematics as the fourth subject rail.
+4. Platform layer: student accounts, progress tracking, teacher/projection mode.
 
 ## 10. Open questions — need client input
 
@@ -259,6 +286,9 @@ Append only. Never rewrite history.
 | 2026-09-11 | Built v1 as dependency-free vanilla JS + Canvas 2D, not Next.js + R3F | Artifact CSP is narrow; hand-rolled 3D gave full control of the phosphor aesthetic and zero dependency risk |
 | 2026-09-11 | Dark-committed single theme | Additive blending for fields, orbitals and traces requires a dark ground |
 | 2026-09-11 | Subject accents grounded in real subject artefacts (phosphor cyan / sodium amber / eosin rose) | Avoids generic AI-default palettes; each colour means something |
+| 2026-09-12 | Depth over breadth: two experiments per chapter, not one per topic | Client asked for more experiments *within* a topic |
+| 2026-09-12 | Engine v2: multi-plot, hover inspection, typed numeric entry, ghost compare, notebook, quizzes | Exam-level work needs exact inputs, comparison and self-testing, not just a slider |
+| 2026-09-12 | `extend(id, patch)` hook rather than rewriting the original six | Deepens shipped sims without risking regressions in working physics |
 
 ---
 
@@ -273,3 +303,12 @@ Append only. Never rewrite history.
   runtime bug (`S.intensity` not on the state object), recalibrated orbital framing and
   molecule camera, separated the cardiac aorta colour from the LV trace. Published as an
   artifact. Recorded the client's three standing mandates in §2.
+- **2026-09-12** — **Shipped v2.** Upgraded the engine (multi-plot with hover crosshair/tooltip,
+  click-to-type numeric entry, ghost comparison overlay, fullscreen stage, lab notebook, quiz
+  engine, chapter-grouped navigation, keyboard shortcuts, `extend()` hook). Added six new
+  experiments so every chapter has two: cyclotron, diffraction & resolving power, Bohr model &
+  hydrogen spectrum, E1/E2 elimination, the synapse, and cardiac conduction with heart block.
+  Deepened the original six with extra controls (refractive-index immersion in YDSE), second
+  graphs (1/B scaling, signed R(r), rate-vs-[Nu], gating variables, Frank–Starling) and a
+  four-question quiz each. Caught the same method-on-state bug class again (`S.psf`) — the rule
+  is now in §8. Verified all twelve run clean in a headless browser.

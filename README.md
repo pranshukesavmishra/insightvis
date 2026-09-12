@@ -7,8 +7,8 @@ syllabus into things a student can *see, touch, break, and rebuild*. Every topic
 normally taught as a static diagram on a whiteboard becomes a real, physically-accurate,
 GPU-accelerated simulation that responds to the student in real time.
 
-The flagship module is **Insight Smart Lab** — six shipped experiments, two each from
-Physics, Chemistry and Biology. See §4.
+The flagship module is **Insight Smart Lab** — twelve shipped experiments across six chapters,
+two each from Physics, Chemistry and Biology. See §4.
 
 ---
 
@@ -65,53 +65,83 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v1 (shipped)
+## 4. Insight Smart Lab — v2 (shipped)
 
-Source: [`smartlab/`](./smartlab). Six experiments, chosen for maximum exam weight combined
-with maximum "impossible to picture from a textbook" value.
+Source: [`smartlab/`](./smartlab). **Twelve experiments across six chapters** — two per chapter, so
+each topic has real depth rather than a single token demo.
 
-### Physics
-**1 · Charged Particle in Crossed E and B Fields** — *Moving Charges & Magnetism*
-Integrated with a **Boris pusher**, which conserves |v| exactly under a pure magnetic field —
-so the flat speed trace is a proof that the magnetic force does no work, not an assertion.
-Covers the cyclotron, the helix, the velocity selector and the mass spectrometer.
+### Physics · Moving Charges & Magnetism
+**1 · Charged Particle in Crossed E and B Fields**
+Integrated with a **Boris pusher**, which conserves |v| exactly under a pure magnetic field — so the
+flat speed trace is a proof that the magnetic force does no work. Cyclotron motion, helices, the
+velocity selector and the mass spectrometer.
 
-**2 · Young's Double Slit — Path Difference to Fringe** — *Wave Optics*
-The true intensity formula including the **single-slit sinc² envelope**, so missing orders
-appear exactly where d/a is integral. The screen is painted in the real wavelength→RGB colour,
-and a λ-ruler counts the path difference in whole wavelengths as the point P sweeps.
+**2 · The Cyclotron — Resonance and Maximum Energy**
+The real device: E exists **only inside the dee gap** and oscillates at the RF frequency, so you can
+**detune the RF** and watch the acceleration collapse as the phase error accumulates. Proves that
+KE_max = q²B²R²/2m is independent of the gap voltage.
 
-### Chemistry
-**3 · Hydrogen Atomic Orbitals — Shape, Phase and Nodes** — *Structure of Atom*
-The point cloud is **rejection-sampled from |ψ|²** using the exact radial functions R<sub>nl</sub>(r)
-and real spherical harmonics. Radial nodes, angular nodes and the n−1 counting rule are all
-genuinely there rather than drawn in.
+### Physics · Wave Optics
+**3 · Young's Double Slit — Path Difference to Fringe**
+True intensity formula including the **single-slit sinc² envelope**, so missing orders appear exactly
+where d/a is integral. A λ-ruler counts the path difference in whole wavelengths as P sweeps.
+Immersion in a medium narrows every fringe by μ.
 
-**4 · SN1 vs SN2 — Mechanism, Stereochemistry and Rate Law** — *Haloalkanes & Haloarenes*
-Real 3D backside attack and **Walden inversion** geometry through a trigonal-bipyramidal
-transition state; a planar sp² carbocation for SN1 with a **live racemisation tally** that
-settles near 50:50. Both activation barriers are computed from the substrate, nucleophile,
-solvent and temperature you set, and the lab tells you which mechanism actually wins.
+**4 · Diffraction & Resolving Power — the Rayleigh Criterion**
+The true **Airy pattern** from the Bessel function J₁ — not a Gaussian stand-in. Two point sources are
+summed and the lab reports resolved / just resolved / unresolved against θ_min = 1.22 λ/D.
 
-### Biology
-**5 · Nerve Impulse — the Hodgkin–Huxley Action Potential** — *Neural Control & Coordination*
-The full 1952 HH equations integrated across a **100-compartment cable**, so the spike
-genuinely propagates and the conduction velocity is measured rather than quoted. Membrane
-patch view shows the m, h and n gates opening and closing. TTX and TEA block the real channels.
+### Chemistry · Structure of Atom
+**5 · Hydrogen Atomic Orbitals — Shape, Phase and Nodes**
+The point cloud is **rejection-sampled from |ψ|²** using exact radial functions and real spherical
+harmonics. A second graph shows the signed R(r) so nodes are visible as genuine zero crossings.
 
-**6 · The Cardiac Cycle — Pressure, Volume and the ECG** — *Body Fluids & Circulation*
-A **time-varying elastance** model of the left heart with a Windkessel aorta. Valves open and
-close purely from the pressure gradient across them — nothing is scripted. Produces a live
-Wiggers diagram, a real **pressure–volume loop**, and stroke volume, ejection fraction and
-cardiac output that respond correctly to preload, afterload and contractility.
+**6 · Bohr Model & the Hydrogen Spectrum**
+Every wavelength from **1/λ = RZ²(1/n_f² − 1/n_i²)**, with the Balmer lines painted in their true
+colours, all five series on one wavenumber axis, and a Rydberg linearity check. Switches to He⁺,
+Li²⁺ and Be³⁺ for the Z² scaling.
 
-### Anatomy of every experiment
-**Stage** (the visual) · **Control Deck** (live SI-unit parameters) · **Readout strip**
-(derived quantities) · **Equation pane** (governing relation with values substituted live) ·
-**Graph pane** · **Guided walkthrough** (predict-then-reveal) · **Why this is asked**
-(exam framing and the trap to avoid).
+### Chemistry · Haloalkanes & Haloarenes
+**7 · SN1 vs SN2 — Mechanism, Stereochemistry and Rate Law**
+Real 3D backside attack and **Walden inversion**; a planar carbocation for SN1 with a **live
+racemisation tally**. Both barriers computed from your conditions, plus the rate-vs-[Nu⁻] graph that
+is the actual experiment distinguishing the two mechanisms.
 
----
+**8 · E1 vs E2 Elimination — Geometry, Saytzeff and Hofmann**
+The stereo-electronic requirement as a **slider**: E2 refuses to proceed until the β-hydrogen is
+anti-periplanar to the leaving group. Newman projection, full product distribution, and the switch
+from Saytzeff to Hofmann when the base becomes bulky.
+
+### Biology · Neural Control & Coordination
+**9 · Nerve Impulse — the Hodgkin–Huxley Action Potential**
+The full 1952 equations across a **100-compartment cable**, so the spike genuinely propagates and
+conduction velocity is measured. Membrane patch shows m, h and n gating live. TTX and TEA block the
+real channels.
+
+**10 · The Synapse — Quantal Release, Summation and Drugs**
+Release follows the real **fourth-power dependence on external Ca²⁺**. Temporal and spatial summation,
+EPSP/IPSP arithmetic, and three drugs acting at three different points in the chain — curare,
+botulinum and neostigmine.
+
+### Biology · Body Fluids & Circulation
+**11 · The Cardiac Cycle — Pressure, Volume and the ECG**
+**Time-varying elastance** with a Windkessel aorta; valves open purely on pressure gradient. Live
+Wiggers diagram, pressure–volume loop, and a **Frank–Starling curve that you build by experiment**.
+
+**12 · Cardiac Conduction System & Heart Block**
+Event-driven conduction from SA node to Purkinje, with a **ladder diagram** and an ECG synthesised
+from what actually conducted. First-degree, Wenckebach, Mobitz II and complete block — and the
+beat-by-beat PR plot that diagnoses each one.
+
+### What every experiment carries
+**Stage** · **Control Deck** (live SI-unit parameters, click any value to type an exact number) ·
+**Readout strip** · **Equation pane** with values substituted live · **one or two graphs** with
+hover crosshair and tooltip · **Guided walkthrough** (predict-then-reveal) · **Check yourself**
+quiz · **Lab notebook** for recording readings · **Why this is asked** exam framing.
+
+### Lab environment
+Ghost-overlay comparison on any graph · fullscreen stage · keyboard shortcuts
+(space / R / L / ← →) · chapter-grouped navigation · adjustable simulation speed.
 
 ## 5. Full subject scope (target)
 
@@ -136,12 +166,18 @@ Cell biology · genetics · human physiology · plant physiology · ecology & ev
 
 ```
 smartlab/
-├── index.html          shell + the complete design system (all CSS)
-├── lab-core.js         sim registry, console shell, control deck, walkthrough engine,
-│                       RK4 integrator, 3D camera + projection, canvas plotting library
-├── sims-physics.js     Lorentz force · Young's double slit
-├── sims-chemistry.js   hydrogen orbitals · SN1/SN2
-└── sims-biology.js     action potential · cardiac cycle
+├── index.html           shell + the complete design system (all CSS)
+├── lab-core.js          sim registry, console shell, control deck, multi-plot canvas
+│                        library with hover inspection, walkthrough + quiz engines,
+│                        lab notebook, RK4 integrator, 3D camera + projection
+├── sims-physics.js      Lorentz force · Young's double slit
+├── sims-physics2.js     cyclotron · diffraction & resolving power
+├── sims-chemistry.js    hydrogen orbitals · SN1/SN2
+├── sims-chemistry2.js   Bohr model & spectrum · E1/E2 elimination
+├── sims-biology.js      action potential · cardiac cycle
+├── sims-biology2.js     synapse · cardiac conduction & heart block
+└── sims-extend.js       depth pass — extra controls, second graphs and quizzes
+                         bolted onto the original six via `InsightLab.extend()`
 ```
 
 **Zero external JavaScript dependencies.** All 3D is a hand-rolled Z-up perspective projection
@@ -200,9 +236,13 @@ requires a dark ground.
 
 **Phase 1 — done.** Engine, design system, six flagship experiments across three subjects.
 
-**Phase 2.** Expand each subject to full coverage — LCR resonance and phasors, the
-photoelectric effect, rotational dynamics; chemical equilibrium, electrochemical cells, a
-VSEPR builder; DNA replication and translation, nephron filtration, mitosis and meiosis.
+**Phase 1.5 — done.** Engine v2 (multi-plot, hover inspection, typed numeric entry, ghost
+comparison, fullscreen, lab notebook, quizzes, chapter navigation) and six more experiments,
+taking every chapter to two.
+
+**Phase 2.** Widen to new chapters — LCR resonance and phasors, the photoelectric effect,
+rotational dynamics; chemical equilibrium, electrochemical cells, a VSEPR builder; DNA
+replication and translation, nephron filtration, mitosis and meiosis.
 
 **Phase 3.** Add Mathematics as the fourth rail — function and surface plotting, conic
 sections from a cutting plane, vector geometry.
