@@ -138,64 +138,66 @@
       ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
       ctx.fillText('gives up O₂', bodyX, hy + 16);
 
-      /* ---------------- the heart ---------------- */
-      const chW = R * 0.62, chH = R * 0.46;
-      const drawCh = (x, y, w, hh, sat, label) => {
-        ctx.fillStyle = g.alpha(satCol(sat), .85);
-        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x - w / 2, y - hh / 2, w, hh, 7); ctx.fill(); }
-        else ctx.fillRect(x - w / 2, y - hh / 2, w, hh);
-        ctx.strokeStyle = g.alpha(th.text, .35); ctx.lineWidth = 1; ctx.stroke();
-        ctx.font = '600 9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = '#0B111E';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(label, x, y);
-      };
-
-      if (h.chambers === 2) {
-        drawCh(hx, hy - chH * 0.62, chW, chH * 0.9, 60, 'atrium');
-        drawCh(hx, hy + chH * 0.62, chW, chH * 1.1, 60, 'ventricle');
-      } else if (h.chambers === 3) {
-        drawCh(hx - chW * 0.56, hy - chH * 0.7, chW * 0.92, chH * 0.82, 98, 'L atrium');
-        drawCh(hx + chW * 0.56, hy - chH * 0.7, chW * 0.92, chH * 0.82, 60, 'R atrium');
-        drawCh(hx, hy + chH * 0.58, chW * 1.7, chH * 1.15, S.satSystemic, 'single ventricle');
-        if (h.id === 'reptile') {                       // the incomplete septum
-          ctx.strokeStyle = g.alpha('#0B111E', .75); ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(hx, hy + chH * 1.15);
-          ctx.lineTo(hx, hy + chH * 0.30);
-          ctx.stroke();
-          ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-          ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-          ctx.fillText('incomplete septum', hx + chW * 0.95, hy + chH * 1.3);
-        }
-      } else {
-        drawCh(hx - chW * 0.56, hy - chH * 0.7, chW * 0.92, chH * 0.82, 98, 'L atrium');
-        drawCh(hx + chW * 0.56, hy - chH * 0.7, chW * 0.92, chH * 0.82, 60, 'R atrium');
-        drawCh(hx - chW * 0.56, hy + chH * 0.62, chW * 0.92, chH * 1.05, 98, 'L ventricle');
-        drawCh(hx + chW * 0.56, hy + chH * 0.62, chW * 0.92, chH * 1.05, 60, 'R ventricle');
-        ctx.strokeStyle = g.alpha('#0B111E', .9); ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(hx, hy - chH * 1.15); ctx.lineTo(hx, hy + chH * 1.2); ctx.stroke();
+      /* ---------------- the heart, drawn as the organ ---------------- */
+      // Anterior view: the right heart is on the viewer's left, which puts
+      // it on the same side as the gas-exchange organ — so the pulmonary
+      // limb is short and the systemic limb runs to the body on the right.
+      const sc = Math.min(R * 0.72, H * 0.20);
+      const beat = 0.5 - 0.5 * Math.cos(S.t * 2 * Math.PI * 1.2);
+      BIOART.heart(ctx, hx, hy, sc, {
+        chambers: h.chambers,
+        septum: h.id === 'reptile',
+        sat: h.chambers === 2
+          ? { ra: 60, rv: 60, la: 60, lv: 60 }
+          : { ra: 60, rv: 60, la: 98, lv: S.satSystemic },
+        contraction: beat * 0.8,
+        mvOpen: beat < 0.45, tvOpen: beat < 0.45,
+        avOpen: beat > 0.5, pvOpen: beat > 0.5,
+        labels: true, leaders: false, vessels: false
+      });
+      if (h.id === 'reptile') {
+        ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th.warn;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText('incomplete septum', hx, hy + sc * 1.16);
       }
+
+      // where each circuit leaves and re-enters the heart
+      const ANCH = h.chambers === 4
+        ? { pOut: [hx - sc * 0.32, hy + sc * 0.70], pIn: [hx + sc * 0.38, hy - sc * 0.64],
+            sOut: [hx + sc * 0.32, hy + sc * 0.68], sIn: [hx - sc * 0.42, hy - sc * 0.64] }
+        : h.chambers === 3
+        ? { pOut: [hx - sc * 0.22, hy + sc * 0.70], pIn: [hx + sc * 0.38, hy - sc * 0.64],
+            sOut: [hx + sc * 0.22, hy + sc * 0.70], sIn: [hx - sc * 0.42, hy - sc * 0.64] }
+        : { pOut: [hx + sc * 0.74, hy - sc * 0.76], pIn: null,
+            sOut: null, sIn: [hx - sc * 0.62, hy + sc * 0.76] };
 
       /* ---------------- mixing warning ---------------- */
       if (S.mix > 0.01) {
         ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        const mg = ctx.createRadialGradient(hx, hy + chH * 0.6, 0, hx, hy + chH * 0.6, chW * 1.2);
+        const mg = ctx.createRadialGradient(hx, hy + sc * 0.28, 0, hx, hy + sc * 0.28, sc * 0.62);
         mg.addColorStop(0, g.alpha('#B07CC6', .35 * S.mix / 0.5)); mg.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = mg;
-        ctx.beginPath(); ctx.arc(hx, hy + chH * 0.6, chW * 1.2, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(hx, hy + sc * 0.28, sc * 0.62, 0, TAU); ctx.fill();
         ctx.restore();
       }
 
       /* ---------------- flow paths ---------------- */
       // Two orthogonal loops: pulmonary on the left, systemic on the right.
       // Each leaves the heart low, travels out, and returns high.
-      const botY = hy + R * 1.5, topY = hy - R * 1.45;
-      const outL = hx - chW * 0.5, outR = hx + chW * 0.5;
-      const LOOPS = [
-        [[outL, hy + chH * 1.15], [outL, botY], [gasX, botY], [gasX, hy + R * 0.95]],
-        [[gasX, hy - R * 0.95], [gasX, topY], [hx - chW * 0.56, topY], [hx - chW * 0.56, hy - chH * 1.15]],
-        [[outR, hy + chH * 1.15], [outR, botY], [bodyX, botY], [bodyX, hy + R * 0.95]],
-        [[bodyX, hy - R * 0.95], [bodyX, topY], [hx + chW * 0.56, topY], [hx + chW * 0.56, hy - chH * 1.15]]
+      const botY = Math.min(hy + R * 1.55, H - 96), topY1 = hy - R * 1.28, topY2 = hy - R * 1.62;
+      // Fish run ONE circuit: heart -> gills -> body -> heart, with no
+      // return to the heart in between. Everything else runs two.
+      const LOOPS = h.chambers === 2 ? [
+        [ANCH.pOut, [ANCH.pOut[0], topY1], [gasX, topY1], [gasX, hy - R * 0.92]],
+        [[gasX, hy + R * 0.92], [gasX, botY], [bodyX, botY], [bodyX, hy + R * 0.92]],
+        [[bodyX, hy + R * 0.92], [bodyX + R * 0.95, hy + R * 0.45],
+         [bodyX + R * 0.95, hy - R * 0.45], [bodyX, hy - R * 0.92]],
+        [[bodyX, hy - R * 0.92], [bodyX, topY2], [ANCH.sIn[0], topY2], ANCH.sIn]
+      ] : [
+        [ANCH.pOut, [ANCH.pOut[0] - sc * 0.3, botY], [gasX, botY], [gasX, hy + R * 0.95]],
+        [[gasX, hy - R * 0.95], [gasX, topY1], [ANCH.pIn[0], topY1], ANCH.pIn],
+        [ANCH.sOut, [ANCH.sOut[0] + sc * 0.3, botY], [bodyX, botY], [bodyX, hy + R * 0.95]],
+        [[bodyX, hy - R * 0.95], [bodyX, topY2], [ANCH.sIn[0], topY2], ANCH.sIn]
       ];
       const along = (pts, t) => {
         let total = 0; const seg = [];

@@ -468,41 +468,86 @@ window.ANIMALART = (function () {
       ctx.closePath(); ctx.fill();
     },
     mammal(ctx, s, hue, t) {
-      const step = Math.sin(t * 3);
-      ctx.strokeStyle = mixHex(hue, '#05080F', .25); ctx.lineWidth = Math.max(1.5, s * .09);
-      ctx.lineCap = 'round';
-      [[-.3, 0], [-.22, 1], [.3, 2], [.38, 3]].forEach(([x, i]) => {
-        const ph = Math.sin(t * 3 + i * 1.57) * .25;
+      const dark = mixHex(hue, '#05080F', .30), mid = mixHex(hue, '#05080F', .12);
+      // four jointed legs, each swinging a quarter-cycle apart — a real
+      // quadruped gait, not four sticks in parallel
+      const leg = (x0, phase, front) => {
+        const sw = Math.sin(t * 3 + phase);
+        const kneeX = x0 + sw * .10, kneeY = s * .46;
+        const footX = x0 + sw * .20, footY = s * .80;
+        ctx.strokeStyle = dark;
+        ctx.lineWidth = Math.max(1.6, s * (front ? .10 : .11));
         ctx.beginPath();
-        ctx.moveTo(s * x, s * .18);
-        ctx.lineTo(s * (x + ph * .2), s * .52);
-        ctx.lineTo(s * (x + ph * .34), s * .78);
+        ctx.moveTo(s * x0, s * .10);
+        ctx.lineTo(s * kneeX, kneeY);
         ctx.stroke();
-      });
-      ctx.fillStyle = shade(ctx, hue, 0, 0, s);
+        ctx.lineWidth = Math.max(1.3, s * .075);
+        ctx.beginPath();
+        ctx.moveTo(s * kneeX, kneeY); ctx.lineTo(s * footX, footY);
+        ctx.stroke();
+        ctx.fillStyle = mixHex(hue, '#05080F', .5);          // hoof / paw
+        ctx.beginPath(); ctx.ellipse(s * footX, footY + s * .02, s * .07, s * .045, 0, 0, TAU); ctx.fill();
+      };
+      leg(-.30, 1.57, true); leg(-.24, 4.71, true);
+      leg(.30, 0, false); leg(.36, 3.14, false);
+
+      // body: withers, back, rump, haunch, belly, chest
+      ctx.fillStyle = shade(ctx, hue, -s * .2, -s * .2, s * .8);
       ctx.beginPath();
-      ctx.ellipse(0, s * .02, s * .52, s * .3, 0, 0, TAU); ctx.fill();
-      // head with pinna
-      ctx.fillStyle = shade(ctx, mixHex(hue, '#ffffff', .1), -s * .6, -s * .2, s * .3);
-      ctx.beginPath(); ctx.ellipse(-s * .62, -s * .18, s * .22, s * .19, -.2, 0, TAU); ctx.fill();
-      ctx.fillStyle = mixHex(hue, '#05080F', .15);
-      ctx.beginPath();
-      ctx.moveTo(-s * .68, -s * .34); ctx.lineTo(-s * .76, -s * .62); ctx.lineTo(-s * .54, -s * .4);
+      ctx.moveTo(-s * .46, -s * .18);                        // base of the neck
+      ctx.bezierCurveTo(-s * .22, -s * .34, s * .12, -s * .32, s * .34, -s * .22);  // back
+      ctx.bezierCurveTo(s * .52, -s * .16, s * .58, s * .06, s * .48, s * .22);     // rump
+      ctx.bezierCurveTo(s * .34, s * .34, s * .10, s * .30, -s * .16, s * .28);     // belly
+      ctx.bezierCurveTo(-s * .38, s * .26, -s * .52, s * .10, -s * .46, -s * .18);  // chest
       ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#05080F';
-      ctx.beginPath(); ctx.arc(-s * .72, -s * .2, s * .035, 0, TAU); ctx.fill();
-      // tail
-      ctx.strokeStyle = mixHex(hue, '#05080F', .15); ctx.lineWidth = Math.max(1.4, s * .07);
+      ctx.strokeStyle = rgba(dark, .8); ctx.lineWidth = Math.max(1, s * .02); ctx.stroke();
+
+      // neck
+      ctx.fillStyle = shade(ctx, mid, -s * .55, -s * .3, s * .4);
       ctx.beginPath();
-      ctx.moveTo(s * .5, -s * .04);
-      ctx.quadraticCurveTo(s * .82, -s * (.28 + .1 * step), s * .92, s * .08);
+      ctx.moveTo(-s * .50, -s * .22);
+      ctx.quadraticCurveTo(-s * .68, -s * .38, -s * .70, -s * .50);
+      ctx.lineTo(-s * .52, -s * .54);
+      ctx.quadraticCurveTo(-s * .44, -s * .34, -s * .34, -s * .18);
+      ctx.closePath(); ctx.fill();
+
+      // head with muzzle and pinna
+      ctx.save(); ctx.translate(-s * .70, -s * .56); ctx.rotate(-.35);
+      ctx.fillStyle = shade(ctx, mixHex(hue, '#ffffff', .08), -s * .08, -s * .06, s * .26);
+      ctx.beginPath(); ctx.ellipse(0, 0, s * .20, s * .145, 0, 0, TAU); ctx.fill();
+      ctx.beginPath();                                      // muzzle
+      ctx.ellipse(-s * .17, s * .04, s * .10, s * .075, -.15, 0, TAU); ctx.fill();
+      ctx.fillStyle = mixHex(hue, '#05080F', .55);          // nose
+      ctx.beginPath(); ctx.ellipse(-s * .25, s * .05, s * .035, s * .028, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = mid;                                   // external ear — a mammal marker
+      ctx.beginPath();
+      ctx.moveTo(s * .04, -s * .10);
+      ctx.quadraticCurveTo(s * .10, -s * .34, s * .18, -s * .30);
+      ctx.quadraticCurveTo(s * .16, -s * .12, s * .12, -s * .07);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#05080F';                             // eye
+      ctx.beginPath(); ctx.arc(-s * .05, -s * .03, s * .028, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.75)';
+      ctx.beginPath(); ctx.arc(-s * .06, -s * .04, s * .010, 0, TAU); ctx.fill();
+      ctx.restore();
+
+      // tail with a terminal tuft
+      const sway = Math.sin(t * 2.4) * s * .10;
+      ctx.strokeStyle = mid; ctx.lineWidth = Math.max(1.4, s * .055); ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(s * .50, -s * .14);
+      ctx.quadraticCurveTo(s * .76, -s * .06 + sway, s * .84, s * .22 + sway);
       ctx.stroke();
-      // hair
-      ctx.strokeStyle = rgba(mixHex(hue, '#ffffff', .4), .35); ctx.lineWidth = 1;
-      for (let i = 0; i < 14; i++) {
-        const a = -Math.PI + (i / 13) * Math.PI;
-        const x = Math.cos(a) * s * .5, y = s * .02 + Math.sin(a) * s * .29;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x * 1.08, y * 1.22 - s * .04); ctx.stroke();
+      ctx.fillStyle = dark;
+      ctx.beginPath(); ctx.ellipse(s * .85, s * .28 + sway, s * .05, s * .09, .3, 0, TAU); ctx.fill();
+
+      // hair — the defining mammalian character
+      ctx.strokeStyle = rgba(mixHex(hue, '#ffffff', .45), .40); ctx.lineWidth = 1;
+      for (let i = 0; i < 16; i++) {
+        const u = i / 15;
+        const x = -s * .44 + u * s * .78;
+        const y = -s * .30 - Math.sin(u * Math.PI) * s * .035;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - s * .02, y - s * .07); ctx.stroke();
       }
     }
   };

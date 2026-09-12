@@ -93,7 +93,7 @@
           for (let k = 0; k < Math.min(6, Math.round(quanta / 2.2)); k++)
             S.vesicles.push({ u: 0, j: Math.random() - 0.5, lane: Math.floor(Math.random() * Math.max(1, p.nSyn)) });
           for (let k = 0; k < Math.min(26, Math.round(quanta * 1.6)); k++)
-            S.nt.push({ u: 0, j: Math.random() - 0.5, sp: 0.7 + Math.random() * 0.8 });
+            S.nt.push({ u: 0, j: Math.random() - 0.5, sp: 0.7 + Math.random() * 0.8, lane: Math.floor(Math.random() * Math.max(1, p.nSyn)) });
         }
         if (p.inhib > 0 && S.tms >= S.nextI) {
           S.nextI = S.tms + interval;
@@ -131,80 +131,113 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const bio = th.bio;
-      const preY = H * 0.30, postY = H * 0.70;
-      const x0 = W * 0.08, x1 = W * 0.72;
+      const preY = H * 0.28, postY = H * 0.58;
+      const x0 = W * 0.17, x1 = W * 0.72;
 
-      /* ---- presynaptic terminal ---- */
-      ctx.fillStyle = g.alpha('#3E5C7E', .30);
-      ctx.beginPath();
-      ctx.roundRect ? ctx.roundRect(x0, preY - 62, x1 - x0, 62, [14, 14, 4, 4])
-        : ctx.rect(x0, preY - 62, x1 - x0, 62);
-      ctx.fill();
-      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1; ctx.stroke();
+      /* ---- presynaptic terminals: one axon knob per synapse ---- */
+      const nSyn = Math.max(1, p.nSyn | 0);
+      const laneW = (x1 - x0) / nSyn;
+      const knobW = Math.min(laneW * 0.82, 150), knobH = Math.min(74, H * 0.20);
+      const cleftTop = preY + knobH * 0.5 + 2;
+      const memY = postY - 16;
+      const laneX = i => x0 + (i + 0.5) * laneW;
+
       ctx.font = '9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
       ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-      ctx.fillText('presynaptic terminal  ·  ' + p.rate + ' Hz  ·  ' + p.nSyn + ' synapse' +
-        (p.nSyn > 1 ? 's' : ''), x0, preY - 66);
+      ctx.fillText('presynaptic terminal' + (nSyn > 1 ? 's — ' + nSyn : '') + '  ·  ' + p.rate + ' Hz',
+        x0 - knobW * 0.5, preY - knobH * 1.7);
 
-      // Ca channels
-      const nCa = 5;
-      for (let i = 0; i < nCa; i++) {
-        const cx = x0 + (i + 0.5) / nCa * (x1 - x0);
-        const open = clamp(p.ca / 3, 0, 1);
-        ctx.fillStyle = g.alpha('#7CE0A8', .25 + .6 * open);
-        ctx.fillRect(cx - 7, preY - 6, 14, 8);
-        ctx.strokeStyle = g.alpha('#7CE0A8', .9); ctx.lineWidth = 1; ctx.strokeRect(cx - 7, preY - 6, 14, 8);
+      const caOpen = clamp(p.ca / 3, 0, 1);
+      for (let i = 0; i < nSyn; i++) {
+        const cx = laneX(i);
+        const K = BIOART.synapticKnob(ctx, cx, preY, knobW, knobH);
+
+        // reserve pool of vesicles waiting in the terminal
+        ctx.save();
+        for (let q = 0; q < 9; q++) {
+          const a = q * 2.399;                          // golden-angle scatter
+          const rr = knobW * 0.21 * Math.sqrt(q / 9);
+          const vx = cx + Math.cos(a) * rr + knobW * 0.12;
+          const vy = preY + knobH * 0.02 + Math.sin(a) * rr * 0.7;
+          ctx.strokeStyle = g.alpha(bio, .75); ctx.lineWidth = 1.2;
+          ctx.fillStyle = g.alpha(bio, .18);
+          ctx.beginPath(); ctx.arc(vx, vy, knobH * 0.075, 0, TAU);
+          ctx.fill(); ctx.stroke();
+        }
+        ctx.restore();
+
+        // voltage-gated Ca²⁺ channels in the active zone
+        for (let q = 0; q < 4; q++) {
+          const chx = cx + (q - 1.5) * knobW * 0.20;
+          ctx.fillStyle = g.alpha('#7CE0A8', .22 + .65 * caOpen);
+          ctx.fillRect(chx - 5, K.bottom - 5, 10, 9);
+          ctx.strokeStyle = g.alpha('#7CE0A8', .9); ctx.lineWidth = 1;
+          ctx.strokeRect(chx - 5, K.bottom - 5, 10, 9);
+        }
+        // the active zone itself — the thickened patch vesicles dock at
+        ctx.fillStyle = g.alpha('#9FD8FF', .30);
+        ctx.fillRect(cx - knobW * 0.36, K.bottom - 1, knobW * 0.72, 2.5);
       }
       ctx.fillStyle = '#7CE0A8'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      ctx.fillText('Ca²⁺ ' + p.ca.toFixed(2) + ' mM', x0 - 6, preY - 12);
+      ctx.font = '9.5px "IBM Plex Mono",monospace';
+      ctx.fillText('Ca²⁺ ' + p.ca.toFixed(2) + ' mM', x0 - knobW * 0.56, preY + knobH * 0.36);
 
-      // vesicles migrating and fusing
+      // vesicles migrating to the active zone and fusing with the membrane
       S.vesicles.forEach(v => {
-        const lane = (v.lane + 0.5) / Math.max(1, p.nSyn);
-        const vx = x0 + lane * (x1 - x0) + v.j * 26;
-        const vy = (preY - 48) + v.u * 44;
-        const r = 5 * (1 - v.u * 0.55);
-        ctx.save(); ctx.globalAlpha = 1 - v.u * 0.35;
-        ctx.strokeStyle = g.alpha(bio, .95); ctx.lineWidth = 1.4;
-        ctx.beginPath(); ctx.arc(vx, vy, r, 0, TAU); ctx.stroke();
-        ctx.fillStyle = g.alpha(bio, .22); ctx.fill();
+        const cx = laneX(Math.min(v.lane, nSyn - 1));
+        const vx = cx + v.j * knobW * 0.34;
+        const vy = (preY - knobH * 0.22) + v.u * (knobH * 0.72);
+        const r = knobH * 0.085 * (1 - v.u * 0.45);
+        ctx.save(); ctx.globalAlpha = 1 - v.u * 0.3;
+        // fusion pore opens as u -> 1
+        ctx.strokeStyle = g.alpha(bio, .95); ctx.lineWidth = 1.6;
+        ctx.fillStyle = g.alpha(bio, .30);
+        ctx.beginPath();
+        if (v.u < 0.85) ctx.arc(vx, vy, r, 0, TAU);
+        else ctx.arc(vx, vy, r, Math.PI * 0.15, Math.PI * 0.85, true);   // omega figure
+        ctx.fill(); ctx.stroke();
         ctx.restore();
       });
 
-      /* ---- cleft ---- */
-      ctx.fillStyle = g.alpha(th['ink-900'], .7);
-      ctx.fillRect(x0, preY + 2, x1 - x0, postY - 22 - preY - 2);
+      /* ---- synaptic cleft ---- */
+      // bounded below by the dome of the postsynaptic cell, so the gap is
+      // a true cleft and not a rectangle sitting on top of a curve
+      const mh = Math.min(24, H * 0.055), mDrop = mh * 1.5;
+      const mL = x0 - knobW * 0.5, mR = x1 + knobW * 0.5;
+      const domeY = xx => memY + mDrop * Math.pow(2 * ((xx - mL) / (mR - mL)) - 1, 2);
+      ctx.fillStyle = g.alpha(th['ink-900'], .55);
+      ctx.beginPath();
+      ctx.moveTo(mL, cleftTop); ctx.lineTo(mR, cleftTop);
+      for (let q = 60; q >= 0; q--) { const xx = mL + (mR - mL) * q / 60; ctx.lineTo(xx, domeY(xx)); }
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
       ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      ctx.fillText('synaptic cleft', x0 - 6, (preY + postY) / 2 - 10);
+      ctx.fillText('synaptic cleft', x0 - knobW * 0.56, (cleftTop + memY) / 2);
+      ctx.fillText('≈20 nm', x0 - knobW * 0.56, (cleftTop + memY) / 2 + 12);
 
-      // neurotransmitter molecules crossing
+      // acetylcholine diffusing across
       S.nt.forEach(o => {
-        const nx = x0 + (0.08 + 0.84 * ((o.j + 0.5) * 0.6 + 0.2)) * (x1 - x0) + o.j * 40;
-        const ny = preY + 4 + o.u * (postY - 24 - preY);
-        ctx.fillStyle = g.alpha(bio, 0.85 * (1 - o.u * 0.35));
+        const cx = laneX(Math.min(o.lane == null ? 0 : o.lane, nSyn - 1));
+        const nx = cx + o.j * knobW * 0.62;
+        const ny = cleftTop + 2 + o.u * (domeY(nx) - cleftTop - 4);
+        ctx.fillStyle = g.alpha(bio, 0.9 * (1 - o.u * 0.3));
         ctx.beginPath(); ctx.arc(nx, ny, 2.6, 0, TAU); ctx.fill();
       });
 
-      /* ---- postsynaptic membrane + receptors ---- */
+      /* ---- postsynaptic membrane with its receptors ---- */
       const occ = S.T / (S.T + 1.0), bound = occ * (1 - p.curare / 100);
-      ctx.fillStyle = g.alpha('#6E3E56', .34);
-      ctx.fillRect(x0, postY - 22, x1 - x0, 26);
-      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
-      ctx.strokeRect(x0 + .5, postY - 22.5, x1 - x0, 26);
-      const nR = 7;
-      for (let i = 0; i < nR; i++) {
-        const cx = x0 + (i + 0.5) / nR * (x1 - x0);
-        const blocked = (i / nR) < (p.curare / 100);
-        ctx.fillStyle = blocked ? g.alpha(th.crit, .55) : g.alpha(bio, .25 + .65 * bound);
-        ctx.fillRect(cx - 9, postY - 24, 18, 30);
-        ctx.strokeStyle = blocked ? th.crit : g.alpha(bio, .9);
-        ctx.lineWidth = 1; ctx.strokeRect(cx - 9, postY - 24, 18, 30);
-      }
-      ctx.font = '9.5px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      BIOART.postsynapticMembrane(ctx, mL, mR, memY, {
+        occupancy: occ, blocked: p.curare / 100, h: mh,
+        depth: Math.max(mh * 3, H - 24 - memY - mDrop)
+      });
+      ctx.font = '9.5px "IBM Plex Mono",monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
       ctx.fillStyle = th['text-3'];
-      ctx.fillText('postsynaptic receptors  ·  ' + (bound * 100).toFixed(0) + '% activated' +
-        (p.curare > 0 ? '  ·  ' + p.curare + '% blocked by curare' : ''), x0, postY + 10);
+      ctx.fillText('nicotinic ACh', mL - 8, memY + mDrop * 0.7);
+      ctx.fillText('receptors', mL - 8, memY + mDrop * 0.7 + 12);
+      ctx.fillStyle = p.curare > 0 ? th.crit : th['text-2'];
+      ctx.fillText((bound * 100).toFixed(0) + '% activated', mL - 8, memY + mDrop * 0.7 + 26);
+      if (p.curare > 0) ctx.fillText(p.curare + '% curare-blocked', mL - 8, memY + mDrop * 0.7 + 38);
 
       /* ---- postsynaptic cell body ---- */
       const bx = W * 0.86, by = postY + 6, br = Math.min(W * 0.10, 44);
@@ -215,6 +248,10 @@
       rg.addColorStop(1, g.alpha(bio, 0));
       ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, by, br * (1.3 + S.flash), 0, TAU); ctx.fill();
       ctx.restore();
+      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(mR - 10, domeY(mR - 10) + mh); ctx.lineTo(bx - br, by); ctx.stroke();
+      ctx.setLineDash([]);
       ctx.fillStyle = g.mix('#16263F', '#FFD36B', t);
       ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.fill();
       ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1.5; ctx.stroke();
@@ -222,7 +259,7 @@
       ctx.fillStyle = th.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(S.V.toFixed(0) + ' mV', bx, by);
       ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('postsynaptic', bx, by + br + 11);
+      ctx.fillText('Vm  postsynaptic cell', bx, by + br + 11);
 
       /* ---- inhibitory inputs ---- */
       if (p.inhib > 0) {
@@ -519,68 +556,103 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const bio = th.bio;
-      const hx = W * 0.19, hy = H * 0.52, sc = Math.min(W * 0.155, H * 0.44);
+      const hx = W * 0.19, hy = H * 0.50, sc = Math.min(W * 0.16, H * 0.34);
 
       /* ---------- heart with the conduction system ---------- */
-      ctx.save(); ctx.translate(hx, hy);
-      ctx.fillStyle = g.alpha('#3A1F2C', .5);
-      ctx.beginPath();
-      ctx.moveTo(-sc * 0.9, -sc * 0.8);
-      ctx.bezierCurveTo(sc * 0.95, -sc * 1.1, sc * 1.0, sc * 0.2, 0, sc * 1.0);
-      ctx.bezierCurveTo(-sc * 0.95, sc * 0.2, -sc * 1.0, -sc * 1.05, -sc * 0.9, -sc * 0.8);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1; ctx.stroke();
-
       const since = k => {
         const e = S.events.filter(x => x.kind === k && x.t <= S.t).pop();
         return e ? S.t - e.t : 99;
       };
       const pAgo = since('P'), qAgo = since('QRS');
       const glow = (a, dur) => clamp(1 - a / dur, 0, 1);
+      const vG = glow(qAgo, 0.30);
 
-      // SA node
-      const saG = glow(pAgo, 0.22);
-      ctx.fillStyle = g.alpha('#FFD36B', .3 + .7 * saG);
-      ctx.beginPath(); ctx.arc(sc * 0.30, -sc * 0.62, 6 + 4 * saG, 0, TAU); ctx.fill();
-      // atria wash
-      ctx.fillStyle = g.alpha('#FFD36B', .05 + .28 * glow(pAgo, 0.32));
-      ctx.beginPath(); ctx.ellipse(0, -sc * 0.52, sc * 0.60, sc * 0.20, 0, 0, TAU); ctx.fill();
-      // AV node
-      const avG = S.pending.length ? 1 : glow(qAgo, 0.2);
-      ctx.fillStyle = p.block === 'third' ? g.alpha(th.crit, .85) : g.alpha('#FFD36B', .3 + .6 * avG);
-      ctx.beginPath(); ctx.arc(sc * 0.03, -sc * 0.16, 6, 0, TAU); ctx.fill();
-      // bundle of His + branches
-      ctx.strokeStyle = g.alpha('#FFD36B', .28 + .7 * glow(qAgo, 0.22));
-      ctx.lineWidth = p.bbb ? 2 : 3;
+      BIOART.heart(ctx, hx, hy, sc, {
+        chambers: 4,
+        sat: { ra: 60, rv: 60, la: 98, lv: 98 },
+        contraction: vG * 0.75,
+        mvOpen: vG < 0.25, tvOpen: vG < 0.25, avOpen: vG > 0.3, pvOpen: vG > 0.3,
+        labels: false, leaders: false, vessels: false
+      });
+
+      // the conduction system, drawn on top of the muscle it drives
+      ctx.save(); ctx.translate(hx, hy);
+      const P = (x, y) => [x * sc, y * sc];
+
+      // atrial depolarisation sweeping out from the SA node
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = g.alpha('#FFD36B', .04 + .26 * glow(pAgo, 0.32));
+      ctx.beginPath(); ctx.ellipse(0, -sc * 0.44, sc * 0.74, sc * 0.28, 0, 0, TAU); ctx.fill();
+      // ventricular depolarisation
+      ctx.fillStyle = g.alpha('#FF8FB0', .04 + .26 * vG);
+      ctx.beginPath(); ctx.ellipse(0, sc * 0.30, sc * 0.62, sc * 0.46, 0, 0, TAU); ctx.fill();
+      ctx.restore();
+
+      // internodal tracts, SA -> AV
+      ctx.strokeStyle = g.alpha('#FFD36B', .22 + .55 * glow(pAgo, 0.26));
+      ctx.lineWidth = Math.max(1.4, sc * 0.022); ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(sc * 0.03, -sc * 0.16); ctx.lineTo(sc * 0.03, sc * 0.18);
-      ctx.moveTo(sc * 0.03, sc * 0.18); ctx.lineTo(-sc * 0.36, sc * 0.72);
-      ctx.moveTo(sc * 0.03, sc * 0.18); ctx.lineTo(sc * 0.42, sc * 0.72);
+      ctx.moveTo(...P(-0.50, -0.56));
+      ctx.quadraticCurveTo(...P(-0.34, -0.30), ...P(-0.05, -0.16));
       ctx.stroke();
-      if (p.bbb) {
-        ctx.strokeStyle = th.crit; ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(sc * 0.18, sc * 0.36); ctx.lineTo(sc * 0.32, sc * 0.50);
-        ctx.moveTo(sc * 0.32, sc * 0.36); ctx.lineTo(sc * 0.18, sc * 0.50);
-        ctx.stroke();
-      }
-      if (p.block === 'third') {
-        ctx.strokeStyle = th.crit; ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(sc * -0.08, -sc * 0.24); ctx.lineTo(sc * 0.14, -sc * 0.08);
-        ctx.moveTo(sc * 0.14, -sc * 0.24); ctx.lineTo(sc * -0.08, -sc * 0.08);
-        ctx.stroke();
-      }
-      // ventricle wash
-      ctx.fillStyle = g.alpha('#FF8FB0', .05 + .3 * glow(qAgo, 0.3));
-      ctx.beginPath(); ctx.ellipse(0, sc * 0.34, sc * 0.52, sc * 0.38, 0, 0, TAU); ctx.fill();
 
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-2'];
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText('SA', sc * 0.40, -sc * 0.62);
-      ctx.fillText('AV', sc * 0.13, -sc * 0.16);
-      ctx.fillText('His', sc * 0.10, sc * 0.10);
-      ctx.fillText('Purkinje', sc * 0.48, sc * 0.74);
+      // bundle of His, the two bundle branches and the Purkinje fibres
+      const hisG = glow(qAgo, 0.22);
+      ctx.strokeStyle = g.alpha('#FFD36B', .26 + .7 * hisG);
+      ctx.lineWidth = Math.max(1.8, sc * (p.bbb ? 0.022 : 0.032));
+      ctx.beginPath();
+      ctx.moveTo(...P(-0.05, -0.16)); ctx.lineTo(...P(0.03, 0.10));
+      ctx.moveTo(...P(0.03, 0.10)); ctx.lineTo(...P(-0.28, 0.68));    // right bundle branch
+      ctx.moveTo(...P(0.03, 0.10)); ctx.lineTo(...P(0.30, 0.66));     // left bundle branch
+      ctx.stroke();
+      // Purkinje fibres fanning up the ventricular walls from the apex
+      ctx.lineWidth = Math.max(1, sc * 0.014);
+      ctx.strokeStyle = g.alpha('#FFD36B', .18 + .55 * hisG);
+      [[-0.28, 0.68, -0.46, 0.36], [-0.28, 0.68, -0.34, 0.18], [-0.20, 0.76, -0.10, 0.86],
+       [0.30, 0.66, 0.48, 0.32], [0.30, 0.66, 0.38, 0.14], [0.22, 0.76, 0.08, 0.90]]
+        .forEach(([x0, y0, x1, y1]) => {
+          ctx.beginPath(); ctx.moveTo(...P(x0, y0));
+          ctx.quadraticCurveTo(...P((x0 + x1) / 2, (y0 + y1) / 2 + 0.10), ...P(x1, y1));
+          ctx.stroke();
+        });
+
+      // SA node — the pacemaker
+      const saG = glow(pAgo, 0.22);
+      ctx.fillStyle = g.alpha('#FFD36B', .35 + .65 * saG);
+      ctx.beginPath(); ctx.arc(...P(-0.50, -0.56), sc * 0.055 + sc * 0.035 * saG, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(10,8,4,.7)'; ctx.lineWidth = 1; ctx.stroke();
+      // AV node — the gate
+      const avG = S.pending.length ? 1 : glow(qAgo, 0.2);
+      ctx.fillStyle = p.block === 'third' ? g.alpha(th.crit, .9) : g.alpha('#FFD36B', .35 + .6 * avG);
+      ctx.beginPath(); ctx.arc(...P(-0.05, -0.16), sc * 0.052, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(10,8,4,.7)'; ctx.lineWidth = 1; ctx.stroke();
+
+      if (p.bbb) {                                   // bundle branch block
+        ctx.strokeStyle = th.crit; ctx.lineWidth = Math.max(2, sc * 0.028);
+        ctx.beginPath();
+        ctx.moveTo(...P(0.10, 0.30)); ctx.lineTo(...P(0.26, 0.44));
+        ctx.moveTo(...P(0.26, 0.30)); ctx.lineTo(...P(0.10, 0.44));
+        ctx.stroke();
+      }
+      if (p.block === 'third') {                     // complete AV block
+        ctx.strokeStyle = th.crit; ctx.lineWidth = Math.max(2, sc * 0.028);
+        ctx.beginPath();
+        ctx.moveTo(...P(-0.14, -0.06)); ctx.lineTo(...P(0.08, 0.10));
+        ctx.moveTo(...P(0.08, -0.06)); ctx.lineTo(...P(-0.14, 0.10));
+        ctx.stroke();
+      }
+
+      ctx.font = '600 9px "IBM Plex Mono",monospace';
+      const tag = (x, y, t, align) => {
+        ctx.textAlign = align; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(5,8,15,.85)';
+        ctx.strokeText(t, x * sc, y * sc);
+        ctx.fillStyle = '#F2E3C0'; ctx.fillText(t, x * sc, y * sc);
+      };
+      tag(-0.62, -0.72, 'SA node', 'right');
+      tag(0.04, -0.30, 'AV node', 'left');
+      tag(0.12, 0.04, 'bundle of His', 'left');
+      tag(-0.06, 1.02, 'Purkinje fibres', 'center');
       ctx.restore();
 
       /* ---------- ladder diagram ---------- */

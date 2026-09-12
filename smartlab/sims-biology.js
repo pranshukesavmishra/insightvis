@@ -33,7 +33,7 @@
       'sweeping down the axon is genuinely propagating, and the sodium and potassium gates open and shut ' +
       'because <b>m, h and n</b> say so.',
 
-    params: { mode: 'single', Istim: 20, dur: 1.0, gap: 5, ttx: 0, tea: 0, temp: 18.5, patch: true },
+    params: { mode: 'single', Istim: 20, dur: 1.0, gap: 5, ttx: 0, tea: 0, temp: 18.5, myelin: false, patch: true },
 
     presets: [
       { name: 'Normal spike', params: { mode: 'single', Istim: 20, dur: 1.0, ttx: 0, tea: 0, temp: 18.5 } },
@@ -42,7 +42,8 @@
       { name: 'TTX — Na⁺ blocked', params: { mode: 'single', Istim: 20, dur: 1.0, ttx: 70, tea: 0 } },
       { name: 'Partial TTX (40%)', params: { mode: 'single', Istim: 20, dur: 1.0, ttx: 40, tea: 0 } },
       { name: 'TEA — K⁺ blocked', params: { mode: 'single', Istim: 20, dur: 1.0, ttx: 0, tea: 80 } },
-      { name: 'Cold axon (6 °C)', params: { mode: 'single', Istim: 20, dur: 1.0, temp: 6.3 } }
+      { name: 'Cold axon (6 °C)', params: { mode: 'single', Istim: 20, dur: 1.0, temp: 6.3 } },
+      { name: 'Myelinated — saltatory', params: { mode: 'single', Istim: 20, dur: 1.0, myelin: true, temp: 18.5 } }
     ],
 
     controls: [
@@ -58,6 +59,9 @@
         { key: 'ttx', label: 'Tetrodotoxin — blocks Na⁺', min: 0, max: 100, step: 1, unit: '%', fmt: v => v.toFixed(0) },
         { key: 'tea', label: 'TEA — blocks K⁺', min: 0, max: 100, step: 1, unit: '%', fmt: v => v.toFixed(0) },
         { key: 'temp', label: 'Temperature', min: 6.3, max: 30, step: 0.1, unit: '°C', fmt: v => v.toFixed(1) }
+      ] },
+      { group: 'Myelination', items: [
+        { key: 'myelin', type: 'toggle', label: 'Myelinate the axon (Schwann cells)', restructure: true }
       ] },
       { group: 'Display', items: [
         { key: 'patch', type: 'toggle', label: 'Show membrane patch & gates' }
@@ -80,6 +84,43 @@
       S.peak = -65; S.lastPeak = null;
       S.tArrive = null; S.vel = null;
       S.period = S.p.mode === 'train' ? 12 : 30;
+
+      /* Per-compartment cable properties. Unmyelinated: excitable
+         everywhere. Myelinated: NODES nodes of Ranvier, each 4
+         compartments wide, are excitable; the internodes under the
+         sheath lose their channels, their leak drops ~40-fold and the
+         sheath's series capacitance drops ~25-fold, so charge runs
+         ahead almost instantly and only the nodes fire. */
+      S.NODES = 7;
+      S.exc = new Float64Array(NSEG).fill(1);
+      S.gL = new Float64Array(NSEG).fill(0.3);
+      S.cm = new Float64Array(NSEG).fill(CM);
+      S.gax = new Float64Array(NSEG).fill(S.p.myelin ? 12 : 8);
+      S.isNode = new Uint8Array(NSEG).fill(1);
+      if (S.p.myelin) {
+        const seg = NSEG / S.NODES;
+        for (let i = 0; i < NSEG; i++) {
+          const inNode = (i % seg) < 4 || i < 6;        // hillock stays excitable
+          S.isNode[i] = inNode ? 1 : 0;
+          if (!inNode) {
+            S.exc[i] = 0.02;
+            S.gL[i] = 0.3 / 40;
+            S.cm[i] = CM / 25;
+            S.gax[i] = 12;
+          }
+        }
+      }
+      // velocity markers must sit on excitable membrane, or a myelinated
+      // axon would never trip them
+      const nearest = want => {
+        for (let d = 0; d < NSEG; d++) {
+          if (want + d < NSEG && S.isNode[want + d]) return want + d;
+          if (want - d >= 0 && S.isNode[want - d]) return want - d;
+        }
+        return want;
+      };
+      S.iA = nearest(20); S.iB = nearest(80);
+      S.rec = nearest(30);            // always record from excitable membrane
     },
 
     step(S, dt) {
@@ -92,7 +133,7 @@
 
       const msPerSec = 15;            // slow motion: 15 simulated ms per wall second
       const total = dt * msPerSec;
-      const hstep = 0.005;
+      const hstep = p.myelin ? 0.0015 : 0.005;   // the myelinated cable is stiffer
       let steps = Math.ceil(total / hstep);
       steps = clamp(steps, 1, 260);
       const h = total / steps;
@@ -107,14 +148,18 @@
 
         for (let i = 0; i < NSEG; i++) {
           const v = V[i];
-          const gNa = gNaMax * m[i] * m[i] * m[i] * hh[i];
-          const gK = gKMax * n[i] * n[i] * n[i] * n[i];
-          const Iion = gNa * (v - ENa) + gK * (v - EK) + 0.3 * (v - EL);
+          // Under myelin the axolemma carries almost no voltage-gated
+          // channels and the sheath cuts leak and capacitance, so current
+          // spreads passively to the next node — saltatory conduction.
+          const ex = S.exc[i];
+          const gNa = gNaMax * ex * m[i] * m[i] * m[i] * hh[i];
+          const gK = gKMax * ex * n[i] * n[i] * n[i] * n[i];
+          const Iion = gNa * (v - ENa) + gK * (v - EK) + S.gL[i] * (v - EL);
           const vl = i > 0 ? V[i - 1] : V[0];
           const vr = i < NSEG - 1 ? V[i + 1] : V[NSEG - 1];
-          const Iax = gax * (vl - 2 * v + vr);
+          const Iax = S.gax[i] * (vl - 2 * v + vr);
           const Is = i < 4 ? stim : 0;
-          const dV = (Is - Iion + Iax) / CM;
+          const dV = (Is - Iion + Iax) / S.cm[i];
 
           const am = aM(v), bm = bM(v), ah = aH(v), bh = bH(v), an = aN(v), bn = bN(v);
           m[i] += h * phi * (am * (1 - m[i]) - bm * m[i]);
@@ -126,14 +171,18 @@
       }
 
       // conduction velocity: time for the spike to reach two markers
-      const iA = 20, iB = 80;
+      const iA = S.iA, iB = S.iB;
       if (V[iA] > 0 && S.tA == null) S.tA = S.tms;
       if (V[iB] > 0 && S.tA != null && S.tB == null) {
         S.tB = S.tms;
         const dx = (iB - iA) / NSEG * AXON_CM / 100;      // metres
         S.vel = dx / ((S.tB - S.tA) / 1000);
       }
-      if (V[iA] < -50 && V[iB] < -50) { S.tA = null; S.tB = null; }
+      // arm the next measurement only once the whole cable is quiet — the
+      // upstroke at A has long repolarised by the time the spike reaches B
+      let live = false;
+      for (let i = 0; i < NSEG; i++) if (V[i] > -40) { live = true; break; }
+      if (!live) { S.tA = null; S.tB = null; }
 
       const v = V[S.rec];
       if (v > S.peak) S.peak = v;
@@ -160,55 +209,81 @@
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const bio = th.bio, na = '#FFC24B', k = '#5AA9FF';
 
-      const axH = p.patch ? H * 0.30 : H * 0.72;
+      const axH = p.patch ? H * 0.44 : H * 0.74;
       const pad = 16;
 
-      /* ---------- axon with membrane potential mapped along its length ---------- */
-      const ax0 = pad + 42, ax1 = W - pad - 12, axY = pad + axH * 0.5, axR = Math.min(26, axH * 0.30);
-      for (let i = 0; i < NSEG; i++) {
-        const v = S.V[i];
-        const t = clamp((v + 80) / 130, 0, 1);
-        const col = t < 0.42
-          ? g.mix('#16263F', '#2E5F8A', t / 0.42)
-          : g.mix('#2E5F8A', '#FFD36B', (t - 0.42) / 0.58);
-        const x0 = ax0 + (i / NSEG) * (ax1 - ax0);
-        const w = (ax1 - ax0) / NSEG + 1;
-        ctx.fillStyle = col;
-        ctx.fillRect(x0, axY - axR, w, axR * 2);
-      }
-      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
-      ctx.strokeRect(ax0 + .5, axY - axR + .5, ax1 - ax0, axR * 2);
+      /* ---------- the neuron, with membrane potential painted along the axon ---------- */
+      const r = clamp(axH * 0.052, 4.5, 16);
+      const somaR = r * 2.6;
+      const nx0 = pad + somaR * 3.5, nx1 = W - pad - Math.max(96, r * 11);
+      const axY = pad + axH * 0.5;
 
-      // depolarised front glow
+      // volts -> colour: resting slate, depolarised amber, overshoot white-hot
+      const vCol = v => {
+        const t = clamp((v + 80) / 130, 0, 1);
+        return t < 0.42 ? g.mix('#16263F', '#2E5F8A', t / 0.42)
+                        : g.mix('#2E5F8A', '#FFD36B', (t - 0.42) / 0.58);
+      };
+
+      const N = BIOART.neuron(ctx, nx0, nx1, axY, r, {
+        somaR: somaR,
+        myelin: !!p.myelin,
+        nodes: S.NODES || 7,
+        colourAt: u => vCol(S.V[clamp(Math.round(u * (NSEG - 1)), 0, NSEG - 1)]),
+        labels: axH > 150
+      });
+      const ax0 = N.axStart, ax1 = N.axEnd;
+
+      // depolarised front glow, riding the leading edge of the spike
       let front = -1;
       for (let i = NSEG - 1; i >= 0; i--) if (S.V[i] > 0) { front = i; break; }
       if (front >= 0) {
-        const fx = ax0 + (front / NSEG) * (ax1 - ax0);
+        const fx = ax0 + (front / (NSEG - 1)) * (ax1 - ax0);
         ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        const rg = ctx.createRadialGradient(fx, axY, 0, fx, axY, axR * 2.6);
-        rg.addColorStop(0, g.alpha(na, .5)); rg.addColorStop(1, g.alpha(na, 0));
-        ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(fx, axY, axR * 2.6, 0, TAU); ctx.fill();
+        const rg = ctx.createRadialGradient(fx, axY, 0, fx, axY, r * 5.5);
+        rg.addColorStop(0, g.alpha(na, .55)); rg.addColorStop(1, g.alpha(na, 0));
+        ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(fx, axY, r * 5.5, 0, TAU); ctx.fill();
         ctx.restore();
       }
 
-      // stimulating electrode
+      // stimulating electrode, on the hillock where the spike is actually started
       ctx.strokeStyle = g.alpha(th['text-2'], .9); ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(ax0 - 22, axY - axR - 16); ctx.lineTo(ax0 + 4, axY - axR + 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ax0 - 16, axY - r * 3.4); ctx.lineTo(ax0 + 3, axY - r * 1.2);
+      ctx.stroke();
+      ctx.fillStyle = g.alpha(th['text-2'], .9);
+      ctx.beginPath(); ctx.arc(ax0 + 3, axY - r * 1.2, 2.6, 0, TAU); ctx.fill();
       ctx.font = '500 9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
       ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-      ctx.fillText('stimulus', ax0 - 26, axY - axR - 18);
+      ctx.fillText('stimulus', ax0 - 18, axY - r * 4.0);
 
-      // recording electrode
-      const rx = ax0 + (S.rec / NSEG) * (ax1 - ax0);
+      // recording micro-electrode
+      const rx = ax0 + (S.rec / (NSEG - 1)) * (ax1 - ax0);
       ctx.strokeStyle = bio; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(rx, axY + axR + 16); ctx.lineTo(rx, axY + axR - 2); ctx.stroke();
-      ctx.fillStyle = bio; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.fillText('recording  ' + S.V[S.rec].toFixed(1) + ' mV', rx, axY + axR + 19);
+      ctx.beginPath();
+      ctx.moveTo(rx + 10, axY + r * 4.6); ctx.lineTo(rx, axY + r * 0.4);
+      ctx.stroke();
+      ctx.fillStyle = bio;
+      ctx.beginPath(); ctx.arc(rx, axY + r * 0.4, 2.6, 0, TAU); ctx.fill();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('recording  ' + S.V[S.rec].toFixed(1) + ' mV', rx + 10, axY + r * 4.9);
 
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('axon', pad, axY);
+      // membrane-potential colour key
+      const kx = W - pad - 84, ky = pad + 4;
+      const kg = ctx.createLinearGradient(kx, 0, kx + 76, 0);
+      for (let q = 0; q <= 10; q++) kg.addColorStop(q / 10, vCol(-80 + q * 13));
+      ctx.fillStyle = kg; ctx.fillRect(kx, ky, 76, 7);
+      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
+      ctx.strokeRect(kx + .5, ky + .5, 76, 7);
+      ctx.font = '8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('–80', kx, ky + 10);
+      ctx.textAlign = 'right'; ctx.fillText('+50 mV', kx + 76, ky + 10);
+
       ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillStyle = th['text-3'];
-      ctx.fillText(AXON_CM + ' cm of axon · ' + NSEG + ' compartments', ax1, axY - axR - 6);
+      ctx.fillText(AXON_CM + ' cm of axon · ' + NSEG + ' compartments' +
+        (p.myelin ? ' · ' + (S.NODES || 7) + ' nodes of Ranvier' : ' · unmyelinated'),
+        nx1, axY - r * 5.6);
 
       /* ---------- gating bar meters ---------- */
       const gy = pad + axH + 6;
@@ -234,9 +309,9 @@
       if (!p.patch) return;
 
       /* ---------- membrane patch with ion channels ---------- */
-      const py0 = gy + 34, py1 = H - 12;
-      const memY = (py0 + py1) / 2, memH = clamp((py1 - py0) * 0.22, 22, 52);
-      const mx0 = pad + 60, mx1 = W - pad - 60;
+      const py0 = gy + 40, py1 = H - 16;
+      const memY = py0 + (py1 - py0) * 0.44, memH = clamp((py1 - py0) * 0.24, 20, 54);
+      const mx0 = pad + 62, mx1 = W - pad - 62;
 
       ctx.fillStyle = th['text-3']; ctx.font = '9.5px "IBM Plex Mono",monospace';
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -245,15 +320,17 @@
       ctx.fillText('INSIDE', pad, memY + memH + 14);
       ctx.fillText('high K⁺', pad, memY + memH + 28);
 
-      // bilayer
-      const headR = Math.max(2.6, memH * 0.16);
-      ctx.fillStyle = g.alpha(th['ink-700'], 1);
+      // the phospholipid bilayer itself — two leaflets of head-and-tail
+      // lipids, hydrophilic heads out, hydrophobic tails meeting in the core
+      ctx.fillStyle = g.alpha(th['ink-800'], 1);
       ctx.fillRect(mx0, memY - memH, mx1 - mx0, memH * 2);
-      for (let x = mx0 + headR; x < mx1; x += headR * 2.6) {
-        ctx.fillStyle = g.alpha(th['text-3'], .55);
-        ctx.beginPath(); ctx.arc(x, memY - memH + headR, headR, 0, TAU); ctx.fill();
-        ctx.beginPath(); ctx.arc(x, memY + memH - headR, headR, 0, TAU); ctx.fill();
-      }
+      BIOART.bilayer(ctx, mx0, mx1, memY, memH);
+      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
+      ctx.strokeRect(mx0 + .5, memY - memH + .5, mx1 - mx0, memH * 2);
+      ctx.font = '8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = g.alpha(th['text-3'], .8);
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText('heads', mx0 - 6, memY - memH + memH * 0.16);
+      ctx.fillText('tails', mx0 - 6, memY);
 
       // two channels
       const chan = [
@@ -560,85 +637,50 @@
       const bio = th.bio, artC = '#FFB454', venC = '#5A8FD8';
       const split = Math.min(W * 0.40, 300);
 
-      /* ================= heart schematic ================= */
-      const hx = split / 2, hy = H * 0.5, sc = Math.min(split, H) / 2.5;
-      const nV = clamp((S.Vlv - 40) / 100, 0.1, 1.2);
-      const nA = clamp((S.Vla - 20) / 55, 0.1, 1.2);
+      /* ================= anatomical heart ================= */
+      const sc = Math.min(split * 0.42, H * 0.30);
+      const hx = split * 0.50, hy = H * 0.50 + sc * 0.22;
+      // right heart valves mirror the left: AV valves open in diastole, SL in systole
+      const tvOpen = S.mvOpen, pvOpen = S.avOpen;
+      BIOART.heart(ctx, hx, hy, sc, {
+        chambers: 4,
+        sat: { ra: 60, rv: 60, la: 98, lv: 98 },
+        contraction: clamp(S.eLV, 0, 1),
+        mvOpen: S.mvOpen, tvOpen: tvOpen, avOpen: S.avOpen, pvOpen: pvOpen,
+        labels: true, leaders: false
+      });
 
-      // body outline
-      ctx.save();
-      ctx.translate(hx, hy);
-      ctx.fillStyle = g.alpha('#3A1F2C', .55);
-      ctx.beginPath();
-      ctx.moveTo(-sc * 0.95, -sc * 0.85);
-      ctx.bezierCurveTo(sc * 1.0, -sc * 1.15, sc * 1.05, sc * 0.2, 0, sc * 1.05);
-      ctx.bezierCurveTo(-sc * 1.0, sc * 0.2, -sc * 1.05, -sc * 1.1, -sc * 0.95, -sc * 0.85);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1; ctx.stroke();
+      // live LV volume, read off the ventricle itself
+      ctx.font = '600 10px "IBM Plex Mono",monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(5,8,15,.85)';
+      const volTxt = S.Vlv.toFixed(0) + ' mL';
+      ctx.strokeText(volTxt, hx + sc * 0.30, hy + sc * 0.44);
+      ctx.fillStyle = '#F2E3C0'; ctx.fillText(volTxt, hx + sc * 0.30, hy + sc * 0.44);
 
-      // right heart (schematic, passive)
-      ctx.fillStyle = g.alpha(venC, .32);
-      ctx.beginPath(); ctx.ellipse(-sc * 0.46, sc * 0.12, sc * 0.30, sc * 0.44, 0, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(-sc * 0.44, -sc * 0.55, sc * 0.24, sc * 0.20, 0, 0, TAU); ctx.fill();
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = g.alpha(venC, .95);
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('RV', -sc * 0.46, sc * 0.12); ctx.fillText('RA', -sc * 0.44, -sc * 0.55);
+      // valve state strip — kept out of the figure so nothing collides
+      const vs = [
+        ['mitral', S.mvOpen], ['aortic', S.avOpen],
+        ['tricuspid', tvOpen], ['pulmonary', pvOpen]
+      ];
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.font = '500 9px "IBM Plex Mono",monospace';
+      vs.forEach((v, i) => {
+        const yy = 84 + i * 14;
+        ctx.fillStyle = v[1] ? th.ok : g.alpha(th['text-3'], .95);
+        ctx.beginPath(); ctx.arc(14, yy, 3.2, 0, TAU); ctx.fill();
+        ctx.fillStyle = v[1] ? th.ok : th['text-3'];
+        ctx.fillText(v[0] + (v[1] ? '  OPEN' : '  shut'), 23, yy);
+      });
 
-      // left atrium
-      ctx.fillStyle = g.alpha(artC, .30 + .22 * nA);
-      ctx.beginPath(); ctx.ellipse(sc * 0.36, -sc * 0.58, sc * 0.26 * (0.75 + .35 * nA), sc * 0.20 * (0.75 + .35 * nA), 0, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = th.text; ctx.fillText('LA', sc * 0.36, -sc * 0.58);
-
-      // left ventricle — wall thickness grows as it contracts
-      const lvR = sc * 0.30 * (0.62 + 0.48 * nV), lvRy = sc * 0.46 * (0.62 + 0.48 * nV);
-      ctx.fillStyle = g.alpha(artC, .34 + .3 * (1 - S.eLV));
-      ctx.beginPath(); ctx.ellipse(sc * 0.34, sc * 0.16, lvR, lvRy, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha(artC, .55 + .4 * S.eLV);
-      ctx.lineWidth = 3 + 7 * S.eLV;
-      ctx.stroke();
-      ctx.fillStyle = th.text; ctx.font = '600 10px "IBM Plex Mono",monospace';
-      ctx.fillText('LV', sc * 0.34, sc * 0.16);
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-2'];
-      ctx.fillText(S.Vlv.toFixed(0) + ' mL', sc * 0.34, sc * 0.16 + 14);
-
-      // mitral valve
-      const mvY = -sc * 0.30, mvX = sc * 0.34;
-      ctx.strokeStyle = S.mvOpen ? th.ok : g.alpha(th['text-3'], .95);
-      ctx.lineWidth = 2.4;
-      const mvA = S.mvOpen ? 1.15 : 0.12;
-      ctx.beginPath();
-      ctx.moveTo(mvX - sc * 0.17, mvY);
-      ctx.lineTo(mvX - sc * 0.17 + sc * 0.15 * Math.cos(mvA), mvY + sc * 0.17 * Math.sin(mvA));
-      ctx.moveTo(mvX + sc * 0.17, mvY);
-      ctx.lineTo(mvX + sc * 0.17 - sc * 0.15 * Math.cos(mvA), mvY + sc * 0.17 * Math.sin(mvA));
-      ctx.stroke();
-
-      // aorta + aortic valve
-      ctx.strokeStyle = g.alpha(artC, .75); ctx.lineWidth = Math.max(7, sc * 0.14);
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(sc * 0.10, -sc * 0.42);
-      ctx.quadraticCurveTo(sc * 0.02, -sc * 1.05, -sc * 0.30, -sc * 1.02);
-      ctx.stroke();
-      const avY = -sc * 0.42, avX = sc * 0.10;
-      ctx.strokeStyle = S.avOpen ? th.ok : g.alpha(th['text-3'], .95);
-      ctx.lineWidth = 2.4; ctx.lineCap = 'butt';
-      const avA = S.avOpen ? 1.2 : 0.1;
-      ctx.beginPath();
-      ctx.moveTo(avX - sc * 0.11, avY);
-      ctx.lineTo(avX - sc * 0.11 + sc * 0.10 * Math.cos(avA), avY - sc * 0.13 * Math.sin(avA));
-      ctx.moveTo(avX + sc * 0.11, avY);
-      ctx.lineTo(avX + sc * 0.11 - sc * 0.10 * Math.cos(avA), avY - sc * 0.13 * Math.sin(avA));
-      ctx.stroke();
-
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = S.mvOpen ? th.ok : th['text-3'];
-      ctx.fillText(S.mvOpen ? 'mitral OPEN' : 'mitral shut', mvX + sc * 0.22, mvY);
-      ctx.fillStyle = S.avOpen ? th.ok : th['text-3'];
-      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText(S.avOpen ? 'aortic OPEN' : 'aortic shut', avX - sc * 0.30, avY - 10);
-      ctx.restore();
+      // saturation legend
+      ctx.font = '500 9px "IBM Plex Mono",monospace';
+      ctx.fillStyle = g.alpha('#3D6FB4', 1);
+      ctx.beginPath(); ctx.arc(14, 50, 3.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = th['text-3']; ctx.fillText('deoxygenated  ~60%  (right heart)', 23, 50);
+      ctx.fillStyle = g.alpha('#E8455C', 1);
+      ctx.beginPath(); ctx.arc(14, 63, 3.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = th['text-3']; ctx.fillText('oxygenated  ~98%  (left heart)', 23, 63);
 
       // phase caption
       ctx.font = '700 13px "IBM Plex Sans Condensed",sans-serif';

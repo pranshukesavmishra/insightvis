@@ -46,6 +46,16 @@ component looks, no "we'll polish it later". Every screen must look like a piece
 professional scientific instrumentation. If a choice trades visual quality for convenience,
 make the other choice.
 
+### 2.4 Biology figures must be anatomically drawn, never boxes and blobs
+Added after client feedback on v3: *"the diagrams and figure you have used in biology are
+unrealistic so it is making it tough for a student to visualise."* A NEET student is examined
+on labelled diagrams. A heart drawn as four rounded rectangles, or an axon drawn as a grey
+bar, teaches them nothing they can carry into the exam hall. Every biological structure is
+drawn as the organ or cell actually looks — chambers with real proportions, great vessels
+in correct anteroposterior order, a neuron with soma, dendrites, hillock, myelin and nodes,
+a bilayer with heads and tails. `art-bio.js` is the single library for these; a lab never
+hand-draws anatomy again.
+
 ---
 
 ## 3. Scope
@@ -203,6 +213,15 @@ These were found by direct numerical testing. Changing them will break the teach
 - Axial coupling `gax = 8`. At 1.6 the spike does **not** propagate along the axon.
 - Firing threshold ≈ **11 µA/cm² at 1.0 ms** pulse. Defaults: `Istim 20, dur 1.0`.
 - Subthreshold demo: `Istim 9`. Paired-pulse refractory demo: `Istim 24, gap 5 ms`.
+- **Myelination (v4).** Internodes get `exc 0.02`, `gL 0.3/40`, `cm CM/25`; `gax` goes 8 → 12
+  everywhere. Explicit Euler on the cable is only stable while `h·2·gax/cm < 2`, so the
+  myelinated case **must** drop `hstep` from 0.005 to 0.0015 — at 0.005 with `cm/25` it sits
+  exactly on the limit and blows up. Measured result: **3.56 m/s unmyelinated → 8.29 m/s
+  myelinated**, nodes firing and internodes staying silent, i.e. genuine saltatory conduction.
+- **Conduction-velocity markers must sit on excitable membrane** (`S.iA`, `S.iB` snap to the
+  nearest node), and the measurement is re-armed only when the **whole cable** is quiet. The
+  old reset (`V[iA] < -50 && V[iB] < -50`) fired while the spike was still in transit, so the
+  velocity readout was permanently blank.
 - Peak locks at ≈ +26 mV for any stimulus from 12 to 26 µA/cm² — this constancy **is** the
   all-or-none demonstration, verified numerically.
 - TTX 70% abolishes the spike; TTX 40% gives a reduced spike (~+10 mV); TEA 80% gives a
@@ -263,6 +282,16 @@ These were found by direct numerical testing. Changing them will break the teach
   NCERT.
 - Sim definitions are data (`params`, `controls`, `presets`, `walkthrough`, `notes`); the
   shell renders them. Adding an experiment should not require touching the shell.
+- **Anatomy lives in `art-bio.js` (`window.BIOART`), never in a sim file.** Same rule as
+  taxonomy in `data-animalia.js`: one source of truth. `BIOART` exports `heart`, `heart2`,
+  `neuron`, `bilayer`, `synapticKnob`, `postsynapticMembrane`, `satColour`. Every figure is
+  drawn in a normalised box and scaled, so any lab can place one at any size. Options that
+  matter: `leaders:false` drops the external leader-line labels but keeps the chamber tags
+  (use it in narrow panels); `vessels:false` drops the great vessels and the semilunar
+  valves (use it when the lab draws its own circulation).
+- **Colour helpers must return hex.** `mixHex` returning `rgb(...)` and then being fed back
+  into itself silently produced invalid gradient stops and black chamber cavities. `parseHex`
+  now tolerates bad input and `mixHex` returns `#rrggbb`.
 - **Sim methods live in the definition object, not on the state object `S`.** A helper needed
   by `drawStage`/`drawPlot` goes at module scope. (This caused a real runtime bug — `S.intensity`
   was called but never existed on `S`.)
@@ -325,6 +354,9 @@ Append only. Never rewrite history.
 | 2026-09-12 | Depth over breadth: two experiments per chapter, not one per topic | Client asked for more experiments *within* a topic |
 | 2026-09-12 | Engine v2: multi-plot, hover inspection, typed numeric entry, ghost compare, notebook, quizzes | Exam-level work needs exact inputs, comparison and self-testing, not just a slider |
 | 2026-09-12 | `extend(id, patch)` hook rather than rewriting the original six | Deepens shipped sims without risking regressions in working physics |
+| 2026-09-12 | **`art-bio.js` — one anatomical figure library, no hand-drawn anatomy in sims** | Client rejected the v3 biology figures as unrealistic; a single library keeps every lab's anatomy correct and consistent |
+| 2026-09-12 | Myelin modelled as a real cable property, not a drawing | A toggle that only changed the picture would violate mandate 2.1; internodes genuinely lose their channels and the spike genuinely jumps |
+| 2026-09-12 | Vertebrate-heart lab keeps its schematic circulation loops but draws the organ | The loops are the teaching point; only the heart itself needed to stop being four boxes |
 
 ---
 
@@ -343,6 +375,18 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-12 (c)** — **Shipped v4: anatomical biology figures.** Client reported the v3
+  biology diagrams as unrealistic and hard to visualise. Confirmed it from screenshots (the
+  cardiac "heart" was an angular blob with floating ellipses; the axon was a plain rectangle
+  and the "bilayer" a row of grey circles). Built `art-bio.js` and rewired five labs onto it:
+  cardiac cycle, nerve impulse, synapse, cardiac conduction and the vertebrate-heart evolution
+  lab. Added a working myelin toggle with real saltatory conduction. Rebuilt the mammal
+  silhouette as a jointed quadruped. Ran repeated screenshot-verify-fix cycles per figure,
+  which caught: `mixHex` returning `rgb()` and producing black chamber cavities; the aortic
+  arch sweeping to the wrong side; semilunar valves rendering as invisible specks; receptors
+  floating off a curved membrane; label collisions in five places; a normalised/pixel unit mix
+  that made the mammal's legs 300 px long; and a long-standing bug that left the conduction
+  velocity readout permanently blank. All 21 labs verified clean headless.
 - **2026-09-12 (a)** — **Shipped v2.** Upgraded the engine (multi-plot with hover crosshair/tooltip,
   click-to-type numeric entry, ghost comparison overlay, fullscreen stage, lab notebook, quiz
   engine, chapter-grouped navigation, keyboard shortcuts, `extend()` hook). Added six new

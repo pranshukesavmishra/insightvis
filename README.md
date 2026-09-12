@@ -48,6 +48,14 @@ No placeholder styling, no default component looks, no "we'll polish it later". 
 must look like professional scientific instrumentation. Where a choice trades visual quality
 for convenience, make the other choice.
 
+### 2.4 · Biology figures are anatomical drawings, not boxes and blobs
+A NEET student is examined on labelled diagrams. A heart drawn as four rounded rectangles, or
+an axon drawn as a grey bar, gives them nothing they can carry into the exam hall. Every
+biological structure is drawn as the organ or cell actually looks — chambers in real
+proportion, great vessels in correct order, a neuron with soma, dendrites, axon hillock,
+myelin sheath and nodes of Ranvier, a membrane with real phospholipid heads and tails.
+All of it lives in one library, `smartlab/art-bio.js`; a lab never hand-draws anatomy.
+
 ---
 
 ## 3. What "high-level visualisation" means here
@@ -65,7 +73,7 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v3 (shipped)
+## 4. Insight Smart Lab — v4 (shipped)
 
 Source: [`smartlab/`](./smartlab). **Twenty-one experiments across seven chapters.** Six chapters
 carry two experiments each; **Animal Kingdom carries nine**, because it is the highest-preference
@@ -161,21 +169,32 @@ exactly which groups to revise.
 ### Biology · Neural Control & Coordination
 **9 · Nerve Impulse — the Hodgkin–Huxley Action Potential**
 The full 1952 equations across a **100-compartment cable**, so the spike genuinely propagates and
-conduction velocity is measured. Membrane patch shows m, h and n gating live. TTX and TEA block the
-real channels.
+conduction velocity is measured. Drawn on a real neuron — soma, dendrites, axon hillock, terminal
+boutons — with membrane potential painted along the axon. The membrane patch is an actual
+phospholipid bilayer with the Na⁺ and K⁺ channels embedded in it and m, h and n gating live.
+TTX and TEA block the real channels. **Myelinating the axon is a change to the cable, not to the
+picture**: the internodes lose their voltage-gated channels and most of their leak and
+capacitance, so the spike genuinely jumps node to node — measured **3.6 → 8.3 m/s**.
 
 **10 · The Synapse — Quantal Release, Summation and Drugs**
+Drawn as a neuromuscular junction: axon knobs with mitochondria and a reserve vesicle pool,
+Ca²⁺ channels in the active zone, vesicles that open a real omega-shaped fusion pore, and a
+folded postsynaptic membrane whose nicotinic receptors sit on the curve of the end plate.
 Release follows the real **fourth-power dependence on external Ca²⁺**. Temporal and spatial summation,
 EPSP/IPSP arithmetic, and three drugs acting at three different points in the chain — curare,
 botulinum and neostigmine.
 
 ### Biology · Body Fluids & Circulation
 **11 · The Cardiac Cycle — Pressure, Volume and the ECG**
-**Time-varying elastance** with a Windkessel aorta; valves open purely on pressure gradient. Live
+**Time-varying elastance** with a Windkessel aorta; valves open purely on pressure gradient. The
+heart is drawn as the organ — four chambers coloured by live oxygen saturation, AV valves with
+chordae tendineae, semilunar valves showing the three-cusp closure. Live
 Wiggers diagram, pressure–volume loop, and a **Frank–Starling curve that you build by experiment**.
 
 **12 · Cardiac Conduction System & Heart Block**
-Event-driven conduction from SA node to Purkinje, with a **ladder diagram** and an ECG synthesised
+Event-driven conduction from SA node through the internodal tracts, AV node, bundle of His, both
+bundle branches and the Purkinje fibres — all drawn on the anatomical heart they drive, lighting up
+as the impulse passes. Plus a **ladder diagram** and an ECG synthesised
 from what actually conducted. First-degree, Wenckebach, Mobitz II and complete block — and the
 beat-by-beat PR plot that diagnoses each one.
 
@@ -222,6 +241,9 @@ smartlab/
 ├── sims-chemistry2.js   Bohr model & spectrum · E1/E2 elimination
 ├── sims-biology.js      action potential · cardiac cycle
 ├── sims-biology2.js     synapse · cardiac conduction & heart block
+├── art-bio.js           anatomical figure library (`window.BIOART`) — the vertebrate heart,
+│                        the neuron, the phospholipid bilayer and the synapse. Every figure is
+│                        drawn in a normalised box and scaled, so any lab places one at any size.
 └── sims-extend.js       depth pass — extra controls, second graphs and quizzes
                          bolted onto the original six via `InsightLab.extend()`
 ```
