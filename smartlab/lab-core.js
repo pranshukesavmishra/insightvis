@@ -61,12 +61,12 @@ window.InsightLab = (function () {
   function readTheme() {
     const cs = getComputedStyle(document.documentElement);
     ['text', 'text-2', 'text-3', 'accent', 'line', 'line-soft', 'ink-950', 'ink-900',
-     'ink-800', 'ink-700', 'phys', 'chem', 'bio', 'ok', 'warn', 'crit'].forEach(k => {
+     'ink-850', 'ink-800', 'ink-750', 'ink-700', 'phys', 'chem', 'bio', 'ok', 'warn', 'crit'].forEach(k => {
       theme[k] = cs.getPropertyValue('--' + k).trim();
     });
   }
   function alpha(hex, a) {
-    hex = (hex || '#ffffff').trim();
+    hex = (hex || '#141D2E').trim();
     if (hex[0] !== '#') return hex;
     if (hex.length === 4) hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
     const n = parseInt(hex.slice(1), 16);
@@ -239,7 +239,10 @@ window.InsightLab = (function () {
     S.begin = function () { ctx.setTransform(S.dpr, 0, 0, S.dpr, 0, 0); };
     if (opts && opts.orbit) {
       let drag = null;
-      cv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); });
+      cv.addEventListener('pointerdown', e => {
+        drag = { x: e.clientX, y: e.clientY };
+        try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+      });
       cv.addEventListener('pointermove', e => {
         if (!drag) return;
         const cam = opts.cam();
@@ -263,7 +266,10 @@ window.InsightLab = (function () {
         const r = cv.getBoundingClientRect();
         opts.onPointer(e.clientX - r.left, e.clientY - r.top, e.buttons > 0, e.type);
       };
-      cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); send(e); });
+      cv.addEventListener('pointerdown', e => {
+        try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+        send(e);
+      });
       cv.addEventListener('pointermove', send);
       cv.addEventListener('pointerup', e => { try { cv.releasePointerCapture(e.pointerId); } catch (_) {} send(e); });
     }

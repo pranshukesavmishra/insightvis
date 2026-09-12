@@ -6,7 +6,7 @@
 > whenever a decision is made or a constraint is discovered.** A stale memory is worse than
 > no memory — fix anything here that no longer matches reality.
 
-Last updated: 2026-09-12
+Last updated: 2026-09-12 (v3)
 
 ---
 
@@ -65,13 +65,38 @@ Full topic breakdown lives in `README.md` §3. Keep the two documents consistent
 
 ---
 
-## 4. What is built — Insight Smart Lab v2
+## 4. What is built — Insight Smart Lab v3
 
 **Live artifact:** https://claude.ai/code/artifact/bff145e7-cd07-46c2-85d5-b579094767e6
 **Source:** `smartlab/` in this repository.
 
-**Twelve experiments across six chapters — two per chapter.** The client asked for depth within a
-topic rather than one demo per topic, so every chapter carries a pair.
+**Twenty-one experiments across seven chapters.** Six chapters carry two each; **Animal Kingdom
+carries nine**. The client flagged Animal Kingdom as the topic they are evaluated on and asked for
+it to be as vast as possible — treat it as the flagship and keep it ahead of everything else.
+
+### Animal Kingdom suite (NCERT Class XI, Chapter 4)
+`data-animalia.js` is the single source of truth: 11 phyla + 3 chordate subphyla + 7 vertebrate
+classes, every examinable character, every NCERT example genus. `art-animalia.js` holds hand-built
+Canvas silhouettes for every group. **All nine labs read from that one dataset — never duplicate
+taxonomic facts into a sim file.**
+
+| Lab | What makes it computational rather than illustrative |
+|---|---|
+| A1 Classification key | live dichotomous-key logic + best-next-character selection |
+| A2 Symmetry | mirror score computed from the real outline; peak count = plane count |
+| A3 Germ layers & coelom | animated gastrulation; schizocoely vs enterocoely |
+| A4 Sponge canal systems | continuity equation Q = Av; velocity drops in chambers, spikes at osculum |
+| A5 Cnidaria | discharge kinematics anchored to 18.6 m/s and ~5.4×10⁶ g |
+| A6 Water vascular system | extension = ΔV/A; metachronal gait; adhesion-limited force |
+| A7 Vertebrate heart | oxygen-saturation mixing model + supply/demand for endothermy |
+| A8 Chordate cladogram | character states distinguish "for life" from "larva only" |
+| A9 Identification challenge | scored drill with per-taxon weakness tracking |
+
+**Five upgrade passes were run on this suite** (the client asked explicitly): (1) exam depth — the
+organ-systems matrix and expanded question banks; (2) graphics — card clipping, a proper
+anatomical circulation circuit, cleaner starfish; (3) more control — variable-fold model animal,
+multiple oscula, germ-layer derivative map, larva/adult chart; (4) the identification challenge;
+(5) verification, which caught two real bugs (see §7).
 
 | # | Subject · Chapter | Experiment | What makes it real |
 |---|---|---|---|
@@ -195,6 +220,17 @@ These were found by direct numerical testing. Changing them will break the teach
   cutoff — framing on `rmax` leaves the cloud tiny.
 - Sampling: inverse-CDF on r²R(r)² for the radius, rejection on |Y|² for direction.
 
+**Animal Kingdom**
+- `readTheme()` must list **every** CSS token a sim uses. `ink-750` was missing, so `alpha()` fell
+  back to white and the challenge buttons rendered as white blocks. `alpha()` now falls back to a
+  dark panel colour instead of white, so a future omission degrades safely.
+- `setPointerCapture` must be wrapped in try/catch — it throws for synthetic pointer events and
+  would otherwise kill the click handler.
+- Symmetry scan: threshold 0.985 over 720 samples in [0°, 180°). A mirror line at φ and φ+180° is
+  the same line, so the scan must cover a half turn only, or every plane is double-counted.
+- Sponge flow is anchored to the classic Leuconia figures: ~0.1 cm/s at the incurrent canals,
+  nearly stationary in the chambers, ~8.5 cm/s at the osculum.
+
 **Cyclotron**
 - Trail points must be pushed **inside** the substep loop (~14 per frame), not once per frame, or
   the spiral renders as a visible polygon.
@@ -303,7 +339,11 @@ Append only. Never rewrite history.
   runtime bug (`S.intensity` not on the state object), recalibrated orbital framing and
   molecule camera, separated the cardiac aorta colour from the LV trace. Published as an
   artifact. Recorded the client's three standing mandates in §2.
-- **2026-09-12** — **Shipped v2.** Upgraded the engine (multi-plot with hover crosshair/tooltip,
+- **2026-09-12 (b)** — **Shipped v3: the Animal Kingdom suite.** Nine labs plus a shared taxonomic
+  data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
+  what each one changed. Verification caught the white-button theme-token bug and an unguarded
+  `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-12 (a)** — **Shipped v2.** Upgraded the engine (multi-plot with hover crosshair/tooltip,
   click-to-type numeric entry, ghost comparison overlay, fullscreen stage, lab notebook, quiz
   engine, chapter-grouped navigation, keyboard shortcuts, `extend()` hook). Added six new
   experiments so every chapter has two: cyclotron, diffraction & resolving power, Bohr model &

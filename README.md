@@ -7,8 +7,8 @@ syllabus into things a student can *see, touch, break, and rebuild*. Every topic
 normally taught as a static diagram on a whiteboard becomes a real, physically-accurate,
 GPU-accelerated simulation that responds to the student in real time.
 
-The flagship module is **Insight Smart Lab** — twelve shipped experiments across six chapters,
-two each from Physics, Chemistry and Biology. See §4.
+The flagship module is **Insight Smart Lab** — **twenty-one shipped experiments**, including a
+nine-lab **Animal Kingdom** suite built to NCERT Chapter 4. See §4.
 
 ---
 
@@ -65,10 +65,11 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v2 (shipped)
+## 4. Insight Smart Lab — v3 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Twelve experiments across six chapters** — two per chapter, so
-each topic has real depth rather than a single token demo.
+Source: [`smartlab/`](./smartlab). **Twenty-one experiments across seven chapters.** Six chapters
+carry two experiments each; **Animal Kingdom carries nine**, because it is the highest-preference
+topic for this client.
 
 ### Physics · Moving Charges & Magnetism
 **1 · Charged Particle in Crossed E and B Fields**
@@ -111,6 +112,51 @@ is the actual experiment distinguishing the two mechanisms.
 The stereo-electronic requirement as a **slider**: E2 refuses to proceed until the β-hydrogen is
 anti-periplanar to the leaving group. Newman projection, full product distribution, and the switch
 from Saytzeff to Hofmann when the base becomes bulky.
+
+### Biology · Animal Kingdom  *(the flagship suite — nine labs)*
+Built to NCERT Class XI Chapter 4. A shared taxonomic core holds all eleven phyla, the three
+chordate subphyla and the seven vertebrate classes, with every character and every example genus
+the syllabus names. All nine labs read from that one dataset, so nothing can drift out of step.
+
+**A1 · The Classification Key** — six characters applied in any order; phyla that fail drop out
+live. Carries the full structural comparison matrix *and* a second organ-systems matrix, an
+elimination funnel, and an "identify a specimen" mode. The readout names the **best next
+character** — the actual logic by which taxonomic keys are built.
+
+**A2 · Body Symmetry** — takes each real body outline, reflects it about a test plane and
+**measures** how well the halves agree. The number of peaks in the graph *is* the number of
+planes of symmetry: 0 for a sponge, 1 for Planaria, 2 for a comb jelly, 5 for a starfish. A
+variable-fold model animal lets the student set n and confirm the prediction.
+
+**A3 · Germ Layers and the Body Cavity** — zygote → blastula → gastrula → mesoderm → cavity,
+animated in cross-section. Diploblastic, acoelomate, pseudocoelomate and coelomate side by side,
+plus schizocoely vs enterocoely and the full protostome/deuterostome contrast. Includes a
+germ-layer derivative map.
+
+**A4 · Sponge Canal Systems** — a real flow calculation. Water enters thousands of ostia slowly,
+**almost stops in the flagellated chambers** so the collar cells can feed, then leaves the
+osculum as a fast jet. Asconoid, syconoid and leuconoid compared at equal body size.
+
+**A5 · Cnidaria: Nematocyst and Metagenesis** — discharge kinematics anchored to the measured
+values: **18.6 m/s and about five million g**, the fastest known cellular process. Plus the
+Obelia polyp↔medusa alternation.
+
+**A6 · Water Vascular System** — starfish locomotion as genuine hydraulics. Squeeze an ampulla
+and the tube foot extends by exactly the displaced volume over its cross-section. Metachronal
+gait diagram, adhesion limits, and the force that prises open a bivalve.
+
+**A7 · Vertebrate Heart, Two Chambers to Four** — blood is coloured by its computed **oxygen
+saturation**, so mixing in a three-chambered heart is visible rather than asserted. A
+supply-versus-demand chart shows why only fully divided hearts support homeothermy — and the
+diving crocodile's pulmonary shunt is there too.
+
+**A8 · Chordate Characters and the Vertebrate Tree** — a cladogram marking where each character
+is gained, distinguishing **present for life** from **present only in the larva** — the exact
+distinction examiners test. Includes the larva-vs-adult comparison for tunicates and amphibians.
+
+**A9 · Specimen Identification Challenge** — a scored drill over every genus NCERT names, played
+on the stage. Tracks streak, accuracy and a **per-taxon breakdown**, so the second graph names
+exactly which groups to revise.
 
 ### Biology · Neural Control & Coordination
 **9 · Nerve Impulse — the Hodgkin–Huxley Action Potential**
