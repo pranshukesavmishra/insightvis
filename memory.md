@@ -344,6 +344,14 @@ These were found by direct numerical testing. Changing them will break the teach
   ground and runs the bloom pass around `drawStage`, and hands every sim a toolkit on `g`:
   `ramp`, `tween`, `label` (collision-aware), `sphere`, `shadow`, `layout`, `scaleBar`, `hit`,
   `pointer`, `quality`. A sim opts out with `ground:false` or `bloom:false` on its definition.
+- **A mechanism is data, not drawing code.** `mech.js` (`window.MECH`) takes a list of scenes —
+  each naming its atoms, bonds and the curly arrows that turn it into the next — and interpolates
+  between them, so bonds genuinely break and form, charges fade in, and fractional bond orders
+  render as delocalisation. Timing: the arrows draw over ~0.55 s as soon as a scene appears, then
+  the geometry morphs from 28% to 100% of the transition, so a scene always reads before it moves.
+  `MECH.frame(steps, i, u, arrowProgress)` → `MECH.draw(ctx, frame, {x,y,s}, opts)`, plus
+  `MECH.transport(...)` for the clickable step strip. Always pass `st.a` as the fourth argument or
+  the arrows vanish when the player is paused — which is exactly when a student wants to read them.
 - **Sim methods live in the definition object, not on the state object `S`.** A helper needed
   by `drawStage`/`drawPlot` goes at module scope. (This caused a real runtime bug — `S.intensity`
   was called but never existed on `S`.)
@@ -431,6 +439,14 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-13 (c)** — **Started on the §2.5 list, beginning with animated mechanisms.** Built
+  `mech.js`, then put it to work in four labs: the full three-step EAS mechanism (π attack →
+  arenium with δ+ on the three carbons that carry it → rearomatisation), the carbocation lab's
+  three- or four-step mechanism including the 1,2-hydride and methyl shifts and the radical chain
+  under peroxide, and curly-arrow insets on SN1/SN2 and E1/E2 — those two already animated their
+  geometry in 3D but never showed the electron flow, which is the part an exam answer has to
+  reproduce. Added `steps.mjs`, which walks every scene of a mechanism and screenshots each, so a
+  broken intermediate cannot hide behind a good-looking first frame.
 - **2026-09-13 (b)** — Client reviewed v5: the organic chemistry experiments are the right kind of
   work, at **50% of expectation**, and are to be the template going forward. Recorded as standing
   mandate §2.5, together with a prioritised list of where the missing half sits — animated

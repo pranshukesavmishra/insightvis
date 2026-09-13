@@ -15,17 +15,17 @@
      one carbon puts the charge on the other. */
   const ALKENES = {
     propene:    { name: 'Propene  CH₃–CH=CH₂',            aSub: 1, bSub: 0, aLabel: 'CH₃', bLabel: 'H',
-                  chain: ['CH₃', 'CH', 'CH₂'], shift: null },
+                  chain: ['CH₃', 'CH', 'CH₂'], shift: null, tail: 'H' },
     isobutene:  { name: '2-Methylpropene  (CH₃)₂C=CH₂',   aSub: 2, bSub: 0, aLabel: '(CH₃)₂', bLabel: 'H',
-                  chain: ['CH₃', 'C(CH₃)', 'CH₂'], shift: null },
+                  chain: ['CH₃', 'C(CH₃)', 'CH₂'], shift: null, tail: 'CH₃' },
     butene1:    { name: '1-Butene  CH₃CH₂–CH=CH₂',        aSub: 1, bSub: 0, aLabel: 'C₂H₅', bLabel: 'H',
-                  chain: ['C₂H₅', 'CH', 'CH₂'], shift: null },
+                  chain: ['C₂H₅', 'CH', 'CH₂'], shift: null, tail: 'CH₃' },
     methylbut:  { name: '3-Methyl-1-butene',              aSub: 1, bSub: 0, aLabel: 'iPr', bLabel: 'H',
-                  chain: ['iPr', 'CH', 'CH₂'], shift: { from: 2, to: 3, kind: 'hydride' } },
+                  chain: ['iPr', 'CH', 'CH₂'], shift: { from: 2, to: 3, kind: 'hydride' }, tail: 'CH₃' },
     tbutylethene:{ name: '3,3-Dimethyl-1-butene',         aSub: 1, bSub: 0, aLabel: 't-Bu', bLabel: 'H',
-                  chain: ['t-Bu', 'CH', 'CH₂'], shift: { from: 2, to: 3, kind: 'methyl' } },
+                  chain: ['t-Bu', 'CH', 'CH₂'], shift: { from: 2, to: 3, kind: 'methyl' }, tail: 'CH₃' },
     styrene:    { name: 'Styrene  C₆H₅–CH=CH₂',           aSub: 1, bSub: 0, aLabel: 'Ph', bLabel: 'H',
-                  chain: ['Ph', 'CH', 'CH₂'], shift: null, benzylic: true }
+                  chain: ['Ph', 'CH', 'CH₂'], shift: null, benzylic: true, tail: 'C₆H₅' }
   };
 
   const HX = {
@@ -45,6 +45,170 @@
     return s;
   }
 
+  /* =====================================================================
+     The mechanism, declared as scenes. The chain is drawn as a zig-zag:
+     C1 is the CH2 end of the double bond, C2 the other alkene carbon, C3
+     the carbon next door that can donate a hydride or a methyl.
+     ===================================================================== */
+  function addMech(alk, hx, radical, shift) {
+    const X = hx.x;
+    // skeleton positions, in units of the bond length
+    const P = {
+      c1: { x: -1.30, y: 0.42 }, c2: { x: -0.42, y: -0.10 },
+      c3: { x: 0.46, y: 0.42 }, r3: { x: 1.34, y: -0.10 },
+      sub: { x: -2.18, y: -0.10 }
+    };
+    const lbl = { c1: '', c2: '', c3: '', r3: alk.chain[0] === 'Ph' ? '' : '' };
+    const chainBonds = [
+      { a: 'c2', b: 'c3', order: 1 }, { a: 'c3', b: 'r3', order: 1 }
+    ];
+    const base = {
+      c1: { x: P.c1.x, y: P.c1.y, label: '' },
+      c2: { x: P.c2.x, y: P.c2.y, label: '' },
+      c3: { x: P.c3.x, y: P.c3.y, label: '' },
+      r3: { x: P.r3.x, y: P.r3.y, label: alk.tail || 'CH₃' }
+    };
+    // the group hanging off C3 that can migrate
+    const migLabel = shift && shift.kind === 'methyl' ? 'CH₃' : 'H';
+    const migFrom = { x: P.c3.x - 0.10, y: P.c3.y + 0.92 };
+    const migTo = { x: P.c2.x + 0.05, y: P.c2.y + 0.92 };
+
+    if (radical) {
+      /* peroxide: Br• adds to the terminal carbon first, so the radical —
+         and therefore the halide — end up the other way round */
+      return [
+        { name: '1 · Br• adds', caption: 'A bromine radical adds to the LESS substituted carbon',
+          sub: 'the chain is started by the peroxide, not by a proton',
+          atoms: Object.assign({}, base, {
+            Xr: { x: P.c1.x - 0.30, y: P.c1.y + 1.05, label: 'Br', colour: '#C98A4B', radical: 1, hot: 1 }
+          }),
+          bonds: chainBonds.concat([{ a: 'c1', b: 'c2', order: 2 }]),
+          arrows: [
+            { from: { atom: 'Xr' }, to: { atom: 'c1' }, bow: 0.30, half: true, colour: '#C98A4B' },
+            { from: { bond: 'c1|c2' }, to: { atom: 'c2', dx: 0.32, dy: -0.45 }, bow: 0.34, half: true,
+              label: 'one electron each' }
+          ] },
+        { name: '2 · radical', caption: 'The more substituted — and more stable — carbon radical',
+          sub: 'no carbocation anywhere, so nothing can rearrange',
+          atoms: Object.assign({}, base, {
+            c2: { x: P.c2.x, y: P.c2.y, label: '', radical: 1, hot: 1 },
+            Xr: { x: P.c1.x, y: P.c1.y + 0.92, label: 'Br', colour: '#C98A4B' },
+            Hd: { x: P.c2.x + 0.20, y: P.c2.y - 1.02, label: 'H–Br', colour: '#C9D4EA' }
+          }),
+          bonds: chainBonds.concat([{ a: 'c1', b: 'c2', order: 1 }, { a: 'c1', b: 'Xr', order: 1 }]),
+          arrows: [
+            { from: { atom: 'Hd', dy: 0.22 }, to: { atom: 'c2', dx: 0.10, dy: -0.30 }, bow: 0.34, half: true,
+              label: 'abstract H' }
+          ] },
+        { name: '3 · product', caption: 'Anti-Markovnikov: the halogen sits on the terminal carbon',
+          sub: 'the rule did not break — the order of addition did',
+          atoms: Object.assign({}, base, {
+            Xr: { x: P.c1.x, y: P.c1.y + 0.92, label: 'Br', colour: '#4ADE80' },
+            Hd: { x: P.c2.x, y: P.c2.y - 0.92, label: 'H', colour: '#C9D4EA' }
+          }),
+          bonds: chainBonds.concat([
+            { a: 'c1', b: 'c2', order: 1 }, { a: 'c1', b: 'Xr', order: 1 }, { a: 'c2', b: 'Hd', order: 1 }
+          ]),
+          arrows: [] }
+      ];
+    }
+
+    const S0 = {
+      name: '1 · protonate',
+      caption: 'The π bond attacks the proton',
+      sub: 'it adds to the carbon that leaves the MORE stable cation behind',
+      atoms: Object.assign({}, base, {
+        Hp: { x: P.c1.x - 0.18, y: P.c1.y + 1.12, label: 'H', colour: '#FF6B6B', charge: 1, hot: 1 },
+        Xm: { x: P.c1.x - 1.00, y: P.c1.y + 0.72, label: X + '⁻', colour: '#5AA9FF', charge: -1 }
+      }),
+      bonds: chainBonds.concat([{ a: 'c1', b: 'c2', order: 2 }]),
+      arrows: [
+        { from: { bond: 'c1|c2' }, to: { atom: 'Hp' }, bow: 0.30, label: '2e⁻' }
+      ]
+    };
+
+    const cationAtoms = Object.assign({}, base, {
+      c2: { x: P.c2.x, y: P.c2.y, label: '', charge: 1, hot: 1 },
+      Hp: { x: P.c1.x, y: P.c1.y + 0.92, label: 'H', colour: '#C9D4EA' },
+      Xm: { x: P.c1.x - 1.15, y: P.c1.y + 0.62, label: X + '⁻', colour: '#5AA9FF', charge: -1 }
+    });
+    const cationBonds = chainBonds.concat([
+      { a: 'c1', b: 'c2', order: 1 }, { a: 'c1', b: 'Hp', order: 1 }
+    ]);
+
+    const steps = [S0];
+
+    if (shift) {
+      steps.push({
+        name: '2 · ' + (shift.kind === 'methyl' ? 'methyl' : 'hydride') + ' shift',
+        caption: 'A ' + shift.kind + ' slides across from the neighbouring carbon',
+        sub: 'it moves WITH its bonding pair, so the charge moves the other way',
+        atoms: Object.assign({}, cationAtoms, {
+          Mg: { x: migFrom.x, y: migFrom.y, label: migLabel, colour: '#FFAE4C', hot: 1 }
+        }),
+        bonds: cationBonds.concat([{ a: 'c3', b: 'Mg', order: 1 }]),
+        arrows: [
+          { from: { bond: 'c3|Mg' }, to: { atom: 'c2', dx: 0.24, dy: 0.30 }, bow: -0.38,
+            label: '1,2-shift' }
+        ]
+      });
+      steps.push({
+        name: '3 · better cation',
+        caption: 'The charge is now on the more substituted carbon',
+        sub: 'gains ' + shift.gain.toFixed(0) + ' kJ/mol — which is why the "expected" product is the minor one',
+        atoms: Object.assign({}, cationAtoms, {
+          c2: { x: P.c2.x, y: P.c2.y, label: '' },
+          c3: { x: P.c3.x, y: P.c3.y, label: '', charge: 1, hot: 1 },
+          Mg: { x: migTo.x, y: migTo.y, label: migLabel, colour: '#4ADE80' }
+        }),
+        bonds: cationBonds.concat([{ a: 'c2', b: 'Mg', order: 1 }]),
+        arrows: [
+          { from: { atom: 'Xm' }, to: { atom: 'c3', dx: -0.18, dy: 0.34 }, bow: 0.40, colour: '#5AA9FF',
+            label: X + '⁻ attacks' }
+        ]
+      });
+      steps.push({
+        name: '4 · product',
+        caption: 'The rearranged halide',
+        sub: 'the halogen is on a carbon the double bond never touched',
+        atoms: Object.assign({}, cationAtoms, {
+          c2: { x: P.c2.x, y: P.c2.y, label: '' },
+          c3: { x: P.c3.x, y: P.c3.y, label: '' },
+          Mg: { x: migTo.x, y: migTo.y, label: migLabel, colour: '#C9D4EA' },
+          Xm: { x: P.c3.x - 0.06, y: P.c3.y + 0.92, label: X, colour: '#4ADE80', charge: 0 }
+        }),
+        bonds: cationBonds.concat([
+          { a: 'c2', b: 'Mg', order: 1 }, { a: 'c3', b: 'Xm', order: 1 }
+        ]),
+        arrows: []
+      });
+    } else {
+      steps.push({
+        name: '2 · carbocation',
+        caption: 'The carbocation, stabilised by every alkyl group next to it',
+        sub: 'planar, sp² — and open to attack from either face',
+        atoms: cationAtoms,
+        bonds: cationBonds,
+        arrows: [
+          { from: { atom: 'Xm' }, to: { atom: 'c2', dx: -0.20, dy: 0.30 }, bow: 0.30, colour: '#5AA9FF',
+            label: X + '⁻' }
+        ]
+      });
+      steps.push({
+        name: '3 · product',
+        caption: 'Markovnikov product',
+        sub: 'the halogen ends up on the more substituted carbon',
+        atoms: Object.assign({}, cationAtoms, {
+          c2: { x: P.c2.x, y: P.c2.y, label: '' },
+          Xm: { x: P.c2.x - 0.06, y: P.c2.y + 0.92, label: X, colour: '#4ADE80', charge: 0 }
+        }),
+        bonds: cationBonds.concat([{ a: 'c2', b: 'Xm', order: 1 }]),
+        arrows: []
+      });
+    }
+    return steps;
+  }
+
   L.register({
     id: 'carbocation', subject: 'chemistry',
     name: 'Carbocations — Markovnikov, Hyperconjugation and Rearrangement',
@@ -61,7 +225,8 @@
 
     params: {
       alkene: 'methylbut', hx: 'HBr', T: 298, peroxide: false,
-      allowShift: true, showHyper: true, speed: 1
+      allowShift: true, showHyper: true, speed: 1,
+      mechPlay: true, mechStep: 0, mechSpeed: 1
     },
 
     presets: [
@@ -88,7 +253,13 @@
       { group: 'Mechanism', items: [
         { key: 'allowShift', type: 'toggle', label: 'Allow hydride / methyl shifts', restructure: true },
         { key: 'showHyper', type: 'toggle', label: 'Show the hyperconjugating C–H bonds' },
-        { key: 'speed', label: 'Animation speed', min: 0.2, max: 3, step: 0.1, unit: '×', fmt: v => v.toFixed(1) }
+        { key: 'mechPlay', type: 'toggle', label: 'Play the mechanism' },
+        { key: 'mechStep', label: 'Step', min: 0, max: 3, step: 1,
+          fmt: v => 'step ' + (Math.round(v) + 1), when: S => !S.p.mechPlay,
+          onChange(S) { if (S.mech) { S.mech.i = clamp(Math.round(S.p.mechStep), 0, S.steps.length - 1); S.mech.u = 0; } } },
+        { key: 'mechSpeed', label: 'Mechanism speed', min: 0.3, max: 2.5, step: 0.1, unit: '×',
+          fmt: v => v.toFixed(1), when: S => S.p.mechPlay },
+        { key: 'speed', label: 'Kinetics speed', min: 0.2, max: 3, step: 0.1, unit: '×', fmt: v => v.toFixed(1) }
       ] }
     ],
 
@@ -150,11 +321,26 @@
       S.hist = [];
       S.t = 0; S.phase = 0;
       S.done = false;
+
+      S.steps = addMech(alk, hx, S.radical, S.shift);
+      S.mech = MECH.makeState(S.steps.length);
+      S.mech.i = clamp(Math.round(p.mechStep), 0, S.steps.length - 1);
+      S.mech.playing = !!p.mechPlay;
     },
 
     step(S, dt) {
       const p = S.p;
       S.t += dt;
+      if (S.mech) {
+        S.mech.playing = !!p.mechPlay;
+        if (S.mech.playing) {
+          MECH.advance(S.mech, dt * clamp(p.mechSpeed, 0.1, 4), { travel: 2.0, dwell: 1.15 });
+          p.mechStep = S.mech.i;
+        } else {
+          S.mech.i = clamp(Math.round(p.mechStep), 0, S.steps.length - 1);
+          S.mech.u = 0;
+        }
+      }
       const h = Math.min(dt, 0.05) * 0.55 * clamp(p.speed, 0.1, 4);
       const C = S.C;
 
@@ -218,140 +404,84 @@
       const ground = th['ink-950'];
       const alk = S.alk, hx = S.hx;
 
-      /* ---------------- the mechanism strip ---------------- */
-      const cell = g.layout(3, 1, 22);
-      const y0 = H * 0.33;
-      const bw = Math.min(cell(0, 0).w - 18, 210);
-      const xs = [0, 1, 2].map(i => cell(i, 0).cx);
-      const phase = (S.t * 0.55) % 3;
-
-      const stageBox = (x, title, sub, on) => {
-        ctx.strokeStyle = on ? g.alpha(th.chem, .9) : g.alpha(th['line-soft'], 1);
-        ctx.lineWidth = on ? 1.8 : 1;
-        const bx = x - bw / 2, by = y0 - H * 0.20;
-        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, H * 0.44, 10); }
-        else { ctx.beginPath(); ctx.rect(bx, by, bw, H * 0.44); }
-        ctx.fillStyle = on ? g.alpha(th.chem, .05) : g.alpha(th['ink-900'], .5);
-        ctx.fill(); ctx.stroke();
-        ctx.font = '600 10px "IBM Plex Mono",monospace';
-        ctx.fillStyle = on ? th.chem : th['text-3'];
-        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-        ctx.fillText(title, x, by + 9);
-        if (sub) {
-          ctx.font = '500 9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-          ctx.fillText(sub, x, by + 23);
-        }
-      };
-
-      /* --- step 1: the alkene and the proton --- */
-      stageBox(xs[0], S.radical ? '1 · Br• adds first' : '1 · protonation', hx.name + ' attacks the π bond',
-        phase < 1);
-      const a1 = [xs[0] - 26, y0 + 10], b1 = [xs[0] + 26, y0 + 10];
-      O.bond(ctx, a1[0], a1[1], b1[0], b1[1], { order: 2, colour: th['text-2'], width: 2.6 });
-      // the substituted end
-      O.bond(ctx, a1[0], a1[1], a1[0] - 30, a1[1] - 20, { colour: th['text-2'], width: 2.2, trim1: 16 });
-      O.atom(ctx, a1[0] - 34, a1[1] - 23, alk.chain[0], { size: 12, ground: ground });
-      O.bond(ctx, a1[0], a1[1], a1[0] - 24, a1[1] + 22, { colour: th['text-2'], width: 2.2, trim1: 9 });
-      O.atom(ctx, a1[0] - 27, a1[1] + 25, 'H', { size: 11, ground: ground });
-      // the CH2 end, where the proton lands
-      [[-20, 26], [22, 22]].forEach(([ox, oy]) => {
-        O.bond(ctx, b1[0], b1[1], b1[0] - ox + 30, b1[1] - oy, { colour: th['text-2'], width: 2.2, trim1: 9 });
-        O.atom(ctx, b1[0] - ox + 30, b1[1] - oy, 'H', { size: 11, ground: ground });
+      /* ---------------- the mechanism, animated ---------------- */
+      const mx = W * 0.37, my = H * 0.33;
+      const ms = Math.min(W * 0.098, H * 0.125);
+      const fr = MECH.frame(S.steps, S.mech.i, S.mech.u, S.mech.a);
+      MECH.draw(ctx, fr, { x: mx, y: my, s: ms }, {
+        ground: ground, colour: g.alpha(th['text-2'], .95),
+        arrow: th.chem, forming: '#4ADE80', breaking: '#FB7185', delocal: '#8FA4CE', width: 2.5
       });
-      ctx.font = '500 9px "IBM Plex Mono",monospace';
-      ctx.fillStyle = g.alpha(th['text-3'], .95); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.fillText('π electrons attack H⁺', (a1[0] + b1[0]) / 2, y0 + 54);
-      // the curly arrow from the π bond to the proton
-      if (phase < 1) {
-        const prog = clamp(phase * 1.6, 0, 1);
-        const hx2 = b1[0] + 30, hy2 = y0 + 74;
-        O.atom(ctx, hx2, hy2, S.radical ? 'Br•' : 'H⁺', {
-          size: 12, ground: ground, colour: S.radical ? '#C98A4B' : '#FF6B6B'
-        });
-        O.curlyArrow(ctx, (a1[0] + b1[0]) / 2, y0 - 2, hx2, hy2 - 12,
-          { colour: th.chem, bow: -0.34, progress: prog, half: S.radical });
-      }
 
-      /* --- step 2: the cation (or radical) --- */
-      const stable = S.stabMark >= S.stabAnti;
-      stageBox(xs[1], S.radical ? '2 · carbon radical' : '2 · carbocation',
-        S.radical ? 'the more stable radical' :
-        (S.shift ? 'then it rearranges' : ['methyl', '1°', '2°', '3°'][clamp(alk.aSub + 1, 0, 3)] +
-          (alk.benzylic ? ' benzylic' : '')), phase >= 1 && phase < 2);
+      ctx.font = '600 12.5px "IBM Plex Mono",monospace';
+      ctx.fillStyle = th.chem; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(fr.caption, mx, 62);
+      ctx.font = '500 9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+      ctx.fillText(fr.sub, mx, 79);
 
-      const cx2 = xs[1], cy2 = y0 + 14;
-      // the cationic carbon, with its empty p orbital
-      O.pOrbital(ctx, cx2, cy2, 26, S.radical ? 0.45 : 0.9,
-        { pos: S.radical ? '#C98A4B' : '#FF6B6B', neg: S.radical ? '#8C6A3B' : '#FB7185' });
-      O.atom(ctx, cx2, cy2, 'C', { size: 14, ground: ground, charge: S.radical ? 0 : 1 });
-      if (S.radical) {
-        ctx.fillStyle = '#C98A4B';
-        ctx.beginPath(); ctx.arc(cx2 + 13, cy2 - 12, 2.6, 0, TAU); ctx.fill();
-      }
-      // hyperconjugating C–H bonds, drawn overlapping the empty p orbital
+      S.transport = MECH.transport(ctx, mx - ms * 2.4, mx + ms * 2.4, H * 0.60,
+        S.steps, S.mech, th, g.alpha);
+      S.transport.forEach(q => g.hit(q.x, q.y, 12, 'step' + q.i));
+
+      /* the empty p orbital and its hyperconjugating neighbours, shown on
+         whichever carbon currently carries the charge */
       if (p.showHyper && !S.radical) {
-        const n = clamp(S.hyperMark, 0, 9);
-        const wob = 0.5 + 0.5 * Math.sin(S.t * 3);
-        for (let i = 0; i < Math.min(n, 6); i++) {
-          const a = Math.PI * 0.62 + (i / Math.max(1, Math.min(n, 6) - 1)) * Math.PI * 0.76;
-          const hxp = cx2 + Math.cos(a) * 42, hyp = cy2 + Math.sin(a) * 30;
-          O.bond(ctx, cx2, cy2, hxp, hyp, { colour: g.alpha(th['text-2'], .75), width: 1.8, trim0: 12, trim1: 7 });
-          O.atom(ctx, hxp, hyp, 'H', { size: 9.5, ground: ground });
-          // the overlap lobe that IS hyperconjugation
-          ctx.strokeStyle = g.alpha('#4ADE80', .18 + .4 * wob);
-          ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]);
-          ctx.beginPath();
-          ctx.moveTo(cx2 + Math.cos(a) * 20, cy2 + Math.sin(a) * 15);
-          ctx.quadraticCurveTo(cx2 + Math.cos(a) * 14, cy2 - 22, cx2, cy2 - 24);
-          ctx.stroke(); ctx.setLineDash([]);
+        const hot = Object.keys(fr.atoms).find(k2 => (fr.atoms[k2].charge || 0) > 0.8 && !fr.atoms[k2].label);
+        if (hot) {
+          const a2 = fr.atoms[hot];
+          const hxp = mx + a2.x * ms, hyp = my + a2.y * ms;
+          O.pOrbital(ctx, hxp, hyp, ms * 0.62, 0.85, { pos: '#FF6B6B', neg: '#FB7185' });
+          const nH = hot === 'c3' ? S.hyperMark + 3 : S.hyperMark;
+          const wob = 0.5 + 0.5 * Math.sin(S.t * 3);
+          for (let i = 0; i < Math.min(nH, 6); i++) {
+            const a3 = Math.PI * 0.66 + (i / Math.max(1, Math.min(nH, 6) - 1)) * Math.PI * 0.68;
+            ctx.strokeStyle = g.alpha('#4ADE80', .16 + .38 * wob);
+            ctx.lineWidth = 1.3; ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(hxp + Math.cos(a3) * ms * 0.42, hyp + Math.sin(a3) * ms * 0.34);
+            ctx.quadraticCurveTo(hxp + Math.cos(a3) * ms * 0.22, hyp - ms * 0.46, hxp, hyp - ms * 0.50);
+            ctx.stroke(); ctx.setLineDash([]);
+          }
+          g.label(hxp, hyp - ms * 0.78, nH + ' α C–H hyperconjugating',
+            { size: 9, colour: th.ok });
         }
-        ctx.font = '500 9px "IBM Plex Mono",monospace';
-        ctx.fillStyle = th.ok; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-        ctx.fillText(S.hyperMark + ' α C–H bonds hyperconjugating', cx2, cy2 + 46);
       }
 
-      /* --- step 3: the product(s) --- */
-      stageBox(xs[2], '3 · product', S.shift ? 'two products compete' : 'halide captures the cation',
-        phase >= 2);
-      const px = xs[2], py = y0 + 6;
+      /* ---------------- product yields ---------------- */
+      const px = W * 0.755, py = H * 0.20;
       const yv = S.yield || { mark: 0, shift: 0, anti: 0 };
       const bars = S.radical
         ? [['anti-Markovnikov', g.tween('ya', yv.anti, 0.2), '#5AA9FF']]
         : [['Markovnikov', g.tween('ym', yv.mark, 0.2), '#4ADE80'],
            ['rearranged', g.tween('ys', yv.shift, 0.2), '#FFAE4C'],
            ['anti-Markovnikov', g.tween('ya', yv.anti, 0.2), '#5AA9FF']];
+      ctx.font = '500 9.5px "IBM Plex Mono",monospace';
+      ctx.fillStyle = th['text-2']; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.fillText('product distribution', px, py - 26);
+      const pw = W - 24 - px;
       bars.forEach(([nm, v, col], i) => {
-        const by = py - 18 + i * 34;
-        ctx.font = '500 9px "IBM Plex Mono",monospace';
+        const by = py + i * 40;
+        ctx.font = '500 9.5px "IBM Plex Mono",monospace';
         ctx.fillStyle = th['text-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-        ctx.fillText(nm, px - bw / 2 + 14, by - 3);
-        const w = bw - 28;
+        ctx.fillText(nm, px, by - 4);
+        ctx.font = '600 11px "IBM Plex Mono",monospace';
+        ctx.fillStyle = col; ctx.textAlign = 'right';
+        ctx.fillText(v.toFixed(1) + '%', px + pw, by - 4);
+        ctx.textAlign = 'left';
         ctx.fillStyle = g.alpha(th['ink-700'], 1);
-        ctx.fillRect(px - bw / 2 + 14, by, w, 9);
-        const grd = ctx.createLinearGradient(px - bw / 2 + 14, 0, px - bw / 2 + 14 + w, 0);
-        grd.addColorStop(0, g.alpha(col, .5)); grd.addColorStop(1, g.alpha(col, .95));
+        ctx.fillRect(px, by, pw, 12);
+        const grd = ctx.createLinearGradient(px, 0, px + pw, 0);
+        grd.addColorStop(0, g.alpha(col, .45)); grd.addColorStop(1, g.alpha(col, .95));
         ctx.fillStyle = grd;
-        ctx.fillRect(px - bw / 2 + 14, by, w * clamp(v / 100, 0, 1), 9);
-        ctx.font = '600 10px "IBM Plex Mono",monospace';
-        ctx.fillStyle = col; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-        ctx.fillText(v.toFixed(1) + '%', px + bw / 2 - 14, by + 4.5);
+        ctx.fillRect(px, by, pw * clamp(v / 100, 0, 1), 12);
       });
-
-      // arrows between the boxes
-      [0, 1].forEach(i => {
-        const x0 = xs[i] + bw / 2 + 4, x1 = xs[i + 1] - bw / 2 - 4;
-        const on = phase >= i && phase < i + 1;
-        ctx.strokeStyle = on ? th.chem : g.alpha(th['text-3'], .5);
-        ctx.lineWidth = on ? 2.2 : 1.4;
-        ctx.beginPath(); ctx.moveTo(x0, y0 + 14); ctx.lineTo(x1 - 8, y0 + 14); ctx.stroke();
-        ctx.fillStyle = on ? th.chem : g.alpha(th['text-3'], .5);
-        ctx.beginPath();
-        ctx.moveTo(x1, y0 + 14); ctx.lineTo(x1 - 9, y0 + 9.5); ctx.lineTo(x1 - 9, y0 + 18.5);
-        ctx.closePath(); ctx.fill();
-      });
+      ctx.font = '500 9px "IBM Plex Mono",monospace';
+      ctx.fillStyle = th['text-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('integrated from the competing', px, py + bars.length * 40 + 4);
+      ctx.fillText('rate constants', px, py + bars.length * 40 + 16);
 
       /* ---------------- the energy profile ---------------- */
-      const ex0 = 34, ex1 = W - 30, ey0 = H * 0.945, ey1 = H * 0.68;
+      const ex0 = 34, ex1 = W - 30, ey0 = H * 0.955, ey1 = H * 0.70;
       const pts = [
         { x: 0.00, e: 0, label: 'alkene + H' + hx.x },
         { x: 0.22, e: S.EaMark, label: '‡' },
@@ -403,6 +533,12 @@
         ctx.fillStyle = th.warn; ctx.font = '600 10px "IBM Plex Mono",monospace';
         ctx.fillText('the peroxide effect works for HBr only', 14, 48);
       }
+    },
+
+    onPointer(S, x, y, down) {
+      if (!down || !S.transport) return;
+      const hit = S.transport.find(q => Math.hypot(x - q.x, y - q.y) < 14);
+      if (hit) { S.p.mechPlay = false; S.p.mechStep = hit.i; S.mech.i = hit.i; S.mech.u = 0; }
     },
 
     plots: [

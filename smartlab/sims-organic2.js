@@ -48,6 +48,104 @@
   ];
   const elecById = id => ELECS.find(e => e.id === id) || ELECS[0];
 
+  /* =====================================================================
+     The mechanism, declared as scenes. Ring carbons are numbered from the
+     substituted one; `k` is the carbon the electrophile attacks.
+     ===================================================================== */
+  function ringPos(i) {
+    const a = -Math.PI / 2 + i / 6 * TAU;
+    return { x: Math.cos(a), y: Math.sin(a) };
+  }
+  function easMech(subLabel, eLabel, k, canDonate, lone) {
+    const C = {};
+    for (let i = 0; i < 6; i++) { const q = ringPos(i); C['c' + i] = { x: q.x, y: q.y, label: '' }; }
+    const out = (i, f) => { const q = ringPos(i); return { x: q.x * f, y: q.y * f }; };
+
+    const aromaticBonds = [];
+    for (let i = 0; i < 6; i++)
+      aromaticBonds.push({ a: 'c' + i, b: 'c' + ((i + 1) % 6), order: i % 2 === 0 ? 2 : 1, toward: [0, 0] });
+
+    // the pentadienyl cation: the five carbons that are not sp3 share the
+    // charge, so every bond between them is drawn at order 1.5
+    const areniumBonds = [];
+    for (let i = 0; i < 6; i++) {
+      const a = i, b = (i + 1) % 6;
+      const touchesSp3 = (a === k || b === k);
+      areniumBonds.push({ a: 'c' + a, b: 'c' + b, order: touchesSp3 ? 1 : 1.5, toward: [0, 0] });
+    }
+
+    const subAt = out(0, 1.85);
+    const eOut = out(k, 2.55), eOn = out(k, 1.72);
+    const hPerp = (() => {
+      const q = ringPos(k);
+      return { x: q.x * 1.55 - q.y * 0.72, y: q.y * 1.55 + q.x * 0.72 };
+    })();
+    const baseFar = { x: hPerp.x * 1.85, y: hPerp.y * 1.85 };
+
+    const sub = extra => Object.assign({
+      x: subAt.x, y: subAt.y, label: subLabel, colour: '#FFAE4C', lone: lone ? [-Math.PI / 2] : null
+    }, extra || {});
+
+    const S0 = {
+      name: '1 · attack',
+      caption: 'The π cloud attacks the electrophile',
+      sub: 'the ring gives up its aromaticity — the slow, rate-determining step',
+      atoms: Object.assign({}, C, {
+        sub: sub(),
+        E: { x: eOut.x, y: eOut.y, label: eLabel, colour: '#FF6B6B', charge: 1, hot: 1 }
+      }),
+      bonds: aromaticBonds.concat([{ a: 'c0', b: 'sub', order: 1 }]),
+      arrows: [
+        { from: { bond: 'c' + k + '|c' + ((k + 1) % 6) }, to: { atom: 'E' }, bow: 0.30,
+          label: '2e⁻' }
+      ]
+    };
+
+    const S1 = {
+      name: '2 · arenium',
+      caption: 'The arenium (Wheland) ion',
+      sub: 'four π electrons over five carbons — the charge is shared, and δ+ marks where',
+      atoms: Object.assign({}, C, {
+        sub: sub({ charge: canDonate ? 0.4 : 0 }),
+        E: { x: eOn.x, y: eOn.y, label: eLabel, colour: '#FF6B6B', hot: 0.6 },
+        H: { x: hPerp.x, y: hPerp.y, label: 'H', colour: '#C9D4EA' },
+        B: { x: baseFar.x, y: baseFar.y, label: 'B⁻', colour: '#5AA9FF', charge: -1, alpha: 1 }
+      }),
+      bonds: areniumBonds.concat([
+        { a: 'c0', b: 'sub', order: canDonate ? 1.5 : 1 },
+        { a: 'c' + k, b: 'E', order: 1, style: 'wedge' },
+        { a: 'c' + k, b: 'H', order: 1, style: 'dash' }
+      ]),
+      arrows: [
+        { from: { bond: 'c' + k + '|H' }, to: { bond: 'c' + k + '|c' + ((k + 5) % 6) }, bow: -0.40,
+          label: 'rearomatise' },
+        { from: { atom: 'B' }, to: { atom: 'H', dx: 0.10, dy: 0.10 }, bow: 0.34, colour: '#5AA9FF' }
+      ]
+    };
+    // partial charges on the three carbons that actually carry them
+    [(k + 1) % 6, (k + 3) % 6, (k + 5) % 6].forEach(i => {
+      S1.atoms['c' + i] = Object.assign({}, C['c' + i], { charge: 0.33, hot: 0.5 });
+    });
+
+    const S2 = {
+      name: '3 · product',
+      caption: 'Aromaticity restored',
+      sub: 'the base removes the proton — fast, and never rate-determining',
+      atoms: Object.assign({}, C, {
+        sub: sub(),
+        E: { x: eOn.x, y: eOn.y, label: eLabel, colour: '#4ADE80' },
+        H: { x: baseFar.x * 1.15, y: baseFar.y * 1.15, label: 'H–B', colour: '#5AA9FF' }
+      }),
+      bonds: aromaticBonds.concat([
+        { a: 'c0', b: 'sub', order: 1 },
+        { a: 'c' + k, b: 'E', order: 1 }
+      ]),
+      arrows: []
+    };
+    return [S0, S1, S2];
+  }
+
+
   L.register({
     id: 'eas', subject: 'chemistry',
     name: 'Electrophilic Aromatic Substitution — Directing Effects from First Principles',
@@ -64,7 +162,7 @@
 
     params: {
       sub: 'OMe', elec: 'NO2', T: 298, attack: 4, steric: true,
-      showArenium: true, showRes: 0, autoRes: true
+      showArenium: true, mechPlay: true, mechStep: 0, mechSpeed: 1
     },
 
     presets: [
@@ -93,10 +191,14 @@
       { group: 'Mechanism', items: [
         { key: 'attack', type: 'select', label: 'Position attacked', restructure: true, options: [
           { value: 2, label: 'ortho (C-2)' }, { value: 3, label: 'meta (C-3)' }, { value: 4, label: 'para (C-4)' }] },
-        { key: 'showArenium', type: 'toggle', label: 'Draw the arenium (Wheland) intermediate' },
-        { key: 'autoRes', type: 'toggle', label: 'Cycle through the resonance contributors' },
-        { key: 'showRes', label: 'Resonance contributor', min: 0, max: 2, step: 1,
-          fmt: v => ['I', 'II', 'III'][Math.round(v)] || 'I', when: S => !S.p.autoRes }
+        { key: 'showArenium', type: 'toggle', label: 'Run the mechanism animation' },
+        { key: 'mechPlay', type: 'toggle', label: 'Play', when: S => S.p.showArenium },
+        { key: 'mechStep', label: 'Step', min: 0, max: 2, step: 1,
+          fmt: v => ['1 · attack', '2 · arenium', '3 · product'][Math.round(v)] || '1',
+          when: S => S.p.showArenium && !S.p.mechPlay,
+          onChange(S) { if (S.mech) { S.mech.i = Math.round(S.p.mechStep); S.mech.u = 0; } } },
+        { key: 'mechSpeed', label: 'Animation speed', min: 0.3, max: 2.5, step: 0.1, unit: '×',
+          fmt: v => v.toFixed(1), when: S => S.p.showArenium && S.p.mechPlay }
       ] }
     ],
 
@@ -139,16 +241,34 @@
       S.major = S.dist.p >= S.dist.o && S.dist.p >= S.dist.m ? 'para'
               : S.dist.o >= S.dist.m ? 'ortho' : 'meta';
       S.directs = (S.dist.o + S.dist.p) > S.dist.m ? 'ortho / para' : 'meta';
-      S.t = 0; S.res = 0;
+      S.t = 0;
+      const kIdx = p.attack === 2 ? 1 : p.attack === 3 ? 2 : 3;
+      S.steps = easMech(sub.label, el.prod, kIdx, !!sub.lone && p.attack !== 3, !!sub.lone);
+      S.mech = MECH.makeState(S.steps.length);
+      S.mech.i = clamp(Math.round(p.mechStep), 0, S.steps.length - 1);
+      S.mech.playing = !!p.mechPlay;
     },
 
     step(S, dt) {
       S.t += dt;
-      S.res = S.p.autoRes ? Math.floor(S.t * 0.55) % 3 : clamp(Math.round(S.p.showRes), 0, 2);
+      if (!S.mech) return;
+      S.mech.playing = !!S.p.mechPlay;
+      if (S.mech.playing) {
+        MECH.advance(S.mech, dt * clamp(S.p.mechSpeed, 0.1, 4), { travel: 2.2, dwell: 1.2 });
+        S.p.mechStep = S.mech.i;
+      } else {
+        S.mech.i = clamp(Math.round(S.p.mechStep), 0, S.steps.length - 1);
+        S.mech.u = 0;
+      }
     },
 
     onPointer(S, x, y, down) {
-      if (!down || !S.ringPts) return;
+      if (!down) return;
+      if (S.transport) {
+        const hit = S.transport.find(q => Math.hypot(x - q.x, y - q.y) < 14);
+        if (hit) { S.p.mechPlay = false; S.p.mechStep = hit.i; S.mech.i = hit.i; S.mech.u = 0; return; }
+      }
+      if (!S.ringPts) return;
       let best = -1, bd = 1e9;
       S.ringPts.forEach((q, i) => {
         const d = Math.hypot(x - q[0], y - q[1]);
@@ -220,96 +340,42 @@
       ctx.fillText('partial rate factors', cx, cy + r * 2.15);
       ctx.fillText('(per position, vs one C–H of benzene)', cx, cy + r * 2.15 + 13);
 
-      /* ---------------- the arenium ion, with resonance ---------------- */
-      if (p.showArenium) {
-        const ax = W * 0.55, ay = H * 0.46;
-        const ar = Math.min(W * 0.088, H * 0.185);
-        const which = S.res;
+      /* ---------------- the mechanism, animated ---------------- */
+      if (p.showArenium && S.steps) {
+        const mx = W * 0.53, my = H * 0.40;
+        const ms = Math.min(W * 0.082, H * 0.145);
+        const fr = MECH.frame(S.steps, S.mech.i, S.mech.u, S.mech.a);
 
-        // ring skeleton: sp3 centre where the electrophile added
-        const idx = p.attack === 2 ? 1 : p.attack === 3 ? 2 : 3;
-        const ap = [];
-        for (let i = 0; i < 6; i++) {
-          const a = -Math.PI / 2 + i / 6 * TAU;
-          ap.push([ax + Math.cos(a) * ar, ay + Math.sin(a) * ar]);
-        }
-        // the positive charge sits on positions 1, 3 and 5 relative to the
-        // sp3 carbon — one contributor each
-        const chargeOn = [(idx + 1) % 6, (idx + 3) % 6, (idx + 5) % 6][which];
-        // the delocalised pentadienyl cation: two double bonds, skipping sp3
-        const dbl = [];
-        for (let k = 0; k < 6; k++) {
-          const a = (idx + 1 + k) % 6, b = (idx + 2 + k) % 6;
-          if (a === idx || b === idx) continue;
-          if (a === chargeOn || b === chargeOn) continue;
-          if (dbl.some(d => d.includes(a) || d.includes(b))) continue;
-          dbl.push([a, b]);
-        }
-        for (let i = 0; i < 6; i++) {
-          const a = i, b = (i + 1) % 6;
-          const isDbl = dbl.some(d => (d[0] === a && d[1] === b) || (d[0] === b && d[1] === a));
-          O.bond(ctx, ap[a][0], ap[a][1], ap[b][0], ap[b][1], {
-            order: isDbl ? 2 : 1, colour: g.alpha(th['text-2'], .92), width: 2.2, toward: [ax, ay]
-          });
-        }
-        // the sp3 carbon: H and E both attached, drawn as wedge and dash
-        const sp3 = ap[idx];
-        const out = [ax + (sp3[0] - ax) * 1.62, ay + (sp3[1] - ay) * 1.62];
-        const side = [ax + (sp3[0] - ax) * 1.30 - (sp3[1] - ay) * 0.55,
-                      ay + (sp3[1] - ay) * 1.30 + (sp3[0] - ax) * 0.55];
-        O.bond(ctx, sp3[0], sp3[1], out[0], out[1], { colour: th.chem, width: 2.4, style: 'wedge', trim1: 11 });
-        O.atom(ctx, out[0], out[1], el.prod, { size: 12, ground: ground, colour: th.chem });
-        O.bond(ctx, sp3[0], sp3[1], side[0], side[1], { colour: g.alpha(th['text-2'], .9), width: 2, style: 'dash', trim1: 9 });
-        O.atom(ctx, side[0], side[1], 'H', { size: 11, ground: ground });
-        ctx.font = '600 8px "IBM Plex Mono",monospace';
-        ctx.fillStyle = th['text-3']; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('sp³', sp3[0] + (sp3[0] - ax) * 0.30, sp3[1] + (sp3[1] - ay) * 0.30);
+        MECH.draw(ctx, fr, { x: mx, y: my, s: ms }, {
+          ground: ground, colour: g.alpha(th['text-2'], .95),
+          arrow: th.chem, forming: '#4ADE80', breaking: '#FB7185', delocal: '#8FA4CE',
+          width: 2.5
+        });
 
-        // the positive charge, with a glow so it is unmissable
-        const cq = ap[chargeOn];
-        ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        const rg2 = ctx.createRadialGradient(cq[0], cq[1], 0, cq[0], cq[1], ar * 0.55);
-        rg2.addColorStop(0, 'rgba(255,107,107,.55)'); rg2.addColorStop(1, 'rgba(255,107,107,0)');
-        ctx.fillStyle = rg2; ctx.beginPath(); ctx.arc(cq[0], cq[1], ar * 0.55, 0, TAU); ctx.fill();
-        ctx.restore();
-        O.atom(ctx, cq[0], cq[1], '', { knockout: false });
-        ctx.fillStyle = '#FF6B6B'; ctx.font = '700 15px "IBM Plex Sans",sans-serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('+', cq[0], cq[1]);
-
-        // when the substituent can donate into that carbon, show the
-        // fourth contributor — this is the whole of the o/p directing story
-        const canDonate = sub.lone && (chargeOn === 0);
-        if (canDonate) {
-          const q0 = ap[0];
-          const ex = ax + (q0[0] - ax) * 1.66, ey = ay + (q0[1] - ay) * 1.66;
-          O.bond(ctx, q0[0], q0[1], ex, ey, { order: 2, colour: '#4ADE80', width: 2.2, trim1: 13 });
-          O.atom(ctx, ex, ey, sub.label, { size: 12, ground: ground, colour: '#4ADE80', charge: 1 });
-          ctx.font = '600 9.5px "IBM Plex Mono",monospace';
-          ctx.fillStyle = th.ok; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-          ctx.fillText('the lone pair closes onto the charge — every octet full', ax, ay + ar * 2.5);
-        } else if (sub.id !== 'H') {
-          const q0 = ap[0];
-          const ex = ax + (q0[0] - ax) * 1.62, ey = ay + (q0[1] - ay) * 1.62;
-          O.bond(ctx, q0[0], q0[1], ex, ey, { colour: g.alpha(th['text-2'], .8), width: 2, trim1: 12 });
-          O.atom(ctx, ex, ey, sub.label, { size: 12, ground: ground });
-          if (chargeOn === 0 && sub.sp > 0.3) {
-            ctx.font = '600 9.5px "IBM Plex Mono",monospace';
-            ctx.fillStyle = th.crit; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-            ctx.fillText('charge sits next to an electron-poor group — very destabilising', ax, ay + ar * 2.5);
-          }
-        }
-
-        ctx.font = '600 11px "IBM Plex Mono",monospace';
+        // caption block above the figure
+        ctx.font = '600 12px "IBM Plex Mono",monospace';
         ctx.fillStyle = th.chem; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-        ctx.fillText('arenium ion — contributor ' + ['I', 'II', 'III'][which], ax, H * 0.09);
+        ctx.fillText(fr.caption, mx, H * 0.075);
         ctx.font = '500 9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-        ctx.fillText(p.attack === 2 ? 'attack at ortho' : p.attack === 3 ? 'attack at meta' : 'attack at para',
-          ax, H * 0.09 + 15);
-        // the three contributors, marked so the cycle is legible
-        for (let q = 0; q < 3; q++) {
-          ctx.fillStyle = q === which ? th.chem : g.alpha(th['text-3'], .5);
-          ctx.beginPath(); ctx.arc(ax - 14 + q * 14, H * 0.09 + 32, q === which ? 4 : 2.6, 0, TAU); ctx.fill();
+        ctx.fillText(fr.sub, mx, H * 0.075 + 17);
+
+        // the step transport, which is also clickable
+        const tx0 = mx - ms * 2.0, tx1 = mx + ms * 2.0;
+        S.transport = MECH.transport(ctx, tx0, tx1, H * 0.80, S.steps, S.mech, th, g.alpha);
+        S.transport.forEach(q => g.hit(q.x, q.y, 12, 'step' + q.i));
+
+        // the one thing the mechanism cannot show on its own: whether the
+        // donor can reach the charge from where the electrophile landed
+        if (S.mech.i === 1) {
+          const can = !!sub.lone && p.attack !== 3;
+          ctx.font = '600 10px "IBM Plex Sans",sans-serif';
+          ctx.fillStyle = can ? th.ok : th.crit;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+          ctx.fillText(can
+            ? 'the charge reaches the carbon bearing ' + sub.label + ' — its lone pair can quench it'
+            : (sub.lone ? 'meta attack keeps the charge away from ' + sub.label
+                        : 'no lone pair on ' + sub.label + ' to donate'),
+            mx, H * 0.705);
         }
       }
 

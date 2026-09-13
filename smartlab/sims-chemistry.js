@@ -351,6 +351,77 @@
     return nodes[nodes.length - 1][1];
   }
 
+  /* =====================================================================
+     Electron-flow inset. The 3D stage shows the geometry moving; this
+     shows WHY it moves — the curly arrows, which is the part an exam
+     answer has to reproduce.
+     ===================================================================== */
+  function snMech(isSN2, nuLabel, lgLabel) {
+    const C = { x: 0, y: 0 }, LG = { x: 1.15, y: 0 }, NU = { x: -1.45, y: 0 };
+    const r1 = { x: -0.42, y: -0.98 }, r2 = { x: -0.42, y: 0.98 }, r3 = { x: 0.30, y: 0 };
+    const skel = {
+      c: { x: C.x, y: C.y, label: 'C' },
+      r1: { x: r1.x, y: r1.y, label: 'R' },
+      r2: { x: r2.x, y: r2.y, label: 'R' }
+    };
+    const skelBonds = [{ a: 'c', b: 'r1', order: 1 }, { a: 'c', b: 'r2', order: 1 }];
+
+    if (isSN2) {
+      return [
+        { name: 'TS', caption: 'One step, two arrows, at the same time',
+          sub: 'the nucleophile attacks from directly behind the leaving group',
+          atoms: Object.assign({}, skel, {
+            lg: { x: LG.x, y: LG.y, label: lgLabel, colour: '#FFAE4C', hot: 1 },
+            nu: { x: NU.x, y: NU.y, label: nuLabel, colour: '#4ADE80', charge: -1, hot: 1,
+                  lone: [0] }
+          }),
+          bonds: skelBonds.concat([{ a: 'c', b: 'lg', order: 1 }]),
+          arrows: [
+            { from: { atom: 'nu', dx: 0.34 }, to: { atom: 'c', dx: -0.34 }, bow: 0.34, colour: '#4ADE80' },
+            { from: { bond: 'c|lg' }, to: { atom: 'lg', dx: 0.30 }, bow: 0.34, colour: '#FFAE4C' }
+          ] },
+        { name: 'product', caption: 'Inversion of configuration',
+          sub: 'the three groups have flipped through — Walden inversion',
+          atoms: Object.assign({}, skel, {
+            r1: { x: -r1.x * 0.6 + 0.18, y: r1.y, label: 'R' },
+            r2: { x: -r2.x * 0.6 + 0.18, y: r2.y, label: 'R' },
+            lg: { x: LG.x + 0.85, y: LG.y, label: lgLabel + '⁻', colour: '#8FA4CE', charge: -1 },
+            nu: { x: -0.95, y: 0, label: nuLabel, colour: '#4ADE80' }
+          }),
+          bonds: skelBonds.concat([{ a: 'c', b: 'nu', order: 1 }]),
+          arrows: [] }
+      ];
+    }
+    return [
+      { name: 'ionise', caption: 'Step 1 — the leaving group goes on its own',
+        sub: 'slow, and the only step in the rate law',
+        atoms: Object.assign({}, skel, {
+          lg: { x: LG.x, y: LG.y, label: lgLabel, colour: '#FFAE4C', hot: 1 },
+          r3: { x: r3.x, y: r3.y, label: '' }
+        }),
+        bonds: skelBonds.concat([{ a: 'c', b: 'lg', order: 1 }]),
+        arrows: [{ from: { bond: 'c|lg' }, to: { atom: 'lg', dx: 0.32 }, bow: 0.36, colour: '#FFAE4C' }] },
+      { name: 'cation', caption: 'Step 2 — a planar carbocation',
+        sub: 'sp², and the nucleophile can reach either face',
+        atoms: Object.assign({}, skel, {
+          c: { x: C.x, y: C.y, label: 'C', charge: 1, hot: 1 },
+          lg: { x: LG.x + 0.95, y: LG.y, label: lgLabel + '⁻', colour: '#8FA4CE', charge: -1 },
+          nu: { x: NU.x, y: -0.30, label: nuLabel, colour: '#4ADE80', charge: -1, lone: [0] }
+        }),
+        bonds: skelBonds,
+        arrows: [{ from: { atom: 'nu', dx: 0.34 }, to: { atom: 'c', dx: -0.32, dy: -0.10 },
+                   bow: 0.34, colour: '#4ADE80' }] },
+      { name: 'racemic', caption: 'Attack from both faces',
+        sub: 'so the product is racemised, not inverted',
+        atoms: Object.assign({}, skel, {
+          lg: { x: LG.x + 1.15, y: LG.y, label: lgLabel + '⁻', colour: '#8FA4CE', charge: -1 },
+          nu: { x: -0.95, y: 0, label: nuLabel, colour: '#4ADE80' }
+        }),
+        bonds: skelBonds.concat([{ a: 'c', b: 'nu', order: 1 }]),
+        arrows: [] }
+    ];
+  }
+
   L.register({
     id: 'substitution', subject: 'chemistry',
     name: 'SN1 vs SN2 — Mechanism, Stereochemistry and Rate Law',
@@ -364,7 +435,8 @@
       '(<b>backside attack and Walden inversion</b> for SN2, a <b>planar carbocation</b> for SN1), computes both ' +
       'activation barriers from the conditions you set, and tallies the product stereochemistry as it forms.',
 
-    params: { sub: 2, mech: 'auto', nu: 1, solvent: 'protic', conc: 0.5, T: 298, labels: true },
+    params: { sub: 2, mech: 'auto', nu: 1, solvent: 'protic', conc: 0.5, T: 298, labels: true,
+              arrows: true },
 
     presets: [
       { name: 'CH₃Br + strong Nu (textbook SN2)', params: { sub: 0, nu: 2, solvent: 'aprotic', conc: 1.0, mech: 'auto' } },
@@ -390,7 +462,8 @@
       { group: 'Display', items: [
         { key: 'mech', type: 'select', label: 'Mechanism shown', restructure: true, options: [
           { value: 'auto', label: 'Auto (faster one)' }, { value: 'sn2', label: 'Force SN2' }, { value: 'sn1', label: 'Force SN1' }] },
-        { key: 'labels', type: 'toggle', label: 'Show atom labels' }
+        { key: 'labels', type: 'toggle', label: 'Show atom labels' },
+        { key: 'arrows', type: 'toggle', label: 'Show the curly-arrow mechanism' }
       ] }
     ],
 
@@ -552,6 +625,42 @@
         ctx.fillStyle = th.crit;
         ctx.fillText('⚠ forced — under these conditions ' + (S.winner === 'sn2' ? 'SN2' : 'SN1') +
           ' is ' + fmt(Math.max(S.k1, S.k2) / Math.max(Math.min(S.k1, S.k2), 1e-300), 2) + '× faster', 14, 50);
+      }
+
+
+      /* ---------------- curly-arrow inset ----------------
+         The 3D stage shows the geometry moving; this shows why it moves.
+         An exam answer has to reproduce these arrows, not the animation. */
+      if (p.arrows) {
+        if (!S.aSteps || S.aWas !== S.active) {
+          S.aSteps = snMech(isS2, (['H₂O', 'CH₃OH', 'OH⁻'][clamp(p.nu | 0, 0, 2)]), 'Br');
+          S.aMech = MECH.makeState(S.aSteps.length);
+          S.aWas = S.active;
+        }
+        MECH.advance(S.aMech, g.dt || 0.016, { travel: 2.0, dwell: 1.35 });
+        const iw = Math.min(g.w * 0.31, 268), ih = Math.min(g.h * 0.36, 196);
+        const ix = 14, iy = g.h - ih - 30;
+        ctx.save();
+        ctx.fillStyle = g.alpha(th['ink-900'], .86);
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(ix, iy, iw, ih, 10); }
+        else { ctx.beginPath(); ctx.rect(ix, iy, iw, ih); }
+        ctx.fill();
+        ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1; ctx.stroke();
+        const afr = MECH.frame(S.aSteps, S.aMech.i, S.aMech.u, S.aMech.a);
+        MECH.draw(ctx, afr, { x: ix + iw * 0.50, y: iy + ih * 0.58, s: Math.min(iw, ih) * 0.215 }, {
+          ground: th['ink-900'], colour: g.alpha(th['text-2'], .95),
+          arrow: th.chem, forming: '#4ADE80', breaking: '#FB7185', width: 2.2
+        });
+        ctx.font = '600 9.5px "IBM Plex Mono",monospace';
+        ctx.fillStyle = th.chem; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(afr.caption, ix + iw / 2, iy + 9);
+        ctx.font = '500 8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+        // the caption must fit the inset, so trim it rather than let it spill
+        let sub2 = afr.sub;
+        while (sub2.length > 8 && ctx.measureText(sub2).width > iw - 16) sub2 = sub2.slice(0, -2);
+        if (sub2 !== afr.sub) sub2 = sub2.replace(/[ ,–—-]+$/, '') + '…';
+        ctx.fillText(sub2, ix + iw / 2, iy + 22);
+        ctx.restore();
       }
 
       /* --- stereochemistry tally --- */

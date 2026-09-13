@@ -293,6 +293,9 @@ smartlab/
 ├── art-organic.js       organic structure library (`window.ORGART`) — skeletal formulae, rings,
 │                        curly (electron-pushing) arrows, Newman projections, cyclohexane chairs,
 │                        tetrahedral stereocentres, p-orbital lobes and reaction profiles
+├── mech.js              mechanism engine (`window.MECH`) — scenes in, an interpolated frame out;
+│                        breaking and forming bonds, partial charges, timed curly arrows
+├── steps.mjs            walks every scene of every mechanism and screenshots each
 ├── audit.mjs            control audit — static wiring check plus a live click-through of every
 │                        control and preset on every lab; must print CLEAN before a release
 ├── art-bio.js           anatomical figure library (`window.BIOART`) — the vertebrate heart,
@@ -301,6 +304,13 @@ smartlab/
 └── sims-extend.js       depth pass — extra controls, second graphs and quizzes
                          bolted onto the original six via `InsightLab.extend()`
 ```
+
+**Mechanisms animate, step by step.** `smartlab/mech.js` renders a reaction as a list of scenes and
+interpolates between them: bonds genuinely break and form, charges fade in, fractional bond orders
+read as delocalisation, and the curly arrows draw themselves before the geometry they explain starts
+to move. Four labs run on it — electrophilic aromatic substitution, carbocation addition and
+rearrangement, and curly-arrow insets on SN1/SN2 and E1/E2. Every scene is clickable, and
+`smartlab/steps.mjs` screenshots each one so a broken intermediate cannot hide behind a good first frame.
 
 **Every control is verified before every release.** `smartlab/audit.mjs` runs a static wiring check and then
 a live click-through of every range, toggle, select option and preset across all 26 labs, asserting the

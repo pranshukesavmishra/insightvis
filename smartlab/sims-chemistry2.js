@@ -447,6 +447,87 @@
     { k: 2, name: '3°', label: '3° (2-bromo-2-methylbutane)', cat: 2, ster: 2, bH: 8 }
   ];
 
+  /* =====================================================================
+     Electron-flow inset for elimination. Three arrows in one concerted
+     step for E2; two separate steps for E1.
+     ===================================================================== */
+  function elimMech(isE2, baseLabel, lgLabel) {
+    const skel = {
+      ca: { x: -0.62, y: 0, label: 'C' },
+      cb: { x: 0.62, y: 0, label: 'C' },
+      h: { x: -1.10, y: -0.92, label: 'H' },
+      lg: { x: 1.10, y: 0.92, label: lgLabel, colour: '#FFAE4C' }
+    };
+    const S0 = {
+      name: 'anti',
+      caption: isE2 ? 'E2 — one step, three arrows' : 'E1 step 1 — the leaving group departs',
+      sub: isE2 ? 'the β-H and the leaving group must be anti-periplanar, 180° apart'
+                : 'slow and unimolecular — the base plays no part yet',
+      atoms: Object.assign({}, skel, isE2 ? {
+        h: { x: -1.10, y: -0.92, label: 'H', hot: 1 },
+        lg: { x: 1.10, y: 0.92, label: lgLabel, colour: '#FFAE4C', hot: 1 },
+        b: { x: -1.95, y: -1.55, label: baseLabel, colour: '#5AA9FF', charge: -1, lone: [0.6] }
+      } : { lg: { x: 1.10, y: 0.92, label: lgLabel, colour: '#FFAE4C', hot: 1 } }),
+      bonds: [
+        { a: 'ca', b: 'cb', order: 1 },
+        { a: 'ca', b: 'h', order: 1 },
+        { a: 'cb', b: 'lg', order: 1 }
+      ],
+      arrows: isE2 ? [
+        { from: { atom: 'b', dx: 0.34, dy: 0.28 }, to: { atom: 'h', dx: -0.24, dy: -0.20 },
+          bow: 0.30, colour: '#5AA9FF', label: '1' },
+        { from: { bond: 'ca|h' }, to: { bond: 'ca|cb' }, bow: -0.42, label: '2' },
+        { from: { bond: 'cb|lg' }, to: { atom: 'lg', dx: 0.30, dy: 0.26 }, bow: 0.34,
+          colour: '#FFAE4C', label: '3' }
+      ] : [
+        { from: { bond: 'cb|lg' }, to: { atom: 'lg', dx: 0.30, dy: 0.26 }, bow: 0.34, colour: '#FFAE4C' }
+      ]
+    };
+    if (isE2) {
+      return [S0, {
+        name: 'alkene',
+        caption: 'The alkene, in one concerted step',
+        sub: 'rate = k[substrate][base] — both appear, because both act at once',
+        atoms: {
+          ca: { x: -0.55, y: 0, label: 'C' }, cb: { x: 0.55, y: 0, label: 'C' },
+          h: { x: -1.85, y: -1.62, label: 'H–' + baseLabel.replace('⁻', ''), colour: '#5AA9FF' },
+          lg: { x: 1.72, y: 1.45, label: lgLabel + '⁻', colour: '#8FA4CE', charge: -1 }
+        },
+        bonds: [{ a: 'ca', b: 'cb', order: 2 }],
+        arrows: []
+      }];
+    }
+    return [S0, {
+      name: 'cation',
+      caption: 'E1 step 2 — the base takes a β-hydrogen',
+      sub: 'fast, and the base decides which alkene you get',
+      atoms: Object.assign({}, skel, {
+        cb: { x: 0.62, y: 0, label: 'C', charge: 1, hot: 1 },
+        lg: { x: 1.85, y: 1.45, label: lgLabel + '⁻', colour: '#8FA4CE', charge: -1 },
+        b: { x: -1.95, y: -1.55, label: baseLabel, colour: '#5AA9FF', charge: -1, lone: [0.6] }
+      }),
+      bonds: [
+        { a: 'ca', b: 'cb', order: 1 }, { a: 'ca', b: 'h', order: 1 }
+      ],
+      arrows: [
+        { from: { atom: 'b', dx: 0.34, dy: 0.28 }, to: { atom: 'h', dx: -0.24, dy: -0.20 },
+          bow: 0.30, colour: '#5AA9FF' },
+        { from: { bond: 'ca|h' }, to: { bond: 'ca|cb' }, bow: -0.42 }
+      ]
+    }, {
+      name: 'alkene',
+      caption: 'The alkene',
+      sub: 'rate = k[substrate] only — the base is absent from the rate law',
+      atoms: {
+        ca: { x: -0.55, y: 0, label: 'C' }, cb: { x: 0.55, y: 0, label: 'C' },
+        h: { x: -1.95, y: -1.62, label: 'H–' + baseLabel.replace('⁻', ''), colour: '#5AA9FF' },
+        lg: { x: 1.85, y: 1.45, label: lgLabel + '⁻', colour: '#8FA4CE', charge: -1 }
+      },
+      bonds: [{ a: 'ca', b: 'cb', order: 2 }],
+      arrows: []
+    }];
+  }
+
   L.register({
     id: 'elimination', subject: 'chemistry',
     name: 'E1 vs E2 Elimination — Geometry, Saytzeff and Hofmann',
@@ -460,7 +541,8 @@
       'The stereo-electronic requirement is the part students skip: <b>E2 needs the β-H and the leaving group ' +
       'anti-periplanar</b>, 180° apart. Here that is a slider, and the reaction refuses to proceed until you satisfy it.',
 
-    params: { sub: 1, base: 1, bulk: 0, solvent: 'protic', temp: 330, dihedral: 180, conc: 0.6, showNewman: true },
+    params: { sub: 1, base: 1, bulk: 0, solvent: 'protic', temp: 330, dihedral: 180, conc: 0.6,
+              showNewman: true, arrows: true },
 
     presets: [
       { name: 'E2 · strong small base', params: { sub: 1, base: 2, bulk: 0, solvent: 'aprotic', temp: 340, dihedral: 180 } },
@@ -492,7 +574,8 @@
           fmt: v => v.toFixed(0), restructure: true }
       ] },
       { group: 'Display', items: [
-        { key: 'showNewman', type: 'toggle', label: 'Show Newman projection' }
+        { key: 'showNewman', type: 'toggle', label: 'Show Newman projection' },
+        { key: 'arrows', type: 'toggle', label: 'Show the curly-arrow mechanism' }
       ] }
     ],
 
@@ -694,6 +777,42 @@
       ctx.fillStyle = th['text-3'];
       ctx.fillText('orbital overlap factor = ' + S.overlap.toFixed(3) +
         '   ·   major alkene: ' + S.major, 14, 50);
+
+      /* ---------------- curly-arrow inset ----------------
+         The 3D stage shows the geometry moving; this shows why it moves.
+         An exam answer has to reproduce these arrows, not the animation. */
+      if (p.arrows) {
+        if (!S.aSteps || S.aWas !== S.route) {
+          S.aSteps = elimMech(S.route === 'E2' || S.route === 'SN2', 'B⁻', 'Br');
+          S.aMech = MECH.makeState(S.aSteps.length);
+          S.aWas = S.route;
+        }
+        MECH.advance(S.aMech, g.dt || 0.016, { travel: 2.0, dwell: 1.35 });
+        const iw = Math.min(g.w * 0.31, 268), ih = Math.min(g.h * 0.36, 196);
+        const ix = 14, iy = g.h - ih - 30;
+        ctx.save();
+        ctx.fillStyle = g.alpha(th['ink-900'], .86);
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(ix, iy, iw, ih, 10); }
+        else { ctx.beginPath(); ctx.rect(ix, iy, iw, ih); }
+        ctx.fill();
+        ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1; ctx.stroke();
+        const afr = MECH.frame(S.aSteps, S.aMech.i, S.aMech.u, S.aMech.a);
+        MECH.draw(ctx, afr, { x: ix + iw * 0.50, y: iy + ih * 0.58, s: Math.min(iw, ih) * 0.215 }, {
+          ground: th['ink-900'], colour: g.alpha(th['text-2'], .95),
+          arrow: th.chem, forming: '#4ADE80', breaking: '#FB7185', width: 2.2
+        });
+        ctx.font = '600 9.5px "IBM Plex Mono",monospace';
+        ctx.fillStyle = th.chem; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(afr.caption, ix + iw / 2, iy + 9);
+        ctx.font = '500 8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+        // the caption must fit the inset, so trim it rather than let it spill
+        let sub2 = afr.sub;
+        while (sub2.length > 8 && ctx.measureText(sub2).width > iw - 16) sub2 = sub2.slice(0, -2);
+        if (sub2 !== afr.sub) sub2 = sub2.replace(/[ ,–—-]+$/, '') + '…';
+        ctx.fillText(sub2, ix + iw / 2, iy + 22);
+        ctx.restore();
+      }
+
     },
 
     plots: [
