@@ -556,7 +556,7 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const bio = th.bio;
-      const hx = W * 0.19, hy = H * 0.50, sc = Math.min(W * 0.16, H * 0.34);
+      const hx = W * 0.235, hy = H * 0.485, sc = Math.min(W * 0.195, H * 0.295);
 
       /* ---------- heart with the conduction system ---------- */
       const since = k => {
@@ -572,7 +572,7 @@
         sat: { ra: 60, rv: 60, la: 98, lv: 98 },
         contraction: vG * 0.75,
         mvOpen: vG < 0.25, tvOpen: vG < 0.25, avOpen: vG > 0.3, pvOpen: vG > 0.3,
-        labels: false, leaders: false, vessels: false
+        labels: true, leaders: false, vessels: false
       });
 
       // the conduction system, drawn on top of the muscle it drives
@@ -655,8 +655,57 @@
       tag(-0.06, 1.02, 'Purkinje fibres', 'center');
       ctx.restore();
 
+      /* ---------- magnified: the pacemaker cell itself ---------- */
+      const px2 = W * 0.515, py2 = H * 0.44, ps = Math.min(W * 0.046, H * 0.090);
+      ctx.save();
+      ctx.strokeStyle = g.alpha(th['text-3'], .40); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(hx - sc * 0.50, hy - sc * 0.56); ctx.lineTo(px2 - ps * 1.5, py2 + ps * 0.4);
+      ctx.stroke();
+      ctx.restore();
+      // a nodal myocyte: small, pale, few myofibrils — it conducts, it does not pump
+      const nodeG = ctx.createRadialGradient(px2 - ps * .3, py2 - ps * .3, ps * .1, px2, py2, ps);
+      nodeG.addColorStop(0, g.mix('#FFD36B', '#ffffff', .35));
+      nodeG.addColorStop(.6, '#C9A24B');
+      nodeG.addColorStop(1, '#6E5520');
+      ctx.fillStyle = nodeG;
+      ctx.beginPath(); ctx.ellipse(px2, py2, ps, ps * 0.74, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(42,22,8,.9)'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.fillStyle = 'rgba(58,42,94,.95)';
+      ctx.beginPath(); ctx.ellipse(px2, py2, ps * 0.26, ps * 0.24, 0, 0, TAU); ctx.fill();
+      // the funny current, drawn as the slow drift that makes it self-excite
+      const dw = ps * 1.55, dh = ps * 0.70;
+      const dx2 = px2 + ps * 1.35, dy2 = py2;
+      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
+      ctx.strokeRect(dx2, dy2 - dh / 2, dw, dh);
+      ctx.strokeStyle = '#FFD36B'; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (let i = 0; i <= 60; i++) {
+        const u = i / 60;
+        const ph = (u * 3) % 1;
+        const vv = ph < 0.72 ? -0.85 + ph / 0.72 * 0.62 : 1 - (ph - 0.72) / 0.28 * 1.85;
+        const qx = dx2 + u * dw, qy = dy2 - vv * dh * 0.42;
+        i ? ctx.lineTo(qx, qy) : ctx.moveTo(qx, qy);
+      }
+      ctx.stroke();
+      const ntag = (x0, y0, x1, y1, t2, c2, al) => {
+        ctx.strokeStyle = g.alpha(c2, .6); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.font = '600 9px "IBM Plex Mono",monospace';
+        ctx.textAlign = al; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3.2; ctx.strokeStyle = 'rgba(5,8,15,.88)';
+        const tx = al === 'right' ? x1 - 4 : x1 + 4;
+        ctx.strokeText(t2, tx, y1); ctx.fillStyle = c2; ctx.fillText(t2, tx, y1);
+      };
+      ntag(px2, py2 - ps * 0.72, px2 - ps * 0.6, py2 - ps * 1.85, 'nodal (pacemaker) cell', '#FFD36B', 'right');
+      ntag(dx2 + dw * 0.3, dy2 + dh * 0.28, dx2 - dw * 0.1, dy2 + dh * 1.45,
+        'no stable resting potential', '#FFD36B', 'left');
+      ntag(dx2 + dw * 0.5, dy2 + dh * 0.40, dx2 - dw * 0.1, dy2 + dh * 2.25,
+        'it drifts up and fires again', '#FFD36B', 'left');
+      g.scaleBar(px2 - ps, py2 + ps * 1.9, ps * 1.2, '≈ 25 µm', th['text-3']);
+
       /* ---------- ladder diagram ---------- */
-      const lx0 = W * 0.40, lx1 = W - 16;
+      const lx0 = W * 0.60, lx1 = W - 16;
       const span = 3.6;
       const X = t => lx1 - (S.t - t) / span * (lx1 - lx0);
       const rowsY = [H * 0.24, H * 0.50, H * 0.76];

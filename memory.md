@@ -56,6 +56,29 @@ in correct anteroposterior order, a neuron with soma, dendrites, hillock, myelin
 a bilayer with heads and tails. `art-bio.js` is the single library for these; a lab never
 hand-draws anatomy again.
 
+### 2.7 THE PLATE STANDARD — the exact shape the client approved
+On 2026-09-13 the client went through the whole biology suite and named
+**three** labs as acceptable — the nerve impulse, the sponge canal system and the
+cnidarian lab — and called everything else "very bad". Those three share one shape, and it is
+now the required layout for **every** biology stage:
+
+1. **The figure dominates the stage.** It is the subject, not a thumbnail beside a chart.
+2. **Drawn at section quality** — cells as cells, layers named, nothing solid-filled that should
+   have internal structure.
+3. **Leader-line labels on every structure the exam asks you to name.** Turning leaders off to
+   save space is what made the cardiac lab fail; if the labels do not fit, the figure is in the
+   wrong place, not the labels.
+4. **A magnified inset** of the cell or structure that does the work, joined to its source on the
+   main figure by a dashed callout.
+5. **A scale bar** on the figure and on the inset.
+6. **Graphs go in the plots panel, not on the stage.** A Wiggers diagram or a ladder diagram is a
+   graph; it must not compete with the anatomy for the stage.
+
+Applying this to the cardiac lab meant moving the Wiggers stack out entirely and rebuilding the
+stage as a labelled heart plus a magnified cardiac-muscle fibre. **`audit.mjs` caught the
+regression that caused** — `showECG` went dead the moment its only reader was removed. Run the
+audit after every layout change, not just after adding controls.
+
 ### 2.6 Biology is behind, and the gap is graphics first
 Client verdict, 2026-09-13, after the organic suite landed: *"I still didn't like the biology part,
 it's too bad — the graphics things the most I didn't like, and rest everything is also kind of
@@ -469,6 +492,15 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-13 (f)** — Client reviewed the whole biology suite and approved exactly three labs
+  (nerve impulse, sponge canal system, cnidaria), calling the rest very bad. Extracted what those
+  three have in common and recorded it as mandate §2.7, the plate standard. Rebuilt the cardiac
+  cycle and cardiac conduction labs to it: the heart is now a large labelled plate with every
+  vessel, valve and chamber named, the Wiggers stack moved out to the plots panel, a magnified
+  cardiac muscle fibre with intercalated discs and a nodal pacemaker cell as insets, and scale
+  bars throughout. `BIOART.heart` gained muscle-fibre banding, endocardial lining and clipped
+  coronary vessels; `BIOART.myocyte` is new. **Still to do: the synapse, the phylum-card cartoons,
+  and the six remaining Animal Kingdom labs.**
 - **2026-09-13 (e)** — Client rejected the biology suite outright: graphics worst, substance also
   unsatisfying. Diagnosed it from screenshots rather than guessing, recorded it as mandate §2.6,
   and built `art-zoo.js` — a real zoological and histological figure library. Rebuilt the two worst

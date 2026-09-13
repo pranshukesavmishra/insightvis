@@ -48,6 +48,12 @@ No placeholder styling, no default component looks, no "we'll polish it later". 
 must look like professional scientific instrumentation. Where a choice trades visual quality
 for convenience, make the other choice.
 
+### 2.7 · The plate standard
+Every biology stage is a labelled anatomical plate: the figure dominates, it is drawn at section
+quality, every structure the exam names carries a leader label, a magnified inset shows the cell
+doing the work, and both carry scale bars. Graphs belong in the plots panel — a Wiggers diagram or
+a ladder diagram must never compete with the anatomy for the stage.
+
 ### 2.6 · Biology figures are zoological plates, and every lab must compute
 Two faults the client named in the biology suite. The **graphics** were cartoon-grade, so
 `smartlab/art-zoo.js` now draws them properly — cells with membranes and nuclei, epithelia as real

@@ -637,134 +637,146 @@
       const bio = th.bio, artC = '#FFB454', venC = '#5A8FD8';
       const split = Math.min(W * 0.40, 300);
 
-      /* ================= anatomical heart ================= */
-      const sc = Math.min(split * 0.42, H * 0.30);
-      const hx = split * 0.50, hy = H * 0.50 + sc * 0.22;
-      // right heart valves mirror the left: AV valves open in diastole, SL in systole
+      /* ================= the heart, as an anatomical plate ================= */
+      const sc = Math.min(W * 0.120, H * 0.250);
+      const hx = W * 0.345, hy = H * 0.50 + sc * 0.16;
       const tvOpen = S.mvOpen, pvOpen = S.avOpen;
       BIOART.heart(ctx, hx, hy, sc, {
         chambers: 4,
         sat: { ra: 60, rv: 60, la: 98, lv: 98 },
         contraction: clamp(S.eLV, 0, 1),
         mvOpen: S.mvOpen, tvOpen: tvOpen, avOpen: S.avOpen, pvOpen: pvOpen,
-        labels: true, leaders: false
+        labels: true, leaders: true
       });
 
       // live LV volume, read off the ventricle itself
-      ctx.font = '600 10px "IBM Plex Mono",monospace';
+      ctx.font = '600 11px "IBM Plex Mono",monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(5,8,15,.85)';
       const volTxt = S.Vlv.toFixed(0) + ' mL';
-      ctx.strokeText(volTxt, hx + sc * 0.30, hy + sc * 0.44);
-      ctx.fillStyle = '#F2E3C0'; ctx.fillText(volTxt, hx + sc * 0.30, hy + sc * 0.44);
+      ctx.strokeText(volTxt, hx + sc * 0.32, hy + sc * 0.46);
+      ctx.fillStyle = '#F2E3C0'; ctx.fillText(volTxt, hx + sc * 0.32, hy + sc * 0.46);
 
-      // valve state strip — kept out of the figure so nothing collides
-      const vs = [
-        ['mitral', S.mvOpen], ['aortic', S.avOpen],
-        ['tricuspid', tvOpen], ['pulmonary', pvOpen]
-      ];
+      g.scaleBar(hx - sc * 0.5, hy + sc * 1.22, sc * 1.0, '≈ 6 cm', th['text-3']);
+
+      /* ---- the four valves, as a state block clear of the figure ---- */
+      const vs = [['mitral', S.mvOpen], ['aortic', S.avOpen],
+                  ['tricuspid', tvOpen], ['pulmonary', pvOpen]];
+      ctx.font = '500 9.5px "IBM Plex Mono",monospace';
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.font = '500 9px "IBM Plex Mono",monospace';
       vs.forEach((v, i) => {
-        const yy = 84 + i * 14;
+        const yy = 62 + i * 15;
         ctx.fillStyle = v[1] ? th.ok : g.alpha(th['text-3'], .95);
-        ctx.beginPath(); ctx.arc(14, yy, 3.2, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(16, yy, 3.4, 0, TAU); ctx.fill();
         ctx.fillStyle = v[1] ? th.ok : th['text-3'];
-        ctx.fillText(v[0] + (v[1] ? '  OPEN' : '  shut'), 23, yy);
+        ctx.fillText(v[0] + (v[1] ? '  OPEN' : '  shut'), 26, yy);
       });
-
-      // saturation legend
-      ctx.font = '500 9px "IBM Plex Mono",monospace';
       ctx.fillStyle = g.alpha('#3D6FB4', 1);
-      ctx.beginPath(); ctx.arc(14, 50, 3.2, 0, TAU); ctx.fill();
-      ctx.fillStyle = th['text-3']; ctx.fillText('deoxygenated  ~60%  (right heart)', 23, 50);
+      ctx.beginPath(); ctx.arc(16, 130, 3.4, 0, TAU); ctx.fill();
+      ctx.fillStyle = th['text-3'];
+      ctx.fillText('deoxygenated ~60%  ·  right heart', 26, 130);
       ctx.fillStyle = g.alpha('#E8455C', 1);
-      ctx.beginPath(); ctx.arc(14, 63, 3.2, 0, TAU); ctx.fill();
-      ctx.fillStyle = th['text-3']; ctx.fillText('oxygenated  ~98%  (left heart)', 23, 63);
+      ctx.beginPath(); ctx.arc(16, 145, 3.4, 0, TAU); ctx.fill();
+      ctx.fillStyle = th['text-3'];
+      ctx.fillText('oxygenated ~98%  ·  left heart', 26, 145);
 
-      // phase caption
-      ctx.font = '700 13px "IBM Plex Sans Condensed",sans-serif';
-      ctx.fillStyle = th.text; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText(S.phase || '', 12, 12);
-      ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText(p.hr + ' bpm  ·  cycle ' + (S.tn * 100).toFixed(0) + '%', 12, 30);
-
-      /* ================= Wiggers stack ================= */
-      if (!S.hist.length) return;
-      const gx0 = split + 46, gx1 = W - 14;
-      if (gx1 - gx0 < 60) return;
-      const t0 = S.hist[0][0], t1 = S.hist[S.hist.length - 1][0];
-      const span = Math.max(t1 - t0, 1e-3);
-      const X = t => gx0 + (t - t0) / span * (gx1 - gx0);
-
-      const rows = p.showECG
-        ? [{ h: .42, kind: 'P' }, { h: .30, kind: 'V' }, { h: .28, kind: 'E' }]
-        : [{ h: .58, kind: 'P' }, { h: .42, kind: 'V' }];
-      let yTop = 14;
-      const usable = H - 34;
-
-      rows.forEach(row => {
-        const hh = usable * row.h, y0 = yTop + hh - 12, y1 = yTop + 2;
-        const box = { y0: y0, y1: y1 };
-        ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(gx0, y0 + .5); ctx.lineTo(gx1, y0 + .5); ctx.stroke();
-
-        const mapY = (v, lo, hi) => y0 + (v - lo) / (hi - lo) * (y1 - y0);
-        const drawSeries = (idx, lo, hi, color, width, dash) => {
-          ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = width || 1.8;
-          ctx.lineJoin = 'round'; if (dash) ctx.setLineDash(dash);
-          ctx.beginPath();
-          S.hist.forEach((r, i) => {
-            const x = X(r[0]), y = mapY(clamp(r[idx], lo, hi), lo, hi);
-            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-          });
-          ctx.stroke(); ctx.restore();
-        };
-
-        ctx.font = '9px "IBM Plex Mono",monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-        if (row.kind === 'P') {
-          drawSeries(3, 0, 140, g.alpha(venC, .9), 1.5);              // LA
-          drawSeries(2, 0, 140, artC, 2);                             // aorta
-          drawSeries(1, 0, 140, bio, 2);                              // LV
-          ctx.fillStyle = th['text-3'];
-          [0, 40, 80, 120].forEach(v => ctx.fillText(String(v), gx0 - 6, mapY(v, 0, 140)));
-          ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-          ctx.fillStyle = bio; ctx.fillText('LV', gx0 + 4, y1);
-          ctx.fillStyle = artC; ctx.fillText('aorta', gx0 + 26, y1);
-          ctx.fillStyle = venC; ctx.fillText('LA', gx0 + 64, y1);
-          ctx.fillStyle = th['text-3']; ctx.textAlign = 'right';
-          ctx.fillText('mmHg', gx1, y1);
-        } else if (row.kind === 'V') {
-          drawSeries(4, 30, 150, g.alpha(th.text, .92), 2);
-          ctx.fillStyle = th['text-3'];
-          [50, 100, 150].forEach(v => ctx.fillText(String(v), gx0 - 6, mapY(v, 30, 150)));
-          ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-          ctx.fillStyle = th['text-2']; ctx.fillText('LV volume (mL)', gx0 + 4, y1);
-        } else {
-          ctx.save(); ctx.strokeStyle = th.ok; ctx.lineWidth = 1.6; ctx.beginPath();
-          S.hist.forEach((r, i) => {
-            const x = X(r[0]), y = y0 - (r[5] + 0.3) / 1.6 * (y0 - y1);
-            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-          });
-          ctx.stroke(); ctx.restore();
-          ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-          ctx.fillStyle = th.ok; ctx.fillText('ECG', gx0 + 4, y1);
-          // wave labels on the most recent complex
-          const T = 60 / p.hr;
-          [['P', .80], ['R', .035], ['T', .33]].forEach(w => {
-            const tt = t1 - (S.tn - w[1] + 1) % 1 * T;
-            if (tt < t0) return;
-            ctx.fillStyle = th['text-3']; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-            ctx.fillText(w[0], X(tt), y1 + 8);
-          });
-        }
-        yTop += hh;
+      /* ---- magnified: the muscle that is doing the work ---- */
+      const colL = W * 0.685, colR = W - 22;
+      const mx0 = colL + 12, mx1 = colR - 12, myy = H * 0.32;
+      const mh = Math.min(H * 0.095, 44);
+      ctx.save();
+      ctx.strokeStyle = g.alpha(th['text-3'], .40); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(hx + sc * 0.74, hy + sc * 0.24); ctx.lineTo(mx0 - 8, myy + mh * 0.7);
+      ctx.stroke();
+      ctx.restore();
+      ctx.font = '600 10.5px "IBM Plex Mono",monospace';
+      ctx.fillStyle = th['text-2']; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('CARDIAC MUSCLE', (colL + colR) / 2, myy - mh * 1.85);
+      ctx.font = '500 9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+      ctx.fillText('branched · striated · involuntary', (colL + colR) / 2, myy - mh * 1.85 + 13);
+      const mc = BIOART.myocyte(ctx, mx0, mx1, myy, mh, {
+        contraction: clamp(S.eLV, 0, 1), cells: 3
       });
+      const tag = (x0, y0, x1, y1, text, col, align) => {
+        ctx.strokeStyle = g.alpha(col, .6); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.fillStyle = g.alpha(col, .9);
+        ctx.beginPath(); ctx.arc(x0, y0, 1.9, 0, TAU); ctx.fill();
+        ctx.font = '600 9px "IBM Plex Mono",monospace';
+        ctx.textAlign = align; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3.2; ctx.strokeStyle = 'rgba(5,8,15,.88)';
+        const tx = align === 'right' ? x1 - 4 : align === 'left' ? x1 + 4 : x1;
+        ctx.strokeText(text, tx, y1);
+        ctx.fillStyle = col; ctx.fillText(text, tx, y1);
+      };
+      if (mc.discs.length)
+        tag(mc.discs[0], myy - mh * 0.5, colL + 4, myy - mh * 0.95, 'intercalated disc', '#F2E3C0', 'left');
+      tag(mx1 - (mx1 - mx0) * 0.10, myy - mh * 0.34, colR - 2, myy - mh * 1.30,
+        'striations', '#C8606C', 'right');
+      tag((mx0 + mx1) / 2, myy + mh * 0.24, (colL + colR) / 2, myy + mh * 1.15,
+        'one central nucleus per cell', '#9A8FD0', 'center');
+      ctx.font = '500 8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('the discs fuse the cells into one syncytium', (colL + colR) / 2, myy + mh * 1.65);
+      g.scaleBar(mx0, myy + mh * 2.25, (mx1 - mx0) * 0.34, '≈ 50 µm', th['text-3']);
 
-      // time cursor
-      const cx = X(t1);
-      ctx.strokeStyle = g.alpha(th.text, .45); ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(cx, 12); ctx.lineTo(cx, H - 18); ctx.stroke();
+      /* ---- the phase, stated plainly ---- */
+      ctx.font = '700 17px "IBM Plex Sans Condensed",sans-serif';
+      ctx.fillStyle = th.text; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText(S.phase || '', 14, 10);
+      ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+      ctx.fillText(p.hr + ' bpm  ·  cycle ' + (S.tn * 100).toFixed(0) + '%  ·  ' +
+        'valves open and shut on pressure alone', 14, 32);
+
+      /* ---- the ECG, lined up with the phase the heart is in ---- */
+      if (p.showECG && S.hist.length > 2) {
+        const ex0 = 20, ex1 = W * 0.62, ey = H * 0.945, eh = H * 0.062;
+        const t0 = S.hist[0][0], t1 = S.hist[S.hist.length - 1][0];
+        const span = Math.max(t1 - t0, 1e-3);
+        ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(ex0, ey); ctx.lineTo(ex1, ey); ctx.stroke();
+        ctx.strokeStyle = th.ok; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        S.hist.forEach((r, i) => {
+          const x = ex0 + (r[0] - t0) / span * (ex1 - ex0);
+          const y = ey - clamp(r[5], -0.4, 1.2) * eh;
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        });
+        ctx.stroke();
+        ctx.font = '600 9.5px "IBM Plex Mono",monospace';
+        ctx.fillStyle = th.ok; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        ctx.fillText('ECG', ex0, ey - eh * 1.15);
+        ctx.font = '500 8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+        ctx.fillText('P = atrial depolarisation · QRS = ventricular · T = repolarisation',
+          ex0 + 34, ey - eh * 1.15);
+        // the electrical event that caused the phase now on screen
+        ctx.strokeStyle = g.alpha(th.text, .45); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(ex1, ey - eh * 1.1); ctx.lineTo(ex1, ey + eh * 0.5); ctx.stroke();
+      }
+
+      /* ---- the pressure gradient that is actually driving it ---- */
+      const gx = W * 0.685 + 12, gy = H * 0.64;
+      ctx.font = '600 10px "IBM Plex Mono",monospace';
+      ctx.fillStyle = th['text-2']; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('PRESSURES NOW', gx, gy - 18);
+      const rows = [['left ventricle', S.Plv, th.bio], ['aorta', S.Pao, '#FFB454'],
+                    ['left atrium', S.Pla, '#5A8FD8']];
+      const pmax = 140;
+      rows.forEach((r, i) => {
+        const yy = gy + i * 22;
+        ctx.font = '500 9.5px "IBM Plex Mono",monospace';
+        ctx.fillStyle = th['text-3']; ctx.textBaseline = 'middle';
+        ctx.fillText(r[0], gx, yy);
+        const bx = gx + 90, bw2 = (W - 60) - bx;
+        ctx.fillStyle = g.alpha(th['ink-700'], 1);
+        ctx.fillRect(bx, yy - 5, bw2, 10);
+        ctx.fillStyle = g.alpha(r[2], .9);
+        ctx.fillRect(bx, yy - 5, bw2 * clamp(r[1] / pmax, 0, 1), 10);
+        ctx.fillStyle = r[2]; ctx.textAlign = 'right';
+        ctx.fillText(r[1].toFixed(0) + ' mmHg', W - 24, yy);
+        ctx.textAlign = 'left';
+      });
     },
 
     plotTitle: 'Pressure–volume loop of the left ventricle',

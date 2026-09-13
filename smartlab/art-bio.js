@@ -139,9 +139,34 @@ window.BIOART = (function () {
     gr.addColorStop(.55, MYO);
     gr.addColorStop(1, MYO_D);
     ctx.fillStyle = gr; ctx.fill();
+    // cardiac muscle runs in spiral bands — drawing them is what turns a
+    // silhouette into a section
+    ctx.save(); ctx.clip();
+    ctx.strokeStyle = rgba('#5E2630', .40);
+    ctx.lineWidth = Math.max(0.8, s * 0.016);
+    for (let i = -7; i <= 7; i++) {
+      ctx.beginPath();
+      for (let k = 0; k <= 20; k++) {
+        const u = k / 20;
+        const px = X(-1.05 + u * 2.1);
+        const py = Y(i * 0.17 + Math.sin(u * Math.PI * 1.3 + i * 0.5) * 0.16);
+        k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
     ctx.strokeStyle = rgba('#2A1016', .9); ctx.lineWidth = Math.max(1, s * 0.02); ctx.stroke();
 
-    // coronary groove and vessels — what makes it read as a heart
+    // coronary groove and vessels — what makes it read as a heart.
+    // Clipped to the silhouette so nothing trails off the muscle.
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(X(-0.70), Y(-0.68));
+    ctx.bezierCurveTo(X(-0.98), Y(-0.34), X(-0.92), Y(0.36), X(-0.46), Y(0.74));
+    ctx.bezierCurveTo(X(-0.26), Y(0.92), X(-0.02), Y(1.04), X(0.10), Y(0.92));
+    ctx.bezierCurveTo(X(0.56), Y(0.60), X(0.94), Y(0.06), X(0.88), Y(-0.40));
+    ctx.bezierCurveTo(X(0.84), Y(-0.62), X(0.74), Y(-0.72), X(0.54), Y(-0.74));
+    ctx.closePath(); ctx.clip();
     ctx.strokeStyle = rgba('#C8606C', .5); ctx.lineWidth = Math.max(1, s * 0.035);
     ctx.beginPath();
     ctx.moveTo(X(-0.82), Y(-0.20));
@@ -152,6 +177,7 @@ window.BIOART = (function () {
     ctx.moveTo(X(0.06), Y(-0.14));
     ctx.bezierCurveTo(X(0.02), Y(0.28), X(-0.02), Y(0.62), X(0.04), Y(0.90));
     ctx.stroke();
+    ctx.restore();
 
     /* ---------- chamber cavities ---------- */
     const cav = (x, y, rx, ry, s0, rot) => {
@@ -163,7 +189,12 @@ window.BIOART = (function () {
       g2.addColorStop(1, mixHex(c, '#120508', .35));
       ctx.fillStyle = g2;
       ctx.beginPath(); ctx.ellipse(0, 0, rx * s, ry * s, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = rgba('#2A1016', .6); ctx.lineWidth = Math.max(1, s * 0.015); ctx.stroke();
+      // endocardium — the glistening lining of every chamber
+      ctx.strokeStyle = rgba('#F2E3C0', .40);
+      ctx.lineWidth = Math.max(1.2, s * 0.020);
+      ctx.stroke();
+      ctx.strokeStyle = rgba('#2A1016', .7); ctx.lineWidth = Math.max(1, s * 0.014);
+      ctx.beginPath(); ctx.ellipse(0, 0, rx * s * 1.04, ry * s * 1.04, 0, 0, TAU); ctx.stroke();
       ctx.restore();
     };
 
@@ -576,6 +607,58 @@ window.BIOART = (function () {
     return { top: y, domeY: domeY, drop: drop };
   }
 
-  return { heart, heart2, neuron, bilayer, synapticKnob, postsynapticMembrane, satColour, mixHex, rgba,
+  /* =========================================================================
+     CARDIAC MUSCLE FIBRE — branched, striated, one central nucleus per cell,
+     and the intercalated discs that make the myocardium a syncytium.
+     ========================================================================= */
+  function myocyte(ctx, x0, x1, y, h, o) {
+    o = o || {};
+    const contract = o.contraction || 0;
+    const hh = h * (1 + contract * 0.18);
+    const body = ctx.createLinearGradient(0, y - hh / 2, 0, y + hh / 2);
+    body.addColorStop(0, mixHex(MYO, '#ffffff', .26));
+    body.addColorStop(.5, MYO);
+    body.addColorStop(1, MYO_D);
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x0, y - hh / 2, x1 - x0, hh, hh * 0.22);
+    else ctx.rect(x0, y - hh / 2, x1 - x0, hh);
+    ctx.fill();
+    ctx.strokeStyle = rgba('#2A1016', .9); ctx.lineWidth = 1.2; ctx.stroke();
+    // striations — sarcomeres, which shorten as the fibre contracts
+    const n = Math.max(6, Math.round((x1 - x0) / (hh * 0.30 * (1 - contract * 0.22))));
+    ctx.strokeStyle = rgba('#3A161D', .55); ctx.lineWidth = Math.max(1, hh * 0.045);
+    for (let i = 1; i < n; i++) {
+      const px = x0 + (i / n) * (x1 - x0);
+      ctx.beginPath(); ctx.moveTo(px, y - hh * 0.44); ctx.lineTo(px, y + hh * 0.44); ctx.stroke();
+    }
+    // intercalated discs — the step junctions between cells
+    const cells = o.cells || 3;
+    const discs = [];
+    for (let i = 1; i < cells; i++) {
+      const px = x0 + (i / cells) * (x1 - x0);
+      ctx.strokeStyle = rgba('#F2E3C0', .85); ctx.lineWidth = Math.max(1.8, hh * 0.075);
+      ctx.beginPath();
+      ctx.moveTo(px - hh * 0.10, y - hh / 2);
+      ctx.lineTo(px - hh * 0.10, y - hh * 0.12);
+      ctx.lineTo(px + hh * 0.10, y - hh * 0.12);
+      ctx.lineTo(px + hh * 0.10, y + hh * 0.12);
+      ctx.lineTo(px - hh * 0.10, y + hh * 0.12);
+      ctx.lineTo(px - hh * 0.10, y + hh / 2);
+      ctx.stroke();
+      discs.push(px);
+    }
+    // one central nucleus per cell — the mark that separates cardiac from skeletal
+    for (let i = 0; i < cells; i++) {
+      const px = x0 + ((i + 0.5) / cells) * (x1 - x0);
+      ctx.fillStyle = rgba('#3A2A5E', .95);
+      ctx.beginPath(); ctx.ellipse(px, y, hh * 0.16, hh * 0.22, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = rgba('#1E1436', .9);
+      ctx.beginPath(); ctx.arc(px + hh * 0.05, y - hh * 0.04, hh * 0.07, 0, TAU); ctx.fill();
+    }
+    return { discs: discs, h: hh };
+  }
+
+  return { heart, heart2, myocyte, neuron, bilayer, synapticKnob, postsynapticMembrane, satColour, mixHex, rgba,
     OXY, DEOXY };
 })();
