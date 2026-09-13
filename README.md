@@ -48,6 +48,20 @@ No placeholder styling, no default component looks, no "we'll polish it later". 
 must look like professional scientific instrumentation. Where a choice trades visual quality
 for convenience, make the other choice.
 
+### 2.5 · The organic chemistry labs are the template, and the bar is twice as high
+Client verdict on v5: the organic chemistry suite is the right **kind** of experiment, at about
+**half** the intended depth. Every lab built from here copies its shape — a real computation at the
+core, the exam rule emerging from the numbers rather than being stated, a purpose-built figure
+library, physically meaningful parameters that can reach the traps JEE examines, two plots
+answering different questions, and a walkthrough that asks before it tells.
+
+The remaining half, in priority order: **animate mechanisms step by step** (curly arrows that play,
+bonds that break and form); **let the student build the input** rather than pick from a dropdown;
+**go 3D** where the chemistry is 3D (conformers, stereocentres, orbitals); **more linked experiments
+per chapter**; a **worked-problem mode** that has the student predict before the simulation checks
+them; and coverage of the organic chapters still missing — carbonyl chemistry, named reactions,
+amines and diazonium, biomolecules, polymers.
+
 ### 2.4 · Biology figures are anatomical drawings, not boxes and blobs
 A NEET student is examined on labelled diagrams. A heart drawn as four rounded rectangles, or
 an axon drawn as a grey bar, gives them nothing they can carry into the exam hall. Every

@@ -56,6 +56,49 @@ in correct anteroposterior order, a neuron with soma, dendrites, hillock, myelin
 a bilayer with heads and tails. `art-bio.js` is the single library for these; a lab never
 hand-draws anatomy again.
 
+### 2.5 The organic chemistry labs are the template — and the bar is twice as high
+Client verdict on v5, 2026-09-13: *"I like this organic chemistry experiments, 50% matching my
+expectations but definitely more improvement and upgradation needed — build these type of
+experiments."*
+
+**Read that as two instructions.** First, the five organic labs are the **model** for everything
+built from now on; match their shape rather than inventing a new one. Second, they are only
+**halfway** to what the client wants, so the ceiling is roughly double — do not treat that
+shape as finished.
+
+**What makes them the right type** (copy all six of these into every new lab):
+1. A **real computation at the core** that a student could in principle do by hand but never
+   would — a diagonalised matrix, an integrated ODE, a Boltzmann sum, a Hammett product.
+   The exam rule is the *output*, never the input.
+2. **The rule emerges.** 4n+2, Markovnikov and ortho/para directing are never stated and then
+   illustrated; they fall out of numbers the student can watch change.
+3. A **purpose-built figure library** (`art-organic.js`, `art-bio.js`) so the drawing is
+   discipline-accurate and consistent across labs.
+4. **Every parameter is physically meaningful** and in real units, with the traps that JEE
+   actually examines reachable by moving a control (COT planarity, the anilinium ion,
+   peroxide-with-HBr-only, the t-butyl lock).
+5. **Two plots that answer different questions** — one about this system, one placing it on a
+   landscape of all comparable systems.
+6. A **walkthrough that asks before it tells**, and a quiz written from real exam patterns.
+
+**Where the missing 50% is.** These are the directions to push, in the order they are likely
+to matter:
+- **Mechanisms must animate step by step.** Curly arrows should play through, bonds should
+  break and form on screen, intermediates should appear and be consumed. Static snapshots with
+  a cycling resonance contributor is the weakest part of what shipped.
+- **Let the student build the input.** Drag a substituent onto a ring, assemble an alkyl halide,
+  set a stereocentre by dragging groups. Choosing from a dropdown is a much smaller act of
+  learning than constructing.
+- **Go 3D where the chemistry is 3D.** Conformers, stereocentres and orbitals are being drawn
+  in 2D projections. The engine already has a working camera — use it.
+- **More depth inside each topic**, the same instruction as v2: several linked experiments per
+  chapter rather than one, e.g. E1/E2/SN1/SN2 competition on one substrate, or a full
+  aldol/Cannizzaro/carbonyl-addition set.
+- **A worked-problem mode** — take an actual JEE question, let the student predict, then run
+  the simulation to check the prediction and show where the reasoning went wrong.
+- **Cover the rest of organic.** Still missing: carbonyl chemistry, aldol and named reactions,
+  amines and diazonium, biomolecules, polymers, reaction-mechanism practice across GOC.
+
 ---
 
 ## 3. Scope
@@ -369,6 +412,7 @@ Append only. Never rewrite history.
 | 2026-09-13 | **A control audit that runs the UI, not just greps it** | The client reported dead controls; static analysis alone gives false positives on dynamic `p[key]` access and misses stale-DOM bugs |
 | 2026-09-13 | Graphics upgrades built into `lab-core`, not per-sim | Ten layers applied once lift all 26 labs; per-sim tweaks would drift apart immediately |
 | 2026-09-13 | Organic chemistry chosen as the fifth subject block, five labs deep | Highest-yield JEE Advanced territory that was entirely missing, and all five topics have genuinely computable models |
+| 2026-09-13 | **The organic labs become the template for every future experiment (§2.5)** | Client called them the right type at 50% of expectation — so copy the shape, and treat the current depth as halfway, not done |
 
 ---
 
@@ -387,7 +431,13 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
-- **2026-09-13** — **Shipped v5: the organic chemistry suite and ten graphics layers.** Built
+- **2026-09-13 (b)** — Client reviewed v5: the organic chemistry experiments are the right kind of
+  work, at **50% of expectation**, and are to be the template going forward. Recorded as standing
+  mandate §2.5, together with a prioritised list of where the missing half sits — animated
+  step-by-step mechanisms, student-built inputs, real 3D for conformers and stereocentres, more
+  linked experiments per chapter, a predict-then-check worked-problem mode, and the organic
+  chapters still uncovered.
+- **2026-09-13 (a)** — **Shipped v5: the organic chemistry suite and ten graphics layers.** Built
   `art-organic.js` (skeletal structures, curly arrows, Newman projections, cyclohexane chairs,
   tetrahedral stereocentres, p-orbital lobes, reaction profiles) and five labs on top of it:
   Hückel MO theory with live Jacobi diagonalisation, conformational analysis, electrophilic aromatic
