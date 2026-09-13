@@ -48,6 +48,14 @@ No placeholder styling, no default component looks, no "we'll polish it later". 
 must look like professional scientific instrumentation. Where a choice trades visual quality
 for convenience, make the other choice.
 
+### 2.6 · Biology figures are zoological plates, and every lab must compute
+Two faults the client named in the biology suite. The **graphics** were cartoon-grade, so
+`smartlab/art-zoo.js` now draws them properly — cells with membranes and nuclei, epithelia as real
+sheets, body walls as named layers, a nematocyst with capsule wall, operculum, cnidocil, coiled
+tubule, barbs and stylets, a choanocyte with a microvillar collar and beating flagellum. The
+**substance** problem is that several Animal Kingdom labs browse data rather than simulate anything.
+Fixing a lab means both: rebuild the figure on `art-zoo.js`, and give it something real to compute.
+
 ### 2.5 · The organic chemistry labs are the template, and the bar is twice as high
 Client verdict on v5: the organic chemistry suite is the right **kind** of experiment, at about
 **half** the intended depth. Every lab built from here copies its shape — a real computation at the
@@ -293,6 +301,8 @@ smartlab/
 ├── art-organic.js       organic structure library (`window.ORGART`) — skeletal formulae, rings,
 │                        curly (electron-pushing) arrows, Newman projections, cyclohexane chairs,
 │                        tetrahedral stereocentres, p-orbital lobes and reaction profiles
+├── art-zoo.js           zoological figure library (`window.ZOOART`) — cells, epithelia, body-wall
+│                        layers, nematocysts, choanocytes, spicules, Hydra and sponge sections
 ├── mech.js              mechanism engine (`window.MECH`) — scenes in, an interpolated frame out;
 │                        breaking and forming bonds, partial charges, timed curly arrows
 ├── steps.mjs            walks every scene of every mechanism and screenshots each

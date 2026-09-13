@@ -56,6 +56,26 @@ in correct anteroposterior order, a neuron with soma, dendrites, hillock, myelin
 a bilayer with heads and tails. `art-bio.js` is the single library for these; a lab never
 hand-draws anatomy again.
 
+### 2.6 Biology is behind, and the gap is graphics first
+Client verdict, 2026-09-13, after the organic suite landed: *"I still didn't like the biology part,
+it's too bad — the graphics things the most I didn't like, and rest everything is also kind of
+unsatisfied."* Two separate faults, both real:
+
+**Graphics.** The organism art was cartoon-grade — a Hydra drawn as a blue rounded rectangle with
+stick tentacles, a nematocyst as a flat egg with a spiral scribble, a sponge as an orange blob with
+yellow dots. `art-zoo.js` is the answer, and it is to zoology what `art-organic.js` is to organic:
+cells drawn as cells with membranes and nuclei, epithelia as real sheets, body walls as named
+layers, a nematocyst with capsule wall, operculum, cnidocil, coiled tubule, barbs and stylets, a
+choanocyte with a microvillar collar and a beating flagellum. **No lab hand-draws an organism.**
+
+**Substance.** Most Animal Kingdom labs are *data browsers, not simulations* — `ak-key` filters a
+matrix, `ak-challenge` is a quiz, `ak-chordata` is a checklist. They look things up; they compute
+nothing, which breaks mandate 2.1 and is exactly why they feel weaker than organic chemistry. Where
+the biology genuinely has physics (sponge hydraulics, nematocyst kinetics, water-vascular pressure,
+circulation), the computation exists but the drawing showed none of the anatomy the numbers
+describe. Fixing a lab means **both**: rebuild the figure on `art-zoo.js`, and give it something
+real to compute.
+
 ### 2.5 The organic chemistry labs are the template — and the bar is twice as high
 Client verdict on v5, 2026-09-13: *"I like this organic chemistry experiments, 50% matching my
 expectations but definitely more improvement and upgradation needed — build these type of
@@ -449,6 +469,15 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-13 (e)** — Client rejected the biology suite outright: graphics worst, substance also
+  unsatisfying. Diagnosed it from screenshots rather than guessing, recorded it as mandate §2.6,
+  and built `art-zoo.js` — a real zoological and histological figure library. Rebuilt the two worst
+  labs on it: the cnidarian lab (Hydra as a longitudinal section with both epithelia drawn as cell
+  sheets, mesoglea, gastrovascular cavity, tentacle nematocyst batteries; the cnidocyte magnified
+  with a proper capsule, operculum, cnidocil, coiled tubule, barbs and stylets) and the sponge canal
+  system (ostia, canals, flagellated chambers with rings of collar cells, spongocoel, osculum,
+  spicules, plus a magnified choanocyte). **Still to do: the phylum-card cartoons in `art-animalia.js`,
+  and converting the data-browser labs into things that actually compute.**
 - **2026-09-13 (d)** — Client reported the stage box growing without limit. Reproduced it
   (~35 px/second, every lab), traced it to a canvas-intrinsic-size feedback loop against
   `aspect-ratio`, fixed it and added two regression harnesses. Stage now holds exactly 16:9 at

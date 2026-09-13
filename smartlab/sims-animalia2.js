@@ -548,120 +548,95 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const c = S.canal;
-      const cx = W * 0.40, cyTop = H * 0.16, cyBot = H * 0.86;
-      const bodyH = cyBot - cyTop;
-      const bodyW = Math.min(W * 0.24, bodyH * 0.55);
-      const hue = '#E8A33D';
+      const Z = window.ZOOART;
+      const cx = W * 0.34, cy = H * 0.50;
+      const bodyH = H * 0.66;
 
-      /* ---------- sponge body cross-section ---------- */
-      const wallOuter = x => bodyW * (0.72 + 0.18 * Math.sin(x * 2.2));
-      ctx.beginPath();
-      ctx.moveTo(cx - bodyW * 0.55, cyBot);
-      ctx.bezierCurveTo(cx - bodyW * 1.0, cyBot - bodyH * .35, cx - bodyW * .92, cyTop + bodyH * .2, cx - bodyW * .6, cyTop);
-      ctx.lineTo(cx + bodyW * .6, cyTop);
-      ctx.bezierCurveTo(cx + bodyW * .92, cyTop + bodyH * .2, cx + bodyW * 1.0, cyBot - bodyH * .35, cx + bodyW * 0.55, cyBot);
-      ctx.closePath();
-      const grd = ctx.createLinearGradient(cx - bodyW, 0, cx + bodyW, 0);
-      grd.addColorStop(0, g.mix(hue, '#05080F', .55));
-      grd.addColorStop(.45, g.mix(hue, '#05080F', .2));
-      grd.addColorStop(1, g.mix(hue, '#05080F', .6));
-      ctx.fillStyle = grd; ctx.fill();
-      ctx.strokeStyle = g.alpha(hue, .85); ctx.lineWidth = 1.5; ctx.stroke();
+      /* ---------- the sponge, drawn as a section through the canal system ---- */
+      const sp = Z.sponge(ctx, cx, cy, bodyH, c.id, {
+        t: S.t * (p.beat || 6) * 0.12,
+        width: Math.min(W * 0.30, bodyH * 0.66)
+      });
+      const scW = sp.rAt(cy) * sp.sc;
 
-      // spongocoel
-      const scW = bodyW * (c.id === 'ascon' ? 0.46 : c.id === 'sycon' ? 0.34 : 0.22);
-      ctx.fillStyle = '#05080F';
-      ctx.beginPath();
-      ctx.moveTo(cx - scW, cyBot - bodyH * .06);
-      ctx.lineTo(cx - scW * .85, cyTop + 2);
-      ctx.lineTo(cx + scW * .85, cyTop + 2);
-      ctx.lineTo(cx + scW, cyBot - bodyH * .06);
-      ctx.closePath(); ctx.fill();
-
-      /* ---------- choanocyte architecture per canal type ---------- */
-      ctx.save();
-      if (c.id === 'ascon') {
-        // choanocytes line the spongocoel itself
-        ctx.strokeStyle = g.alpha('#FFD98A', .85); ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(cx - scW * .9, cyBot - bodyH * .08); ctx.lineTo(cx - scW * .82, cyTop + 6);
-        ctx.moveTo(cx + scW * .9, cyBot - bodyH * .08); ctx.lineTo(cx + scW * .82, cyTop + 6);
-        ctx.stroke();
-      } else if (c.id === 'sycon') {
-        // radial canals, choanocyte-lined
-        for (let i = 0; i < 9; i++) {
-          const y = cyTop + bodyH * (0.12 + i * 0.085);
-          [-1, 1].forEach(sg => {
-            ctx.strokeStyle = g.alpha('#FFD98A', .8); ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.moveTo(cx + sg * scW * .95, y);
-            ctx.lineTo(cx + sg * bodyW * .74, y + bodyH * .02);
-            ctx.stroke();
-          });
-        }
-      } else {
-        // leuconoid — a mesh of small flagellated chambers
-        for (let i = 0; i < 46; i++) {
-          const a = (i * 2.399) % 1, b = ((i * 7) % 13) / 13;
-          const sg = i % 2 ? 1 : -1;
-          const x = cx + sg * (scW + 6 + b * (bodyW * .72 - scW));
-          const y = cyTop + bodyH * (0.08 + a * 0.82);
-          ctx.fillStyle = g.alpha('#FFD98A', .5 + .3 * Math.abs(Math.sin(S.t * 3 + i)));
-          ctx.beginPath(); ctx.arc(x, y, bodyW * .055, 0, TAU); ctx.fill();
-        }
-      }
-      ctx.restore();
-
-      // ostia on the outer wall
-      ctx.fillStyle = g.alpha('#9FD8FF', .8);
-      for (let i = 0; i < 22; i++) {
-        const t = i / 21;
-        const y = cyTop + bodyH * (0.06 + t * 0.86);
-        const sg = i % 2 ? 1 : -1;
-        ctx.beginPath();
-        ctx.arc(cx + sg * bodyW * (0.78 + 0.1 * Math.sin(t * 3)), y, 2.2, 0, TAU);
-        ctx.fill();
-      }
-
-      // osculum
-      const oscR = clamp(p.rOsc * bodyW * 0.5, 4, scW * 1.1);
-      ctx.fillStyle = '#05080F';
-      ctx.beginPath(); ctx.ellipse(cx, cyTop, oscR, oscR * .38, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha(hue, .95); ctx.lineWidth = 2; ctx.stroke();
-
-      /* ---------- water particles ---------- */
+      /* ---------- water, drawn as it actually moves through the mesh ---------- */
       if (p.particles) {
         S.parts.forEach(q => {
-          const pos = pathPoint(S, q, cx, cyTop, cyBot, bodyW, scW, oscR);
+          const pos = pathPoint(S, q, cx, sp.top, sp.bot,
+            sp.rAt(cy), scW, sp.oR);
           const v = pathSpeed(S, q.u);
           ctx.fillStyle = g.alpha('#9FD8FF', clamp(0.25 + v * 0.5, .25, .95));
           ctx.beginPath(); ctx.arc(pos[0], pos[1], q.u > 0.86 ? 2.6 : 2.0, 0, TAU); ctx.fill();
-          if (q.u > 0.86) {                       // motion streak in the fast jet
+          if (q.u > 0.86) {
             ctx.strokeStyle = g.alpha('#9FD8FF', .5); ctx.lineWidth = 1.4;
             ctx.beginPath(); ctx.moveTo(pos[0], pos[1]); ctx.lineTo(pos[0], pos[1] + 9); ctx.stroke();
           }
         });
       }
 
-      /* ---------- velocity call-outs ---------- */
-      const call = (x, y, txt, sub, col) => {
+      /* ---------- name the structures ---------- */
+      const tag = (x0, y0, x1, y1, text, col) => {
+        Z.leader(ctx, x0, y0, x1, y1, col);
+        Z.lbl(ctx, x1 + (x1 > x0 ? 5 : -5), y1, text, col, x1 > x0 ? 'left' : 'right', 9);
+      };
+      const Lx = cx - sp.rAt(cy) - 18;
+      if (sp.ostia.length) {
+        const o0 = sp.ostia.find(q => q[2] < 0) || sp.ostia[0];
+        tag(o0[0], o0[1], Lx - 8, sp.top + bodyH * 0.18, 'ostia — incurrent pores', '#9FD8FF');
+      }
+      if (sp.chambers.length) {
+        const ch = sp.chambers.find(q => q[0] < cx) || sp.chambers[0];
+        tag(ch[0], ch[1], Lx - 8, sp.top + bodyH * 0.42,
+          c.id === 'ascon' ? 'choanocytes line the spongocoel'
+            : c.id === 'sycon' ? 'radial canal · choanocyte-lined'
+            : 'flagellated chamber', '#FFD98A');
+      } else {
+        tag(cx - scW, cy, Lx - 8, sp.top + bodyH * 0.42, 'choanocyte layer', '#FFD98A');
+      }
+      tag(cx - scW * 0.5, sp.bot - bodyH * 0.16, Lx - 8, sp.top + bodyH * 0.66,
+        'spongocoel', '#E0A54C');
+      tag(cx - sp.rAt(cy) * 0.80, cy + bodyH * 0.30, Lx - 8, sp.top + bodyH * 0.86,
+        'spicules — the skeleton', '#DCE6F5');
+      tag(cx + sp.oR * 0.7, sp.osculum[1], cx + sp.rAt(cy) + 26, sp.top - bodyH * 0.03,
+        'osculum — the one exit', '#FFAE4C');
+
+      Z.lbl(ctx, cx, sp.bot + 20, c.name.toUpperCase() + ' CANAL SYSTEM · section',
+        th['text-2'], 'center', 9.5);
+      Z.lbl(ctx, cx, sp.bot + 33, 'cellular grade · no tissues, no organs',
+        th['text-3'], 'center', 8.5);
+
+      /* ---------- one choanocyte, magnified, because it does all the work --- */
+      const qx = W * 0.735, qy = H * 0.32, qs = Math.min(W * 0.078, H * 0.155);
+      ctx.save();
+      ctx.strokeStyle = g.alpha(th['text-3'], .40); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      const src = sp.chambers[0] || [cx, cy];
+      ctx.beginPath();
+      ctx.moveTo(src[0], src[1]); ctx.lineTo(qx - qs * 0.9, qy + qs * 0.6);
+      ctx.stroke();
+      ctx.restore();
+      Z.choanocyte(ctx, qx, qy, qs, { beat: S.t * 2.4, dir: -Math.PI / 2 });
+      tag(qx, qy - qs * 1.25, qx + qs * 0.80, qy - qs * 1.50, 'flagellum · drives the current', '#FFF0C0');
+      tag(qx - qs * 0.42, qy - qs * 0.30, qx - qs * 1.15, qy - qs * 0.65, 'collar of microvilli', '#F0D89A');
+      tag(qx + qs * 0.30, qy + qs * 0.46, qx + qs * 0.95, qy + qs * 0.72, 'choanocyte · collar cell', '#E0A54C');
+      Z.lbl(ctx, qx, qy + qs * 1.5, 'traps food particles on the collar',
+        th['text-3'], 'center', 8.5);
+      g.scaleBar(qx - qs * 0.6, qy + qs * 1.85, qs * 0.8, '≈ 10 µm', th['text-3']);
+
+      /* ---------- velocity call-outs, tied to the structures they describe -- */
+      const call = (y, txt, sub, col) => {
         ctx.font = '600 11px "IBM Plex Mono",monospace';
         ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(txt, x, y);
+        ctx.fillText(txt, W * 0.66, y);
         ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-        ctx.fillText(sub, x, y + 12);
+        ctx.fillText(sub, W * 0.66, y + 12);
       };
-      ctx.strokeStyle = g.alpha(th['text-3'], .5); ctx.lineWidth = 1;
+      const vy = H * 0.70;
+      call(vy, S.vIn.toFixed(3) + ' cm/s', 'in through ' + fmt(S.nOstia, 3) + ' ostia', '#9FD8FF');
+      call(vy + 34, S.vCh.toFixed(4) + ' cm/s', 'in the chambers — slowest, so food is caught', th.ok);
+      call(vy + 68, S.vOsc.toFixed(2) + ' cm/s', 'out of the osculum — fastest', th.warn);
+      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(cx + bodyW * .9, cyBot - bodyH * .18); ctx.lineTo(W * 0.70, cyBot - bodyH * .18);
-      ctx.moveTo(cx + scW + 8, cyTop + bodyH * .45); ctx.lineTo(W * 0.70, cyTop + bodyH * .45);
-      ctx.moveTo(cx + oscR, cyTop); ctx.lineTo(W * 0.70, cyTop + 6);
-      ctx.stroke();
-      call(W * 0.71, cyBot - bodyH * .18, S.vIn.toFixed(3) + ' cm/s', 'through ' +
-        fmt(S.nOstia, 3) + ' ostia', '#9FD8FF');
-      call(W * 0.71, cyTop + bodyH * .45, S.vCh.toFixed(4) + ' cm/s',
-        'in the flagellated chambers — slowest', th.ok);
-      call(W * 0.71, cyTop + 6, S.vOsc.toFixed(2) + ' cm/s', 'out of the osculum — fastest', th.warn);
+      ctx.moveTo(W * 0.655, vy - 12); ctx.lineTo(W * 0.655, vy + 80); ctx.stroke();
 
       /* ---------- header ---------- */
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';

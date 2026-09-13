@@ -98,140 +98,103 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       if (p.mode === 'lifecycle') return drawCycle(S, g);
+      const Z = window.ZOOART;
 
-      const hue = '#5AA9FF';
-      /* ---------------- left: Hydra with prey ---------------- */
-      const hx = W * 0.18, hyTop = H * 0.22, bodyH = H * 0.5;
-      ctx.fillStyle = g.mix(hue, '#05080F', .35);
-      ctx.beginPath();
-      ctx.moveTo(hx - 12, hyTop + bodyH);
-      ctx.quadraticCurveTo(hx - 20, hyTop + bodyH * .4, hx - 15, hyTop);
-      ctx.lineTo(hx + 15, hyTop);
-      ctx.quadraticCurveTo(hx + 20, hyTop + bodyH * .4, hx + 12, hyTop + bodyH);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = g.alpha(hue, .8); ctx.lineWidth = 1.2; ctx.stroke();
-      // gastrovascular cavity — one opening only
-      ctx.fillStyle = '#05080F';
-      ctx.beginPath(); ctx.ellipse(hx, hyTop + bodyH * .5, 5, bodyH * .4, 0, 0, TAU); ctx.fill();
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText('gastrovascular cavity', hx + 24, hyTop + bodyH * .55);
-      ctx.fillText('(one opening)', hx + 24, hyTop + bodyH * .55 + 12);
+      /* ---------------- left: Hydra, drawn as a longitudinal section ------- */
+      const hx = W * 0.20, hTop = H * 0.30, hLen = H * 0.46;
+      const hy = Z.hydra(ctx, hx, hTop, hLen, {
+        width: Math.min(W * 0.062, hLen * 0.26), t: S.t, tentacles: 6
+      });
 
-      // tentacles with cnidoblasts
-      const fired = S.fires && S.ph > 0.35;
-      for (let i = 0; i < 6; i++) {
-        const a = -Math.PI / 2 + (i - 2.5) * 0.38;
-        ctx.strokeStyle = g.alpha(hue, .85); ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(hx, hyTop);
-        const ex = hx + Math.cos(a) * 62, ey = hyTop + Math.sin(a) * 62 + Math.sin(S.t * 2 + i) * 4;
-        ctx.quadraticCurveTo(hx + Math.cos(a) * 34, hyTop + Math.sin(a) * 40, ex, ey);
-        ctx.stroke();
-        // cnidoblast beads
-        for (let k = 1; k <= 4; k++) {
-          const t = k / 5;
-          const bx = hx + Math.cos(a) * 62 * t, by = hyTop + Math.sin(a) * 58 * t;
-          ctx.fillStyle = g.alpha(fired && i === 3 ? th.warn : '#BFE3FF', .85);
-          ctx.beginPath(); ctx.arc(bx, by, 2.4, 0, TAU); ctx.fill();
-        }
+      // name the parts a NEET paper asks for
+      const nameIt = (x0, y0, x1, y1, text, col) => {
+        Z.leader(ctx, x0, y0, x1, y1, col);
+        Z.lbl(ctx, x1 + (x1 > x0 ? 5 : -5), y1, text, col || th['text-2'],
+          x1 > x0 ? 'left' : 'right', 9);
+      };
+      const midY = (hy.colTop + hy.colBot) / 2;
+      nameIt(hx, hTop + 2, hx + hy.w * 2.0, hTop - H * 0.09, 'mouth — the ONLY opening', '#9FD8FF');
+      nameIt(hx, midY - H * 0.04, hx + hy.w * 2.3, midY - H * 0.11, 'gastrovascular cavity', '#E0A54C');
+      nameIt(hx + hy.rAt(midY) - hy.wall * 0.2, midY,
+             hx + hy.w * 2.3, midY - H * 0.045, 'epidermis · ectoderm', '#5A8FD8');
+      nameIt(hx + hy.rAt(midY) - hy.wall * 0.75, midY + H * 0.06,
+             hx + hy.w * 2.3, midY + H * 0.02, 'gastrodermis · endoderm', '#E0A54C');
+      nameIt(hx + hy.rAt(midY) - hy.wall * 0.48, midY + H * 0.12,
+             hx + hy.w * 2.3, midY + H * 0.085, 'mesoglea · NOT a germ layer', '#9FB6D8');
+      if (hy.tips.length) {
+        const tp = hy.tips[1];
+        nameIt(tp[0], tp[1], hx + hy.w * 2.3, hTop - H * 0.16,
+          'tentacle · cnidoblast battery', '#9FD8FF');
       }
-      // prey
+      Z.lbl(ctx, hx, hTop + hLen + 16, 'HYDRA · longitudinal section', th['text-2'], 'center', 9.5);
+      Z.lbl(ctx, hx, hTop + hLen + 29, 'diploblastic · radial symmetry · tissue grade',
+        th['text-3'], 'center', 8.5);
+
+      /* ---------------- prey drifting onto the tentacles ---------------- */
       const preyU = clamp(S.ph / 0.35, 0, 1);
-      const px = hx + 130 - preyU * 76, py = hyTop - 34;
-      if (S.ph < 0.75) {
-        ctx.fillStyle = g.alpha('#E8B64C', S.fires && S.ph > 0.4 ? .45 : .95);
-        ctx.beginPath(); ctx.ellipse(px, py, 8, 5.5, 0.4, 0, TAU); ctx.fill();
-        ctx.strokeStyle = g.alpha('#E8B64C', .8); ctx.lineWidth = 1;
+      const tip = hy.tips[1] || [hx, hTop];
+      const px = tip[0] + 120 - preyU * 104, py = tip[1] - 26;
+      if (S.ph < 0.78) {
+        const dim = S.fires && S.ph > 0.42;
+        ctx.fillStyle = g.alpha('#E8B64C', dim ? .40 : .95);
+        ctx.beginPath(); ctx.ellipse(px, py, 8, 5.4, 0.4, 0, TAU); ctx.fill();
+        ctx.strokeStyle = g.alpha('#E8B64C', dim ? .3 : .85); ctx.lineWidth = 1;
         for (let i = 0; i < 3; i++) {
-          ctx.beginPath(); ctx.moveTo(px + 5, py); ctx.lineTo(px + 13, py - 5 + i * 5); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(px + 5, py);
+          ctx.lineTo(px + 13, py - 5 + i * 5); ctx.stroke();
         }
-        ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText('prey', px, py - 10);
+        Z.lbl(ctx, px, py - 12, 'prey', th['text-3'], 'center', 9, 'bottom');
       }
 
-      /* ---------------- right: the cnidocyte, hugely magnified ---------------- */
-      const cx = W * 0.66, cy = H * 0.5, R = Math.min(W * 0.16, H * 0.34);
+      /* ---------------- right: the cnidocyte at cellular magnification ---- */
+      const cx = W * 0.71, cy = H * 0.50;
+      const R = Math.min(W * 0.125, H * 0.255);
+
+      // the magnification callout
       ctx.save();
-      ctx.strokeStyle = g.alpha(th['text-3'], .5); ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(hx + 52, hyTop - 10); ctx.lineTo(cx - R * 1.1, cy - R * .8); ctx.stroke();
+      ctx.strokeStyle = g.alpha(th['text-3'], .45); ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(tip[0] + 6, tip[1] + 4); ctx.lineTo(cx - R * 1.25, cy - R * 0.55);
+      ctx.moveTo(tip[0] + 6, tip[1] + 14); ctx.lineTo(cx - R * 1.25, cy + R * 0.95);
+      ctx.stroke();
       ctx.restore();
 
-      // cell body
-      ctx.fillStyle = g.mix(hue, '#05080F', .5);
-      ctx.beginPath(); ctx.ellipse(cx, cy, R * .78, R * 1.0, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha(hue, .9); ctx.lineWidth = 1.5; ctx.stroke();
-      // nucleus
-      ctx.fillStyle = g.alpha('#2A4A6E', .9);
-      ctx.beginPath(); ctx.ellipse(cx - R * .4, cy + R * .5, R * .2, R * .16, 0, 0, TAU); ctx.fill();
+      // the cnidoblast itself — a real cell holding the organelle
+      ctx.save(); ctx.globalAlpha = 0.55;
+      Z.cell(ctx, cx, cy + R * 0.12, R * 0.86, R * 1.10, {
+        colour: '#2E5580', nucleus: false
+      });
+      ctx.restore();
+      Z.cell(ctx, cx - R * 0.46, cy + R * 0.68, R * 0.20, R * 0.16,
+        { colour: '#4E7FB8', nucleusR: 0.62 });
 
-      // cnidocil trigger
-      const touched = S.ph > 0.30 && S.ph < 0.36;
-      ctx.strokeStyle = touched ? th.warn : g.alpha('#BFE3FF', .9);
-      ctx.lineWidth = touched ? 3 : 2;
-      ctx.beginPath(); ctx.moveTo(cx + R * .1, cy - R * .95);
-      ctx.lineTo(cx + R * .18, cy - R * 1.42); ctx.stroke();
-      ctx.font = '9px "IBM Plex Mono",monospace';
-      ctx.fillStyle = touched ? th.warn : th['text-3'];
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText('cnidocil (trigger)', cx + R * .26, cy - R * 1.42);
+      const fireU = S.fires ? clamp((S.ph - 0.35) / 0.24, 0, 1) : 0;
+      const cap = Z.nematocyst(ctx, cx, cy - R * 0.12, R * 0.62, fireU, { wall: '#7FA8D8' });
 
-      // capsule
-      ctx.fillStyle = g.alpha('#0D2138', .95);
-      ctx.beginPath(); ctx.ellipse(cx, cy - R * .12, R * .5, R * .62, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha('#9FD8FF', .9); ctx.lineWidth = 2; ctx.stroke();
-
-      const fireU = clamp((S.ph - 0.35) / 0.22, 0, 1);
-      const showFire = S.fires && S.ph >= 0.35 && S.ph < 0.80;
-
-      if (!showFire) {
-        // coiled thread inside
-        ctx.strokeStyle = g.alpha('#9FD8FF', .85); ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        for (let i = 0; i <= 120; i++) {
-          const t = i / 120, a = t * TAU * 5;
-          const rr = R * (.08 + .34 * (1 - t));
-          const x = cx + Math.cos(a) * rr, y = cy - R * .12 + Math.sin(a) * rr * .9;
-          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-        }
-        ctx.stroke();
-        ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-        ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-        ctx.fillText('coiled thread', cx - R * .6, cy - R * .1);
-        ctx.fillText('under ~' + p.pressure + ' atm', cx - R * .6, cy - R * .1 + 12);
-      } else {
-        // everted thread, barbs first
-        const len = fireU * R * 2.6;
-        ctx.strokeStyle = g.alpha('#DDF2FF', .95); ctx.lineWidth = 2.4;
-        ctx.beginPath(); ctx.moveTo(cx, cy - R * .74);
-        ctx.lineTo(cx + R * .1, cy - R * .74 - len); ctx.stroke();
-        // barbs / spines at the base
-        ctx.strokeStyle = g.alpha(th.warn, .95); ctx.lineWidth = 1.8;
-        for (let i = 0; i < 3; i++) {
-          const y = cy - R * .74 - len * (0.14 + i * 0.07);
-          [-1, 1].forEach(sg => {
-            ctx.beginPath(); ctx.moveTo(cx + R * .05, y);
-            ctx.lineTo(cx + R * .05 + sg * R * .16, y + R * .12); ctx.stroke();
-          });
-        }
-        ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        const gg = ctx.createRadialGradient(cx, cy - R * .74, 0, cx, cy - R * .74, R * .7);
-        gg.addColorStop(0, g.alpha(th.warn, .5 * (1 - fireU))); gg.addColorStop(1, g.alpha(th.warn, 0));
-        ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(cx, cy - R * .74, R * .7, 0, TAU); ctx.fill();
-        ctx.restore();
+      // labels, placed around the organelle
+      const L = [
+        [cx + cap.capsuleW * 0.52, cy - R * 1.06, cx + R * 1.02, cy - R * 1.22, 'cnidocil — the trigger', '#9FD8FF'],
+        [cx - cap.capsuleW * 0.34, cy - R * 0.78, cx - R * 1.02, cy - R * 0.98, 'operculum (lid)', '#BFE3FF'],
+        [cx - cap.capsuleW * 0.55, cy - R * 0.10, cx - R * 1.18, cy - R * 0.24,
+         fireU > 0.02 ? 'thread everting, inside out' : 'coiled thread · ' + p.pressure + ' atm', '#E6F0FF'],
+        [cx + cap.capsuleW * 0.62, cy + R * 0.18, cx + R * 1.02, cy + R * 0.20, 'capsule wall', '#7FA8D8'],
+        [cx - R * 0.46, cy + R * 0.68, cx - R * 1.18, cy + R * 0.84, 'nucleus', '#9A8FD0'],
+        [cx + R * 0.30, cy + R * 0.92, cx + R * 1.02, cy + R * 1.06, 'cnidoblast (cnidocyte)', '#C9D4EA']
+      ];
+      L.forEach(([x0, y0, x1, y1, t2, c2]) => {
+        Z.leader(ctx, x0, y0, x1, y1, c2);
+        Z.lbl(ctx, x1 + (x1 > x0 ? 5 : -5), y1, t2, c2, x1 > x0 ? 'left' : 'right', 9);
+      });
+      if (fireU > 0.02) {
+        Z.lbl(ctx, cx, cy - R * 1.05 - R * 3.0 * fireU - 12,
+          'stylets pierce first', th.warn, 'center', 9, 'bottom');
       }
-      // operculum lid
-      ctx.strokeStyle = g.alpha('#9FD8FF', .95); ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      if (showFire) { ctx.moveTo(cx - R * .2, cy - R * .74); ctx.lineTo(cx - R * .44, cy - R * .96); }
-      else { ctx.moveTo(cx - R * .2, cy - R * .72); ctx.lineTo(cx + R * .2, cy - R * .72); }
-      ctx.stroke();
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText('operculum', cx + R * .3, cy - R * .82);
-      ctx.fillText('cnidoblast (cnidocyte)', cx - R * .78, cy + R * 1.22);
 
-      /* ---------------- headline numbers ---------------- */
+      // the scale bar — this really is a few micrometres across
+      g.scaleBar(cx - R * 0.9, cy + R * 1.55, R * 0.72, '≈ 10 µm', th['text-3']);
+
+      /* ---------------- headline ---------------- */
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif'; ctx.fillStyle = th.text;
       ctx.fillText(S.fires ? S.vMax.toFixed(1) + ' m/s  ·  ' + fmt(S.gPeak, 3) + ' g'
@@ -241,7 +204,6 @@
       ctx.fillText(S.fires
         ? 'whole discharge in ' + S.tDischarge.toFixed(0) + ' ns  ·  thread ' + S.threadLen.toFixed(1) + ' µm'
         : 'Ca²⁺ is required for the capsule to discharge', 14, 32);
-
       const phase = S.ph < 0.30 ? 'Prey approaching — cnidocil untouched'
         : S.ph < 0.36 ? 'CNIDOCIL TOUCHED — trigger'
         : S.ph < 0.58 ? 'Operculum flips, thread everts at ' + S.vMax.toFixed(1) + ' m/s'
