@@ -56,6 +56,26 @@ in correct anteroposterior order, a neuron with soma, dendrites, hillock, myelin
 a bilayer with heads and tails. `art-bio.js` is the single library for these; a lab never
 hand-draws anatomy again.
 
+### 2.8 Rendering quality is a layer, not a per-figure effort
+After the plate standard landed the client still said the graphics needed "very much upgrade".
+Layout was no longer the fault — **rendering** was. Flat fills with one gradient look like plastic
+whatever their layout. `render.js` (`window.RX`) is the fix and every figure library draws through
+it: `RX.body(ctx, pathFn, opts)` gives a shape a lit base gradient, ambient occlusion inside the
+contact edge, a narrow bright rim on the lit side, procedural tissue grain, an optional cast
+shadow, and a confident contour. `RX.blob` is the ellipse shortcut, `RX.contour` varies line weight
+with the light, `RX.contact` drops a soft shadow where one structure overlaps another.
+
+Two things learned tuning it, both non-obvious:
+- **Effects must fade out below about ten pixels** (`sz` in `RX.body`). At cell scale a 2 px
+  occlusion band swallows the whole form — the first attempt turned every epithelium into a row
+  of dark rings.
+- **At low magnification a plate draws tissue layers, not cells.** The Hydra column was drawn
+  cell-by-cell at 6 px per cell, which is sub-pixel detail masquerading as rigour. It is now three
+  lit, textured bands (epidermis, mesoglea, gastrodermis) with cell boundaries as tick marks, and
+  the cells themselves belong in a magnified callout.
+- **Never draw a structure at low global alpha to push it back.** The cnidoblast was at 0.55 alpha
+  and read as a smudge. Use a darker colour, not transparency.
+
 ### 2.7 THE PLATE STANDARD — the exact shape the client approved
 On 2026-09-13 the client went through the whole biology suite and named
 **three** labs as acceptable — the nerve impulse, the sponge canal system and the
@@ -492,6 +512,12 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-13 (g)** — Client: still "very much upgrade" needed on graphics. Layout was no longer
+  the problem, so built `render.js`, an illustration renderer every figure library now draws
+  through — lit gradients, ambient occlusion, rim light, tissue grain, cast shadows and
+  light-aware contours. Reworked the Hydra body wall from per-cell drawing into lit tissue bands,
+  gave the nematocyst a genuinely dark lumen so the coiled thread reads, and removed the
+  low-alpha wash that made the cnidoblast a smudge. Lessons recorded in §2.8.
 - **2026-09-13 (f)** — Client reviewed the whole biology suite and approved exactly three labs
   (nerve impulse, sponge canal system, cnidaria), calling the rest very bad. Extracted what those
   three have in common and recorded it as mandate §2.7, the plate standard. Rebuilt the cardiac

@@ -161,11 +161,9 @@
       ctx.restore();
 
       // the cnidoblast itself — a real cell holding the organelle
-      ctx.save(); ctx.globalAlpha = 0.55;
       Z.cell(ctx, cx, cy + R * 0.12, R * 0.86, R * 1.10, {
-        colour: '#2E5580', nucleus: false
+        colour: '#35618F', nucleus: false, stipple: 0.8
       });
-      ctx.restore();
       Z.cell(ctx, cx - R * 0.46, cy + R * 0.68, R * 0.20, R * 0.16,
         { colour: '#4E7FB8', nucleusR: 0.62 });
 

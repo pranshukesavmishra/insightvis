@@ -28,10 +28,10 @@ window.ZOOART = (function () {
      Ectoderm/epidermis blue, mesoderm/muscle red, endoderm/gut amber,
      nuclei dark violet, matrix and jelly pale. */
   const C = {
-    ecto: '#5A8FD8', ectoD: '#2E4F7A',
+    ecto: '#4E86DB', ectoD: '#2A4A78',
     meso: '#D9605A', mesoD: '#7E2F2C',
-    endo: '#E0A54C', endoD: '#7E5A1E',
-    jelly: '#9FB6D8', nucleus: '#3A2A5E', nucleolus: '#1E1436',
+    endo: '#E8A33D', endoD: '#7E5A1E',
+    jelly: '#B9C9E4', nucleus: '#4A3578', nucleolus: '#241844',
     spicule: '#DCE6F5', cavity: '#0A1220', ink: '#0A0E18'
   };
 
@@ -59,27 +59,34 @@ window.ZOOART = (function () {
     o = o || {};
     const base = o.colour || C.ecto;
     const rot = o.rot || 0;
+    const R = Math.max(rx, ry);
+    // slight per-cell variation, keyed to position, so a sheet of cells
+    // never looks stamped from one template
+    const jitter = RX.hash2(Math.round(x * 0.37), Math.round(y * 0.41));
+    const tint = RX.mix(base, jitter > 0.5 ? '#ffffff' : '#05080F', 0.05 + jitter * 0.07);
     ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
-    const gr = ctx.createRadialGradient(-rx * .32, -ry * .34, rx * .08, 0, 0, Math.max(rx, ry));
-    gr.addColorStop(0, mix(base, '#ffffff', .34));
-    gr.addColorStop(.62, base);
-    gr.addColorStop(1, mix(base, C.ink, .46));
-    ctx.fillStyle = gr;
-    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = rgba(mix(base, C.ink, .55), .95);
-    ctx.lineWidth = Math.max(0.8, Math.min(rx, ry) * 0.10);
-    ctx.stroke();
+    RX.blob(ctx, 0, 0, rx, ry, {
+      fill: tint, r: R, cx: 0, cy: 0, squash: ry / Math.max(rx, 0.001),
+      ao: 0.85, rim: 0.8, stipple: o.stipple == null ? 0.9 : o.stipple,
+      grain: RX.mix(base, '#05080F', 0.6),
+      contour: Math.max(0.8, R * 0.075),
+      contourColour: RX.rgba(RX.mix(base, '#05080F', 0.66), 0.95),
+      quality: o.quality
+    });
     if (o.nucleus !== false) {
       const nr = Math.min(rx, ry) * (o.nucleusR || 0.42);
       const nx = (o.nx || 0) * rx, ny = (o.ny || 0) * ry;
-      const ng = ctx.createRadialGradient(nx - nr * .3, ny - nr * .3, nr * .1, nx, ny, nr);
-      ng.addColorStop(0, mix(C.nucleus, '#ffffff', .30));
-      ng.addColorStop(1, C.nucleus);
-      ctx.fillStyle = ng;
-      ctx.beginPath(); ctx.arc(nx, ny, nr, 0, TAU); ctx.fill();
+      // the nucleus sits in the cytoplasm, so it casts a little shadow
+      RX.contact(ctx, c => c.arc(nx, ny, nr, 0, TAU), nr, 0.55);
+      RX.blob(ctx, nx, ny, nr, nr, {
+        fill: C.nucleus, r: nr, cx: nx, cy: ny,
+        ao: 0.5, rim: 0.9, stipple: 1.4, grain: '#120A26',
+        contour: Math.max(0.7, nr * 0.10),
+        contourColour: RX.rgba('#160E2E', 0.95), quality: o.quality
+      });
       if (nr > 2.4) {
         ctx.fillStyle = C.nucleolus;
-        ctx.beginPath(); ctx.arc(nx + nr * .22, ny - nr * .16, nr * 0.32, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(nx + nr * .22, ny - nr * .16, nr * 0.30, 0, TAU); ctx.fill();
       }
     }
     ctx.restore();
@@ -118,7 +125,7 @@ window.ZOOART = (function () {
     const beat = o.beat || 0;
     ctx.save(); ctx.translate(x, y); ctx.rotate(dir + Math.PI / 2);
     // cell body
-    cell(ctx, 0, s * 0.42, s * 0.40, s * 0.44, { colour: o.colour || C.endo, nucleusR: 0.40 });
+    cell(ctx, 0, s * 0.42, s * 0.40, s * 0.44, { colour: o.colour || C.endo, nucleusR: 0.40, stipple: 1.2 });
     // the collar: microvilli, drawn as individual filaments
     const nv = 9;
     ctx.strokeStyle = rgba(mix(o.colour || C.endo, '#ffffff', .5), .9);
@@ -153,23 +160,24 @@ window.ZOOART = (function () {
   function nematocyst(ctx, cx, cy, s, fire, o) {
     o = o || {};
     const f = Math.max(0, Math.min(1, fire || 0));
-    const wall = o.wall || '#7FA8D8';
+    const wall = o.wall || '#6E9AD0';
     ctx.save(); ctx.translate(cx, cy);
 
     // capsule: a thick-walled flask, under pressure
     const cw = s * 0.52, ch = s * 0.74;
-    const cg = ctx.createRadialGradient(-cw * .34, -ch * .38, cw * .1, 0, 0, ch);
-    cg.addColorStop(0, mix(wall, '#ffffff', .42));
-    cg.addColorStop(.6, wall);
-    cg.addColorStop(1, mix(wall, C.ink, .52));
-    ctx.fillStyle = cg;
-    ctx.beginPath(); ctx.ellipse(0, ch * 0.10, cw, ch, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = rgba(mix(wall, C.ink, .6), 1);
-    ctx.lineWidth = Math.max(1.4, s * 0.055); ctx.stroke();
+    RX.blob(ctx, 0, ch * 0.10, cw, ch, {
+      fill: wall, r: ch, ao: 0.85, rim: 0.95, stipple: 0.7,
+      grain: RX.mix(wall, C.ink, .55), shadow: 0.7,
+      contour: Math.max(1.4, s * 0.05),
+      contourColour: rgba(mix(wall, C.ink, .62), 1)
+    });
 
     // lumen, so the coil reads as being inside something
-    ctx.fillStyle = rgba(C.cavity, .78);
-    ctx.beginPath(); ctx.ellipse(0, ch * 0.12, cw * 0.80, ch * 0.82, 0, 0, TAU); ctx.fill();
+    RX.blob(ctx, 0, ch * 0.12, cw * 0.80, ch * 0.82, {
+      fill: '#0C1728', r: ch * 0.82, ao: 0.9, rim: 0.25, stipple: 0,
+      contour: Math.max(1, s * 0.03),
+      contourColour: rgba(mix(wall, '#ffffff', .25), .85)
+    });
 
     // the coiled tubule still inside, unwinding as it fires
     const turns = 3.4 * (1 - f);
@@ -330,7 +338,7 @@ window.ZOOART = (function () {
     const w = o.width || h * 0.30;
     const t = o.t || 0;
     const nT = o.tentacles == null ? 6 : o.tentacles;
-    const wall = Math.max(4, w * 0.20);
+    const wall = Math.max(7, w * 0.34);
     const yBase = cyTop + h;
     const sway = a => Math.sin(t * 1.4 + a * 3.1) * 0.12;
 
@@ -377,28 +385,45 @@ window.ZOOART = (function () {
     for (let y = colBot; y >= colTop; y -= 3) ctx.lineTo(cx + rAt(y) - wall, y);
     ctx.closePath(); ctx.fill();
 
-    // the two epithelia, each a real sheet of cells
-    const steps = Math.max(8, Math.round(h / 16));
-    for (let side = -1; side <= 1; side += 2) {
-      for (let i = 0; i < steps; i++) {
-        const y = colTop + (i + 0.5) / steps * (colBot - colTop);
-        const r = rAt(y);
-        // gastrodermis lines the cavity
-        cell(ctx, cx + side * (r - wall * 0.72), y, wall * 0.34, (colBot - colTop) / steps * 0.46,
-          { colour: C.endo, nucleusR: 0.42 });
-        // epidermis faces the water
-        cell(ctx, cx + side * (r - wall * 0.22), y, wall * 0.30, (colBot - colTop) / steps * 0.46,
-          { colour: C.ecto, nucleusR: 0.42 });
+    // the two epithelia, drawn as lit tissue bands. At this magnification a
+    // plate shows layers, not cells; the cells live in the callout.
+    const band = (inner, outer, colour, grain) => {
+      const pathFn = c => {
+        c.moveTo(cx - rAt(colTop) + inner, colTop);
+        for (let y = colTop; y <= colBot; y += 3) c.lineTo(cx - rAt(y) + inner, y);
+        for (let y = colBot; y >= colTop; y -= 3) c.lineTo(cx - rAt(y) + outer, y);
+        c.closePath();
+        c.moveTo(cx + rAt(colTop) - inner, colTop);
+        for (let y = colTop; y <= colBot; y += 3) c.lineTo(cx + rAt(y) - inner, y);
+        for (let y = colBot; y >= colTop; y -= 3) c.lineTo(cx + rAt(y) - outer, y);
+        c.closePath();
+      };
+      RX.body(ctx, pathFn, {
+        fill: colour, r: Math.max(6, (outer - inner) * 1.6),
+        cx: cx, cy: (colTop + colBot) / 2,
+        ao: 0.5, rim: 0.5, stipple: 1.5, grain: grain,
+        contour: 0.9, contourColour: RX.rgba(RX.mix(colour, '#05080F', .7), .8)
+      });
+      // cell boundaries, as tick marks across the band — the read at this size
+      ctx.save();
+      ctx.beginPath(); pathFn(ctx); ctx.clip();
+      ctx.strokeStyle = RX.rgba(RX.mix(colour, '#05080F', .62), .55);
+      ctx.lineWidth = 1;
+      const steps2 = Math.max(10, Math.round((colBot - colTop) / 9));
+      for (let i = 0; i <= steps2; i++) {
+        const y = colTop + (i / steps2) * (colBot - colTop);
+        [-1, 1].forEach(sg => {
+          ctx.beginPath();
+          ctx.moveTo(cx + sg * (rAt(y) - inner), y);
+          ctx.lineTo(cx + sg * (rAt(y) - outer), y);
+          ctx.stroke();
+        });
       }
-    }
-    // mesoglea, the non-cellular jelly between them
-    for (let side = -1; side <= 1; side += 2) {
-      ctx.strokeStyle = rgba(C.jelly, .55);
-      ctx.lineWidth = Math.max(1.2, wall * 0.16);
-      ctx.beginPath();
-      for (let y = colTop; y <= colBot; y += 3) ctx.lineTo(cx + side * (r0(y, rAt, wall)), y);
-      ctx.stroke();
-    }
+      ctx.restore();
+    };
+    band(0, wall * 0.38, C.ecto, RX.mix(C.ecto, '#05080F', .55));           // epidermis outside
+    band(wall * 0.38, wall * 0.58, C.jelly, RX.mix(C.jelly, '#ffffff', .3)); // mesoglea between
+    band(wall * 0.58, wall * 1.00, C.endo, RX.mix(C.endo, '#05080F', .5));   // gastrodermis inside
 
     /* hypostome and mouth — the one opening */
     ctx.fillStyle = rgba(C.ecto, .95);

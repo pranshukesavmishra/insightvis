@@ -307,6 +307,9 @@ smartlab/
 ├── art-organic.js       organic structure library (`window.ORGART`) — skeletal formulae, rings,
 │                        curly (electron-pushing) arrows, Newman projections, cyclohexane chairs,
 │                        tetrahedral stereocentres, p-orbital lobes and reaction profiles
+├── render.js            illustration renderer (`window.RX`) — lit gradients, ambient occlusion,
+│                        rim light, tissue grain, cast shadows, light-aware contours. Every
+│                        figure library draws through it, so one improvement lifts all of them.
 ├── art-zoo.js           zoological figure library (`window.ZOOART`) — cells, epithelia, body-wall
 │                        layers, nematocysts, choanocytes, spicules, Hydra and sponge sections
 ├── mech.js              mechanism engine (`window.MECH`) — scenes in, an interpolated frame out;
