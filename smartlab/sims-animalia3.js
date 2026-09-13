@@ -161,11 +161,33 @@
       ctx.restore();
 
       // the cnidoblast itself — a real cell holding the organelle
-      Z.cell(ctx, cx, cy + R * 0.12, R * 0.86, R * 1.10, {
-        colour: '#35618F', nucleus: false, stipple: 0.8
+      RX.volume(ctx, c => c.ellipse(cx, cy + R * 0.12, R * 0.86, R * 1.10, 0, 0, TAU), {
+        fill: '#2F6AA8', r: R * 1.10, cx: cx, cy: cy + R * 0.12, squash: 0.78,
+        stipple: 1.1, grain: '#12294A', shadow: 0.8, gloss: 0.30,
+        contour: 1.6, contourColour: 'rgba(12,26,48,.95)'
       });
-      Z.cell(ctx, cx - R * 0.46, cy + R * 0.68, R * 0.20, R * 0.16,
-        { colour: '#4E7FB8', nucleusR: 0.62 });
+      // organelles — a cell that fires a harpoon needs the machinery to build it
+      RX.volume(ctx, c => {
+        c.ellipse(cx - R * 0.52, cy - R * 0.34, R * 0.17, R * 0.10, -0.5, 0, TAU);
+      }, { fill: '#E2866A', r: R * 0.17, cx: cx - R * 0.52, cy: cy - R * 0.34,
+           gloss: 0.5, contour: 1 });
+      ctx.strokeStyle = 'rgba(110,50,36,.85)'; ctx.lineWidth = 1;
+      for (let q = -1; q <= 1; q++) {
+        ctx.beginPath();
+        ctx.moveTo(cx - R * 0.60, cy - R * 0.34 + q * R * 0.045);
+        ctx.lineTo(cx - R * 0.44, cy - R * 0.34 + q * R * 0.045);
+        ctx.stroke();
+      }
+      // Golgi stack, which assembles the capsule
+      ctx.strokeStyle = 'rgba(140,200,255,.7)'; ctx.lineWidth = 1.6;
+      for (let q = 0; q < 4; q++) {
+        ctx.beginPath();
+        ctx.arc(cx + R * 0.50, cy + R * 0.60, R * (0.12 + q * 0.055),
+          Math.PI * 1.08, Math.PI * 1.82);
+        ctx.stroke();
+      }
+      RX.ball(ctx, cx - R * 0.46, cy + R * 0.66, R * 0.19, '#7A4FD0',
+        { gloss: 0.55, shadow: true });
 
       const fireU = S.fires ? clamp((S.ph - 0.35) / 0.24, 0, 1) : 0;
       const cap = Z.nematocyst(ctx, cx, cy - R * 0.12, R * 0.62, fireU, { wall: '#7FA8D8' });
@@ -177,7 +199,9 @@
         [cx - cap.capsuleW * 0.55, cy - R * 0.10, cx - R * 1.18, cy - R * 0.24,
          fireU > 0.02 ? 'thread everting, inside out' : 'coiled thread · ' + p.pressure + ' atm', '#E6F0FF'],
         [cx + cap.capsuleW * 0.62, cy + R * 0.18, cx + R * 1.02, cy + R * 0.20, 'capsule wall', '#7FA8D8'],
-        [cx - R * 0.46, cy + R * 0.68, cx - R * 1.18, cy + R * 0.84, 'nucleus', '#9A8FD0'],
+        [cx - R * 0.46, cy + R * 0.66, cx - R * 1.18, cy + R * 0.84, 'nucleus', '#9A8FD0'],
+        [cx - R * 0.52, cy - R * 0.34, cx - R * 1.14, cy - R * 0.56, 'mitochondrion', '#E2866A'],
+        [cx + R * 0.50, cy + R * 0.60, cx + R * 1.00, cy + R * 0.74, 'Golgi · builds it', '#8CC8FF'],
         [cx + R * 0.30, cy + R * 0.92, cx + R * 1.02, cy + R * 1.06, 'cnidoblast (cnidocyte)', '#C9D4EA']
       ];
       L.forEach(([x0, y0, x1, y1, t2, c2]) => {

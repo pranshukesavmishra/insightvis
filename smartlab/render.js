@@ -193,3 +193,256 @@ window.RX = (function () {
 
   return { body, blob, contour, contact, mix, rgba, hash2, LIGHT, canFilter };
 })();
+
+/* ============================================================
+   VOLUME PASS
+   Flat fills read as paper. These primitives build form the way
+   a painter does: a key light, a bounce (fill) light from the
+   opposite side, a specular, a terminator where the surface
+   turns away, and subsurface warmth through the thin parts.
+   ============================================================ */
+(function (RX) {
+  'use strict';
+  const TAU = Math.PI * 2;
+  const L = RX.LIGHT;
+
+  /* ---- colour ---- */
+  function toHSL(hex) {
+    const c = RX.mix(hex, hex, 0);                 // normalise to #rrggbb
+    const n = parseInt(c.slice(1), 16);
+    let r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    let h = 0, s = 0; const l = (mx + mn) / 2;
+    if (mx !== mn) {
+      const d = mx - mn;
+      s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+      h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      h /= 6;
+    }
+    return [h, s, l];
+  }
+  function fromHSL(h, s, l) {
+    const f = n => {
+      const k = (n + h * 12) % 12;
+      const a = s * Math.min(l, 1 - l);
+      return l - a * Math.max(-1, Math.min(Math.min(k - 3, 9 - k), 1));
+    };
+    const q = v => ('0' + Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16)).slice(-2);
+    return '#' + q(f(0)) + q(f(8)) + q(f(4));
+  }
+  /* push saturation without losing the hue — the "vivid" control */
+  function sat(hex, k, lShift) {
+    const [h, s, l] = toHSL(hex);
+    return fromHSL(h, Math.max(0, Math.min(1, s * (k == null ? 1.35 : k))),
+      Math.max(0, Math.min(1, l + (lShift || 0))));
+  }
+
+  /* =====================================================================
+     SPHERE — a genuinely lit ball: key highlight, terminator, bounce
+     light from below, specular, and a rim where it meets the dark.
+     ===================================================================== */
+  function ball(ctx, x, y, r, colour, o) {
+    o = o || {};
+    const base = o.vivid === false ? colour : sat(colour, 1.25);
+    const lx = x + L.x * r * 0.42, ly = y + L.y * r * 0.42;
+
+    if (o.shadow !== false && r > 3) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,.34)';
+      if (RX.canFilter) ctx.filter = 'blur(' + (r * 0.35).toFixed(1) + 'px)';
+      ctx.beginPath();
+      ctx.ellipse(x - L.x * r * 0.30, y - L.y * r * 0.30, r * 0.96, r * 0.96, 0, 0, TAU);
+      ctx.fill(); ctx.restore(); ctx.filter = 'none';
+    }
+
+    // body: bright at the key, deepening through the terminator
+    const g1 = ctx.createRadialGradient(lx, ly, r * 0.04, x, y, r * 1.02);
+    g1.addColorStop(0, RX.mix(base, '#ffffff', 0.62));
+    g1.addColorStop(0.22, RX.mix(base, '#ffffff', 0.22));
+    g1.addColorStop(0.58, base);
+    g1.addColorStop(0.86, RX.mix(base, '#05080F', 0.42));
+    g1.addColorStop(1, RX.mix(base, '#05080F', 0.62));
+    ctx.fillStyle = g1;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+
+    // bounce light: the ground throws a little colour back up the dark side
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip();
+    const g2 = ctx.createRadialGradient(
+      x - L.x * r * 0.85, y - L.y * r * 0.85, r * 0.05,
+      x - L.x * r * 0.85, y - L.y * r * 0.85, r * 0.95);
+    g2.addColorStop(0, RX.rgba(RX.mix(base, '#ffffff', 0.45), 0.34));
+    g2.addColorStop(1, RX.rgba(base, 0));
+    ctx.fillStyle = g2;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+
+    // subsurface: warmth bleeding through the thin edge
+    if (o.subsurface !== false) {
+      const g3 = ctx.createRadialGradient(x, y, r * 0.60, x, y, r);
+      g3.addColorStop(0, RX.rgba(RX.mix(base, '#FF9A6A', 0.5), 0));
+      g3.addColorStop(1, RX.rgba(RX.mix(base, '#FF9A6A', 0.5), 0.22));
+      ctx.fillStyle = g3;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    ctx.restore();
+
+    // specular
+    if (o.specular !== false && r > 2.5) {
+      const sp = ctx.createRadialGradient(lx, ly, 0, lx, ly, r * 0.34);
+      sp.addColorStop(0, 'rgba(255,255,255,' + (o.gloss == null ? 0.72 : o.gloss) + ')');
+      sp.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sp;
+      ctx.beginPath(); ctx.ellipse(lx, ly, r * 0.30, r * 0.22, Math.atan2(L.y, L.x), 0, TAU);
+      ctx.fill();
+    }
+    // rim
+    if (o.rim !== false && r > 3) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip();
+      ctx.strokeStyle = RX.rgba(RX.mix(base, '#ffffff', 0.85), 0.5);
+      ctx.lineWidth = Math.max(1, r * 0.10);
+      ctx.beginPath();
+      ctx.arc(x + L.x * r * 0.10, y + L.y * r * 0.10, r * 0.97, 0, TAU);
+      ctx.stroke(); ctx.restore();
+    }
+  }
+
+  /* =====================================================================
+     TUBE — a round tube along a polyline. Tentacles, vessels, canals,
+     axons and neurites are all this, and flat strokes are what made them
+     look like drawn lines instead of structures.
+     ===================================================================== */
+  function tube(ctx, pts, radius, colour, o) {
+    o = o || {};
+    if (!pts || pts.length < 2) return;
+    const base = o.vivid === false ? colour : sat(colour, 1.22);
+    const rAt = typeof radius === 'function' ? radius : () => radius;
+    const stroke = (wScale, col, ox, oy, cap) => {
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = cap || 'round';
+      ctx.strokeStyle = col;
+      ctx.translate(ox, oy);
+      // width varies along the path, so stroke it segment by segment
+      for (let i = 0; i < pts.length - 1; i++) {
+        const r = rAt(i / (pts.length - 1));
+        ctx.lineWidth = Math.max(0.4, r * 2 * wScale);
+        ctx.beginPath();
+        ctx.moveTo(pts[i][0], pts[i][1]);
+        ctx.lineTo(pts[i + 1][0], pts[i + 1][1]);
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+    const r0 = rAt(0.5);
+    if (o.shadow) {
+      ctx.save();
+      if (RX.canFilter) ctx.filter = 'blur(' + (r0 * 0.5).toFixed(1) + 'px)';
+      stroke(1.0, 'rgba(0,0,0,.38)', -L.x * r0 * 0.5, -L.y * r0 * 0.5);
+      ctx.restore(); ctx.filter = 'none';
+    }
+    stroke(1.00, RX.mix(base, '#05080F', 0.55));                       // shadowed underside
+    stroke(0.86, base, L.x * r0 * 0.12, L.y * r0 * 0.12);              // body
+    stroke(0.52, RX.mix(base, '#ffffff', 0.28), L.x * r0 * 0.30, L.y * r0 * 0.30);
+    stroke(0.20, RX.mix(base, '#ffffff', 0.68), L.x * r0 * 0.44, L.y * r0 * 0.44);  // highlight
+    if (o.contour) {
+      ctx.save();
+      ctx.strokeStyle = RX.rgba(RX.mix(base, '#05080F', 0.78), 0.85);
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      for (let side = -1; side <= 1; side += 2) {
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+          const r = rAt(i / (pts.length - 1));
+          const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+          const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+          const px = pts[i][0] - dy / len * r * side, py = pts[i][1] + dx / len * r * side;
+          i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        }
+        ctx.lineWidth = o.contour;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  /* Sample a quadratic into a polyline, which is what tube() wants. */
+  function quadPts(x0, y0, cx, cy, x1, y1, n) {
+    const out = [];
+    n = n || 18;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, u = 1 - t;
+      out.push([u * u * x0 + 2 * u * t * cx + t * t * x1,
+                u * u * y0 + 2 * u * t * cy + t * t * y1]);
+    }
+    return out;
+  }
+
+  /* =====================================================================
+     VOLUME — a closed form given real roundness: the flat fill is
+     replaced by a lit body, a bounce, a terminator and a specular band.
+     ===================================================================== */
+  function volume(ctx, path, o) {
+    o = o || {};
+    const base = o.vivid === false ? (o.fill || '#8899AA') : sat(o.fill || '#8899AA', 1.22);
+    const r = o.r || 40, cx = o.cx || 0, cy = o.cy || 0;
+    if (o.shadow) {
+      ctx.save();
+      if (RX.canFilter) ctx.filter = 'blur(' + (r * 0.30).toFixed(1) + 'px)';
+      ctx.fillStyle = 'rgba(0,0,0,' + (0.40 * o.shadow) + ')';
+      ctx.translate(-L.x * r * 0.14, -L.y * r * 0.14);
+      ctx.beginPath(); path(ctx); ctx.fill();
+      ctx.restore(); ctx.filter = 'none';
+    }
+    ctx.save();
+    ctx.beginPath(); path(ctx);
+    const g1 = ctx.createRadialGradient(
+      cx + L.x * r * 0.52, cy + L.y * r * 0.52, r * 0.05, cx, cy, r * 1.15);
+    g1.addColorStop(0, RX.mix(base, '#ffffff', 0.50));
+    g1.addColorStop(0.26, RX.mix(base, '#ffffff', 0.16));
+    g1.addColorStop(0.62, base);
+    g1.addColorStop(1, RX.mix(base, '#05080F', 0.56));
+    ctx.fillStyle = g1; ctx.fill();
+    ctx.clip();
+    // bounce from the shadow side
+    const g2 = ctx.createRadialGradient(
+      cx - L.x * r * 0.95, cy - L.y * r * 0.95, r * 0.05,
+      cx - L.x * r * 0.95, cy - L.y * r * 0.95, r * 1.0);
+    g2.addColorStop(0, RX.rgba(RX.mix(base, '#ffffff', 0.5), 0.26));
+    g2.addColorStop(1, RX.rgba(base, 0));
+    ctx.fillStyle = g2; ctx.fillRect(cx - r * 1.4, cy - r * 1.4, r * 2.8, r * 2.8);
+    if (o.stipple) {
+      const n = Math.round(r * r * 0.13 * o.stipple);
+      const gcol = o.grain || RX.mix(base, '#05080F', 0.5);
+      for (let i = 0; i < Math.min(n, 1100); i++) {
+        const a = RX.hash2(i * 1.7, r) * TAU;
+        const rr = Math.sqrt(RX.hash2(i * 3.1, r + 7)) * r * 1.2;
+        ctx.fillStyle = RX.rgba(gcol, 0.08 + RX.hash2(i * 7.9, r + 3) * 0.20);
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * (o.squash || 1),
+          0.5 + RX.hash2(i * 5.3, r + 13) * 1.2, 0, TAU);
+        ctx.fill();
+      }
+    }
+    // specular band along the lit edge
+    if (o.gloss !== 0) {
+      ctx.save();
+      ctx.translate(L.x * r * 0.10, L.y * r * 0.10);
+      if (RX.canFilter) ctx.filter = 'blur(' + Math.max(1, r * 0.08).toFixed(1) + 'px)';
+      ctx.strokeStyle = 'rgba(255,255,255,' + (o.gloss == null ? 0.34 : o.gloss) + ')';
+      ctx.lineWidth = r * 0.09;
+      ctx.beginPath(); path(ctx); ctx.stroke();
+      ctx.restore(); ctx.filter = 'none';
+    }
+    ctx.restore();
+    if (o.contour !== 0) {
+      ctx.save();
+      ctx.strokeStyle = o.contourColour || RX.rgba(RX.mix(base, '#05080F', 0.80), 1);
+      ctx.lineWidth = o.contour || Math.max(1.1, r * 0.05);
+      ctx.lineJoin = 'round';
+      ctx.beginPath(); path(ctx); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  RX.ball = ball; RX.tube = tube; RX.volume = volume;
+  RX.quadPts = quadPts; RX.sat = sat; RX.toHSL = toHSL; RX.fromHSL = fromHSL;
+})(window.RX);

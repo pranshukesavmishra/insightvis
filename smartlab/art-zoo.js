@@ -28,10 +28,10 @@ window.ZOOART = (function () {
      Ectoderm/epidermis blue, mesoderm/muscle red, endoderm/gut amber,
      nuclei dark violet, matrix and jelly pale. */
   const C = {
-    ecto: '#4E86DB', ectoD: '#2A4A78',
-    meso: '#D9605A', mesoD: '#7E2F2C',
-    endo: '#E8A33D', endoD: '#7E5A1E',
-    jelly: '#B9C9E4', nucleus: '#4A3578', nucleolus: '#241844',
+    ecto: '#3E8CF5', ectoD: '#1E4C90',
+    meso: '#F0554E', mesoD: '#8E2A26',
+    endo: '#FFAE2E', endoD: '#8E5E12',
+    jelly: '#CFE0F7', nucleus: '#6A3FC0', nucleolus: '#2E1A5E',
     spicule: '#DCE6F5', cavity: '#0A1220', ink: '#0A0E18'
   };
 
@@ -165,35 +165,39 @@ window.ZOOART = (function () {
 
     // capsule: a thick-walled flask, under pressure
     const cw = s * 0.52, ch = s * 0.74;
-    RX.blob(ctx, 0, ch * 0.10, cw, ch, {
-      fill: wall, r: ch, ao: 0.85, rim: 0.95, stipple: 0.7,
-      grain: RX.mix(wall, C.ink, .55), shadow: 0.7,
+    RX.volume(ctx, c => c.ellipse(0, ch * 0.10, cw, ch, 0, 0, TAU), {
+      fill: wall, r: ch, cx: 0, cy: ch * 0.10, squash: cw / ch,
+      stipple: 0.8, grain: RX.mix(wall, C.ink, .55), shadow: 0.9, gloss: 0.42,
       contour: Math.max(1.4, s * 0.05),
-      contourColour: rgba(mix(wall, C.ink, .62), 1)
+      contourColour: rgba(mix(wall, C.ink, .66), 1)
     });
 
     // lumen, so the coil reads as being inside something
-    RX.blob(ctx, 0, ch * 0.12, cw * 0.80, ch * 0.82, {
-      fill: '#0C1728', r: ch * 0.82, ao: 0.9, rim: 0.25, stipple: 0,
-      contour: Math.max(1, s * 0.03),
-      contourColour: rgba(mix(wall, '#ffffff', .25), .85)
-    });
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(0, ch * 0.12, cw * 0.80, ch * 0.82, 0, 0, TAU);
+    ctx.fillStyle = '#060B15'; ctx.fill();
+    ctx.clip();
+    const lum = ctx.createRadialGradient(0, ch * 0.12, cw * 0.20, 0, ch * 0.12, cw * 0.86);
+    lum.addColorStop(0, 'rgba(0,0,0,0)');
+    lum.addColorStop(1, rgba(mix(wall, '#ffffff', .5), .30));
+    ctx.fillStyle = lum; ctx.fillRect(-cw, -ch, cw * 2, ch * 2.2);
+    ctx.restore();
+    ctx.strokeStyle = rgba(mix(wall, '#ffffff', .35), .9);
+    ctx.lineWidth = Math.max(1, s * 0.032);
+    ctx.beginPath(); ctx.ellipse(0, ch * 0.12, cw * 0.80, ch * 0.82, 0, 0, TAU); ctx.stroke();
 
     // the coiled tubule still inside, unwinding as it fires
     const turns = 3.4 * (1 - f);
     if (turns > 0.05) {
-      ctx.strokeStyle = rgba('#E6F0FF', .85);
-      ctx.lineWidth = Math.max(1, s * 0.045);
-      ctx.beginPath();
-      const N = 150;
+      const coil = [];
+      const N = 160;
       for (let i = 0; i <= N; i++) {
         const t = i / N;
         const a = t * turns * TAU;
         const r = cw * 0.70 * (1 - t * 0.86);
-        const px = Math.cos(a) * r, py = ch * 0.12 + Math.sin(a) * r * 1.12;
-        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        coil.push([Math.cos(a) * r, ch * 0.12 + Math.sin(a) * r * 1.12]);
       }
-      ctx.stroke();
+      RX.tube(ctx, coil, Math.max(0.9, s * 0.030), '#BFE0FF', { vivid: false });
     }
 
     // operculum — the lid, hinged open by the discharge
@@ -342,7 +346,8 @@ window.ZOOART = (function () {
     const yBase = cyTop + h;
     const sway = a => Math.sin(t * 1.4 + a * 3.1) * 0.12;
 
-    /* tentacles, drawn first so the hypostome overlaps their bases */
+    /* tentacles: round lit tubes, tapering, each carrying batteries of
+       cnidocytes — flat strokes were what made them read as drawn lines */
     const tips = [];
     for (let i = 0; i < nT; i++) {
       const u = nT > 1 ? i / (nT - 1) : 0.5;
@@ -351,22 +356,19 @@ window.ZOOART = (function () {
       const bx = cx + Math.cos(a) * w * 0.30, by = cyTop + h * 0.035;
       const ex = bx + Math.cos(a) * len, ey = by + Math.sin(a) * len;
       const mx = bx + Math.cos(a + 0.5) * len * 0.55, my = by + Math.sin(a + 0.5) * len * 0.55;
-      ctx.strokeStyle = rgba(C.ecto, .95);
-      ctx.lineWidth = Math.max(2.4, w * 0.13);
-      ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(mx, my, ex, ey); ctx.stroke();
-      // the hollow core — tentacles of Hydra are extensions of the cavity
-      ctx.strokeStyle = rgba(C.endo, .55);
-      ctx.lineWidth = Math.max(0.9, w * 0.045);
-      ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(mx, my, ex, ey); ctx.stroke();
-      // batteries of nematocysts along the tentacle
-      const nb = 5;
+      const pts = RX.quadPts(bx, by, mx, my, ex, ey, 20);
+      const rBase = Math.max(2.6, w * 0.155);
+      RX.tube(ctx, pts, t2 => rBase * (1 - t2 * 0.55), C.ecto,
+        { contour: Math.max(0.8, w * 0.022), shadow: true });
+      // batteries of cnidocytes, sitting proud of the surface
+      const nb = 7;
       for (let k = 1; k <= nb; k++) {
         const s2 = k / (nb + 0.4);
-        const px = (1 - s2) * (1 - s2) * bx + 2 * (1 - s2) * s2 * mx + s2 * s2 * ex;
-        const py = (1 - s2) * (1 - s2) * by + 2 * (1 - s2) * s2 * my + s2 * s2 * ey;
-        ctx.fillStyle = rgba('#9FD8FF', .85);
-        ctx.beginPath(); ctx.arc(px, py, Math.max(1.4, w * 0.055), 0, TAU); ctx.fill();
+        const idx = Math.min(pts.length - 1, Math.round(s2 * (pts.length - 1)));
+        const q = pts[idx];
+        const rr = rBase * (1 - s2 * 0.55);
+        RX.ball(ctx, q[0], q[1] - rr * 0.30, Math.max(1.6, rr * 0.52), '#8FD8FF',
+          { shadow: false, gloss: 0.85 });
       }
       tips.push([ex, ey]);
     }
@@ -379,11 +381,25 @@ window.ZOOART = (function () {
       return w * (0.42 + 0.58 * Math.sin(Math.PI * Math.pow(u, 0.62) * 0.92));
     };
     // gastrovascular cavity
-    ctx.fillStyle = rgba(C.cavity, .92);
-    ctx.beginPath();
-    for (let y = colTop; y <= colBot; y += 3) ctx.lineTo(cx - rAt(y) + wall, y);
-    for (let y = colBot; y >= colTop; y -= 3) ctx.lineTo(cx + rAt(y) - wall, y);
-    ctx.closePath(); ctx.fill();
+    const cavPath = c => {
+      c.moveTo(cx - rAt(colTop) + wall, colTop);
+      for (let y = colTop; y <= colBot; y += 3) c.lineTo(cx - rAt(y) + wall, y);
+      for (let y = colBot; y >= colTop; y -= 3) c.lineTo(cx + rAt(y) - wall, y);
+      c.closePath();
+    };
+    ctx.save();
+    ctx.beginPath(); cavPath(ctx);
+    ctx.fillStyle = '#070C16'; ctx.fill();
+    ctx.clip();
+    // light spilling in from the mouth, and a faint sheen on the lining
+    const mg = ctx.createLinearGradient(0, colTop, 0, colBot);
+    mg.addColorStop(0, 'rgba(255,196,120,.22)');
+    mg.addColorStop(0.35, 'rgba(255,196,120,.04)');
+    mg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = mg; ctx.fillRect(cx - w * 2, colTop, w * 4, colBot - colTop);
+    ctx.strokeStyle = RX.rgba(C.endo, .30); ctx.lineWidth = 2.4;
+    ctx.beginPath(); cavPath(ctx); ctx.stroke();
+    ctx.restore();
 
     // the two epithelia, drawn as lit tissue bands. At this magnification a
     // plate shows layers, not cells; the cells live in the callout.
@@ -398,12 +414,33 @@ window.ZOOART = (function () {
         for (let y = colBot; y >= colTop; y -= 3) c.lineTo(cx + rAt(y) - outer, y);
         c.closePath();
       };
-      RX.body(ctx, pathFn, {
-        fill: colour, r: Math.max(6, (outer - inner) * 1.6),
-        cx: cx, cy: (colTop + colBot) / 2,
-        ao: 0.5, rim: 0.5, stipple: 1.5, grain: grain,
-        contour: 0.9, contourColour: RX.rgba(RX.mix(colour, '#05080F', .7), .8)
-      });
+      const vivid = RX.sat(colour, 1.25);
+      const wMax = rAt(colBot);
+      const lg = ctx.createLinearGradient(cx - wMax, 0, cx + wMax, 0);
+      lg.addColorStop(0, RX.mix(vivid, '#05080F', .42));
+      lg.addColorStop(0.24, RX.mix(vivid, '#ffffff', .34));
+      lg.addColorStop(0.46, vivid);
+      lg.addColorStop(0.76, RX.mix(vivid, '#ffffff', .18));
+      lg.addColorStop(1, RX.mix(vivid, '#05080F', .50));
+      ctx.save();
+      ctx.beginPath(); pathFn(ctx);
+      ctx.fillStyle = lg; ctx.fill();
+      ctx.clip();
+      // tissue grain
+      const nG = Math.round((colBot - colTop) * (outer - inner) * 0.055);
+      for (let i = 0; i < Math.min(nG, 700); i++) {
+        const yy = colTop + RX.hash2(i * 2.3, 11) * (colBot - colTop);
+        const sgn = RX.hash2(i * 5.1, 19) > 0.5 ? 1 : -1;
+        const xx = cx + sgn * (rAt(yy) - inner - RX.hash2(i * 7.7, 23) * (outer - inner));
+        ctx.fillStyle = RX.rgba(grain, 0.10 + RX.hash2(i * 3.3, 29) * 0.22);
+        ctx.beginPath(); ctx.arc(xx, yy, 0.5 + RX.hash2(i * 9.1, 31) * 1.1, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = RX.rgba(RX.mix(vivid, '#05080F', .74), .9);
+      ctx.lineWidth = 1.0;
+      ctx.beginPath(); pathFn(ctx); ctx.stroke();
+      ctx.restore();
       // cell boundaries, as tick marks across the band — the read at this size
       ctx.save();
       ctx.beginPath(); pathFn(ctx); ctx.clip();

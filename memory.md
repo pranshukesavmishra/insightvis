@@ -56,6 +56,27 @@ in correct anteroposterior order, a neuron with soma, dendrites, hillock, myelin
 a bilayer with heads and tails. `art-bio.js` is the single library for these; a lab never
 hand-draws anatomy again.
 
+### 2.9 The agreed look: rich, volumetric, vivid, dense
+Asked directly on 2026-09-13, the client chose **all three** of rich 3D realism, vivid colour and
+more detail per figure, with no reference — my judgement. That is now the target, and `render.js`
+carries the volume pass that delivers it:
+- `RX.ball` — a properly lit sphere: key highlight, terminator, bounce light off the shadow side,
+  subsurface warmth, specular and rim.
+- `RX.tube` — a round tube along a polyline, built from stacked strokes offset toward the light.
+  **Tentacles, vessels, canals, axons and neurites must all use this.** Flat strokes are precisely
+  what made them read as drawn lines rather than structures.
+- `RX.volume` — a closed form with a lit body, a bounce, tissue grain and a specular band.
+- `RX.sat` — the vivid control; tissue colours are pushed through it rather than picked pale.
+
+Two rules learned the hard way, both easy to get wrong again:
+- **A cavity is not a solid.** Running `RX.volume` on the gastrovascular cavity put a specular
+  highlight in the middle of a hole. A cavity is dark at its centre and catches light only at the
+  rim, plus whatever spills in through its opening.
+- **A gradient must span the shape it fills.** The body-wall bands were shaded with a radial
+  gradient whose radius was the band *thickness* while the band was 230 px tall, so everything
+  past the first few pixels fell to the final dark stop and the walls went black. For a long thin
+  band, light it with a linear gradient across its thickness.
+
 ### 2.8 Rendering quality is a layer, not a per-figure effort
 After the plate standard landed the client still said the graphics needed "very much upgrade".
 Layout was no longer the fault — **rendering** was. Flat fills with one gradient look like plastic
@@ -512,6 +533,13 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-13 (h)** — Asked the client directly what "good" looks like; answer was rich 3D
+  realism **and** vivid colour **and** more detail, judgement mine. Added the volume pass to
+  `render.js` (`RX.ball`, `RX.tube`, `RX.volume`, `RX.sat`) and rebuilt the cnidarian lab on it:
+  tentacles are now round lit tubes carrying batteries of cnidocytes, the gastrovascular cavity
+  reads as a cavity with light spilling from the mouth, the body wall is three lit tissue bands,
+  and the cnidoblast is a solid cell with a shaded nucleus, a striated mitochondrion, a Golgi
+  stack and a bright coiled tubule in a dark lumen. Rules in §2.9.
 - **2026-09-13 (g)** — Client: still "very much upgrade" needed on graphics. Layout was no longer
   the problem, so built `render.js`, an illustration renderer every figure library now draws
   through — lit gradients, ambient occlusion, rim light, tissue grain, cast shadows and
