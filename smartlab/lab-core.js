@@ -446,7 +446,9 @@ window.InsightLab = (function () {
       if (r.width < 2 || r.height < 2) return false;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const w = Math.round(r.width), h = Math.round(r.height);
-      if (w === S.w && h === S.h && dpr === S.dpr) return false;
+      // ignore sub-pixel jitter: a one-pixel difference is never worth a
+      // reallocation, and reacting to it is how a resize loop starts
+      if (Math.abs(w - S.w) < 2 && Math.abs(h - S.h) < 2 && dpr === S.dpr) return false;
       S.w = w; S.h = h; S.dpr = dpr;
       cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
       return true;

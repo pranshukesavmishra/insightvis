@@ -133,7 +133,7 @@ table{border-collapse:collapse;}
 /* ---------- stage ---------- */
 .stage{position:relative;background:var(--ink-950);border-bottom:1px solid var(--line-soft);
   aspect-ratio:16/9;width:100%;}
-.stage canvas{width:100%;height:100%;touch-action:none;}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;}
 .stagepanel[data-d3="1"] .stage canvas{cursor:grab;}
 .stagepanel[data-d3="1"] .stage canvas:active{cursor:grabbing;}
 .stage-hint{position:absolute;left:10px;bottom:9px;font-family:var(--mono);font-size:9.5px;
@@ -245,7 +245,7 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;
 /* ---------- plots ---------- */
 .plot{position:relative;width:100%;aspect-ratio:16/7;background:var(--ink-950);
   border-radius:var(--r2);overflow:hidden;}
-.plot canvas{width:100%;height:100%;cursor:crosshair;}
+.plot canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;}
 .tooltip{position:absolute;z-index:5;pointer-events:none;
   background:rgba(8,12,22,.95);border:1px solid var(--line);border-radius:var(--r2);
   padding:7px 9px;display:flex;flex-direction:column;gap:3px;min-width:118px;

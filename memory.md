@@ -344,6 +344,16 @@ These were found by direct numerical testing. Changing them will break the teach
   ground and runs the bloom pass around `drawStage`, and hands every sim a toolkit on `g`:
   `ramp`, `tween`, `label` (collision-aware), `sphere`, `shadow`, `layout`, `scaleBar`, `hit`,
   `pointer`, `quality`. A sim opts out with `ground:false` or `bloom:false` on its definition.
+- **A canvas must never size the box that measures it.** Client report, 2026-09-13: the stage
+  "keeps increasing, it should be constant size". A `<canvas>` with width/height *attributes*
+  contributes them as intrinsic content height. Inside an `aspect-ratio` box whose height is auto,
+  the taller of the two wins — so measuring the box and writing that height back into the attribute
+  every frame ratchets it upward about a pixel per frame (measured: ~35 px/second, unbounded).
+  The fix is `position:absolute;inset:0` on every stage and plot canvas, which takes it out of
+  flow so the box height comes purely from `aspect-ratio`; plus a 2 px tolerance in
+  `Surface.resize()` so sub-pixel jitter can never start a loop. `smartlab/grow.mjs` samples the
+  stage over six seconds and `smartlab/resz.mjs` checks every breakpoint — run both after any
+  change to stage or plot layout.
 - **A mechanism is data, not drawing code.** `mech.js` (`window.MECH`) takes a list of scenes —
   each naming its atoms, bonds and the curly arrows that turn it into the next — and interpolates
   between them, so bonds genuinely break and form, charges fade in, and fractional bond orders
@@ -439,6 +449,10 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-13 (d)** — Client reported the stage box growing without limit. Reproduced it
+  (~35 px/second, every lab), traced it to a canvas-intrinsic-size feedback loop against
+  `aspect-ratio`, fixed it and added two regression harnesses. Stage now holds exactly 16:9 at
+  every breakpoint. Rule recorded in §8.
 - **2026-09-13 (c)** — **Started on the §2.5 list, beginning with animated mechanisms.** Built
   `mech.js`, then put it to work in four labs: the full three-step EAS mechanism (π attack →
   arenium with δ+ on the three carbons that carry it → rearomatisation), the carbocation lab's
