@@ -292,6 +292,15 @@ These were found by direct numerical testing. Changing them will break the teach
 - **Colour helpers must return hex.** `mixHex` returning `rgb(...)` and then being fed back
   into itself silently produced invalid gradient stops and black chamber cavities. `parseHex`
   now tolerates bad input and `mixHex` returns `#rrggbb`.
+- **Every control must be exercised before shipping.** `smartlab/audit.mjs` does it: a static wiring
+  check (does the key exist in `params`, is it read anywhere in the owning file or its `-x`/extend
+  patches) plus a live click-through of every range, toggle, select option and preset on all 26 sims,
+  asserting the param actually moves. Run `node audit.mjs` — it must print CLEAN. It has already found
+  two genuinely dead controls (`matrixView` on ak-key, declared and never read) and one crash.
+- **Stage graphics come from the engine, not from each sim.** `lab-core.js` paints the instrument
+  ground and runs the bloom pass around `drawStage`, and hands every sim a toolkit on `g`:
+  `ramp`, `tween`, `label` (collision-aware), `sphere`, `shadow`, `layout`, `scaleBar`, `hit`,
+  `pointer`, `quality`. A sim opts out with `ground:false` or `bloom:false` on its definition.
 - **Sim methods live in the definition object, not on the state object `S`.** A helper needed
   by `drawStage`/`drawPlot` goes at module scope. (This caused a real runtime bug — `S.intensity`
   was called but never existed on `S`.)
@@ -357,6 +366,9 @@ Append only. Never rewrite history.
 | 2026-09-12 | **`art-bio.js` — one anatomical figure library, no hand-drawn anatomy in sims** | Client rejected the v3 biology figures as unrealistic; a single library keeps every lab's anatomy correct and consistent |
 | 2026-09-12 | Myelin modelled as a real cable property, not a drawing | A toggle that only changed the picture would violate mandate 2.1; internodes genuinely lose their channels and the spike genuinely jumps |
 | 2026-09-12 | Vertebrate-heart lab keeps its schematic circulation loops but draws the organ | The loops are the teaching point; only the heart itself needed to stop being four boxes |
+| 2026-09-13 | **A control audit that runs the UI, not just greps it** | The client reported dead controls; static analysis alone gives false positives on dynamic `p[key]` access and misses stale-DOM bugs |
+| 2026-09-13 | Graphics upgrades built into `lab-core`, not per-sim | Ten layers applied once lift all 26 labs; per-sim tweaks would drift apart immediately |
+| 2026-09-13 | Organic chemistry chosen as the fifth subject block, five labs deep | Highest-yield JEE Advanced territory that was entirely missing, and all five topics have genuinely computable models |
 
 ---
 
@@ -375,6 +387,15 @@ Append only. Never rewrite history.
   data core and an organism-art module. Ran the five requested upgrade passes in order and recorded
   what each one changed. Verification caught the white-button theme-token bug and an unguarded
   `setPointerCapture`; both are now in §7 and §8 so they cannot recur.
+- **2026-09-13** — **Shipped v5: the organic chemistry suite and ten graphics layers.** Built
+  `art-organic.js` (skeletal structures, curly arrows, Newman projections, cyclohexane chairs,
+  tetrahedral stereocentres, p-orbital lobes, reaction profiles) and five labs on top of it:
+  Hückel MO theory with live Jacobi diagonalisation, conformational analysis, electrophilic aromatic
+  substitution from Hammett constants, chirality/CIP/polarimetry, and carbocation rearrangement with
+  an integrated kinetic scheme. Wrote `audit.mjs` after the client reported dead controls, which found
+  and fixed two. Then added ten rendering layers to `lab-core` — instrument ground, bloom, collision-aware
+  labels, perceptual ramps, tweening, lit materials, hit targets, layout grid, scale chrome and quality
+  tiers — so all 26 labs gained them at once.
 - **2026-09-12 (c)** — **Shipped v4: anatomical biology figures.** Client reported the v3
   biology diagrams as unrealistic and hard to visualise. Confirmed it from screenshots (the
   cardiac "heart" was an angular blob with floating ellipses; the axon was a plain rectangle

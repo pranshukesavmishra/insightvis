@@ -73,7 +73,7 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v4 (shipped)
+## 4. Insight Smart Lab — v5 (shipped)
 
 Source: [`smartlab/`](./smartlab). **Twenty-one experiments across seven chapters.** Six chapters
 carry two experiments each; **Animal Kingdom carries nine**, because it is the highest-preference
@@ -109,6 +109,41 @@ harmonics. A second graph shows the signed R(r) so nodes are visible as genuine 
 Every wavelength from **1/λ = RZ²(1/n_f² − 1/n_i²)**, with the Balmer lines painted in their true
 colours, all five series on one wavenumber axis, and a Rydberg linearity check. Switches to He⁺,
 Li²⁺ and Be³⁺ for the Z² scaling.
+
+### Chemistry · Aromaticity & Molecular Orbitals
+**· Hückel MO Theory — Where 4n + 2 Actually Comes From**
+Builds the secular determinant for any π system you choose and **diagonalises it live** by Jacobi rotations.
+Fills the levels respecting degeneracy, reports delocalisation energy and the HOMO–LUMO gap, and draws the
+selected MO as phased p-orbital lobes on the ring. A **Frost circle** is drawn beside the computed ladder with
+tie lines proving the mnemonic and the eigenvalues are the same thing. Aromatic, antiaromatic and non-aromatic
+are verdicts from the arithmetic, including the planarity trap that catches cyclooctatetraene.
+
+### Chemistry · Stereochemistry & Conformation
+**· Conformational Analysis — Newman Projections & the Ring Flip**
+A real torsional potential — threefold bond term plus a pairwise van der Waals term — sampled every degree,
+with **Boltzmann populations** integrated over the whole curve. The anti/gauche/eclipsed/syn-periplanar
+structure emerges rather than being labelled. Switch to cyclohexane and the same thermodynamics drives the
+chair–chair flip using measured **A-values**, with the 1,2/1,3/1,4 cis–trans logic computed.
+
+**· Chirality, CIP and the Polarimeter**
+A genuine Cahn–Ingold–Prelog comparison over the four branches assigns R/S — including the inversion when the
+lowest priority is not pointing away. Alongside it a working polarimeter: α = [α]·l·c, a plane of polarisation
+drawn as a ribbon that genuinely twists along the tube, an analyser obeying **Malus's law**, and optical
+rotatory dispersion from a one-term Drude equation.
+
+### Chemistry · Aromatic Compounds
+**· Electrophilic Aromatic Substitution — Directing Effects from First Principles**
+Takes the **Hammett σ⁺** of the substituent and the **ρ⁺** of the electrophile, computes a partial rate factor
+for every position, and turns those into an isomer distribution and a rate relative to benzene. The arenium ion
+is drawn with its three resonance contributors, so you can watch the donor lone pair quench the charge at ortho
+and para — and fail to at meta. Halogens, sterics and the anilinium trap all fall out of the numbers.
+
+### Chemistry · Hydrocarbons & Reaction Mechanisms
+**· Carbocations — Markovnikov, Hyperconjugation and Rearrangement**
+Markovnikov as a consequence rather than a premise: both protonation barriers are computed from cation
+stability through a Hammond relation, and the **competing kinetic scheme is integrated** to give the product
+distribution. 1,2-hydride and methyl shifts are in the scheme, so the "unexpected" rearranged product appears
+on its own. The peroxide effect switches the mechanism to a radical chain — for HBr only.
 
 ### Chemistry · Haloalkanes & Haloarenes
 **7 · SN1 vs SN2 — Mechanism, Stereochemistry and Rate Law**
@@ -241,12 +276,27 @@ smartlab/
 ├── sims-chemistry2.js   Bohr model & spectrum · E1/E2 elimination
 ├── sims-biology.js      action potential · cardiac cycle
 ├── sims-biology2.js     synapse · cardiac conduction & heart block
+├── art-organic.js       organic structure library (`window.ORGART`) — skeletal formulae, rings,
+│                        curly (electron-pushing) arrows, Newman projections, cyclohexane chairs,
+│                        tetrahedral stereocentres, p-orbital lobes and reaction profiles
+├── audit.mjs            control audit — static wiring check plus a live click-through of every
+│                        control and preset on every lab; must print CLEAN before a release
 ├── art-bio.js           anatomical figure library (`window.BIOART`) — the vertebrate heart,
 │                        the neuron, the phospholipid bilayer and the synapse. Every figure is
 │                        drawn in a normalised box and scaled, so any lab places one at any size.
 └── sims-extend.js       depth pass — extra controls, second graphs and quizzes
                          bolted onto the original six via `InsightLab.extend()`
 ```
+
+**Every control is verified before every release.** `smartlab/audit.mjs` runs a static wiring check and then
+a live click-through of every range, toggle, select option and preset across all 26 labs, asserting the
+parameter actually moves. It must print `CLEAN` — it has already caught two genuinely dead controls.
+
+**Ten rendering layers live in the engine**, so every lab gets them: an instrument ground with vignette and
+measurement grid; a real threshold-and-blur **bloom** pass; **collision-aware labels** that nudge apart and
+grow leader lines; perceptual colour ramps; frame-rate-independent **tweening**; lit sphere and shadow
+materials; **hit targets** that advertise themselves under the cursor; a layout grid; scale-bar chrome; and a
+quality tier that follows the measured frame cost.
 
 **Zero external JavaScript dependencies.** All 3D is a hand-rolled Z-up perspective projection
 with painter's-algorithm depth sorting and additive ("phosphor") blending on Canvas 2D.

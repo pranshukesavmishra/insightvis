@@ -6,7 +6,7 @@
 (function (L, A) {
   'use strict';
   const { clamp } = L;
-  const { PHYLA } = A;
+  const { PHYLA, CHARACTERS } = A;
 
   /* Ordinal grading of each organ system, so the matrix reads as a
      progression rather than as unrelated labels. */
@@ -34,6 +34,14 @@
       names: ['Hermaphrodite', 'Both occur', 'Dioecious'] }
   ];
 
+  /* the structural characters, expressed in the same column shape as SYSTEMS
+     so one matrix renderer can draw either view */
+  const STRUCT = CHARACTERS.map(ch => ({
+    key: ch.key, short: ch.short,
+    names: ch.values.map(v => ch.labels[String(v)]),
+    grade: ph => Math.max(0, ch.values.findIndex(v => String(v) === String(ph[ch.key])))
+  }));
+
   L.extend('ak-key', {
     params: { matrixView: 'characters' },
     addControlGroups: [{
@@ -43,23 +51,28 @@
       ]
     }],
     addPlots: [{
-      title: 'Organ systems across the phyla — the second half of the comparison table',
+      title(S) {
+        return S.p.matrixView === 'systems'
+          ? 'Organ systems across the phyla — the second half of the comparison table'
+          : 'Structural characters across the phyla — the half the key filters on';
+      },
       legend: [{ c: '#3A4766', label: 'absent / simplest' }, { c: '#4ADE80', label: 'most advanced' },
                { c: '#E7EDFB', label: 'still possible' }],
       draw(S, g) {
         const ctx = g.ctx;
+        const COLS = S.p.matrixView === 'systems' ? SYSTEMS : STRUCT;
         const P = g.Plot({
-          xmin: -0.5, xmax: SYSTEMS.length - 0.5, ymin: -0.5, ymax: PHYLA.length - 0.5,
-          xticks: SYSTEMS.map((_, i) => i), yticks: PHYLA.map((_, i) => i),
-          xfmt: v => (SYSTEMS[Math.round(v)] || { short: '' }).short,
+          xmin: -0.5, xmax: COLS.length - 0.5, ymin: -0.5, ymax: PHYLA.length - 0.5,
+          xticks: COLS.map((_, i) => i), yticks: PHYLA.map((_, i) => i),
+          xfmt: v => (COLS[Math.round(v)] || { short: '' }).short,
           yfmt: v => (PHYLA[Math.round(v)] || { name: '' }).name,
           pad: { l: 108, r: 14, t: 12, b: 32 }
         }).frame();
-        const cw = (P.x1 - P.x0) / SYSTEMS.length, chh = (P.y0 - P.y1) / PHYLA.length;
+        const cw = (P.x1 - P.x0) / COLS.length, chh = (P.y0 - P.y1) / PHYLA.length;
         P.clip(() => {
           PHYLA.forEach((ph, r) => {
             const alive = S.alive.indexOf(ph) >= 0;
-            SYSTEMS.forEach((sy, c) => {
+            COLS.forEach((sy, c) => {
               const v = sy.grade(ph), max = sy.names.length - 1;
               const t = max > 0 ? v / max : 0;
               const x = P.X(c) - cw / 2 + 1, y = P.Y(r) - chh / 2 + 1;
@@ -74,11 +87,12 @@
         });
       },
       hover(S, x, y) {
-        const c = clamp(Math.round(x), 0, SYSTEMS.length - 1);
+        const COLS = S.p.matrixView === 'systems' ? SYSTEMS : STRUCT;
+        const c = clamp(Math.round(x), 0, COLS.length - 1);
         const r = clamp(Math.round(y), 0, PHYLA.length - 1);
-        const sy = SYSTEMS[c], ph = PHYLA[r];
+        const sy = COLS[c], ph = PHYLA[r];
         return [{ label: 'phylum', value: ph.name, color: ph.hue },
-                { label: sy.short, value: ph[sy.key] },
+                { label: sy.short, value: String(ph[sy.key]) },
                 { label: 'grade', value: sy.names[sy.grade(ph)] },
                 { label: 'habitat', value: ph.habitat }];
       }

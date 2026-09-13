@@ -220,6 +220,221 @@ window.InsightLab = (function () {
     return P;
   }
 
+  /* =====================================================================
+     STAGE GRAPHICS TOOLKIT
+     Ten layers of rendering quality, applied by the engine so that every
+     simulation gets them without touching its own drawing code:
+       1  instrument ground — vignette and a recessive measurement grid
+       2  bloom — a real threshold-and-blur pass over emissive content
+       3  label kit — haloed labels that nudge apart instead of colliding
+       4  colour ramps — perceptual sequential and diverging scales
+       5  tweening — parameter changes ease instead of snapping
+       6  materials — spheres, shadows and glass with consistent lighting
+       7  hit targets — interactive elements advertise themselves on hover
+       8  layout grid — stages place panels without magic numbers
+       9  scale chrome — units, scale bars and a corner HUD
+      10  quality tiers — everything degrades gracefully on slow hardware
+     ===================================================================== */
+
+  const FX = {
+    quality: 1,            // 1 full, 0.5 reduced, 0 minimal — set by the frame timer
+    frameCost: 0,
+    bloomCanvas: null
+  };
+
+  /* ---- 4 · colour ramps ------------------------------------------------
+     Sampled from perceptually even scales so that equal steps in the data
+     look like equal steps on screen. */
+  const RAMPS = {
+    heat:     ['#0B1120', '#2A2F6B', '#6B3A8F', '#B8437A', '#F0714C', '#FFC24B', '#FFF6C8'],
+    ice:      ['#06101F', '#123A5E', '#1E6F92', '#35A8B0', '#7FD8C4', '#D6F5EC'],
+    diverge:  ['#3D6FB4', '#7FA8D8', '#C9D4EA', '#F2E3C0', '#E8955C', '#D6453F'],
+    phosphor: ['#04121A', '#0A3A4A', '#12707F', '#3DD6F5', '#A8F0FF'],
+    amber:    ['#170D04', '#4A2A08', '#8F5410', '#D98A1E', '#FFC24B', '#FFE9B0'],
+    eosin:    ['#1A0710', '#4E1430', '#8E2551', '#D94A7C', '#FF9BC0', '#FFE0EC']
+  };
+  function ramp(name, t) {
+    const c = RAMPS[name] || RAMPS.heat;
+    const u = Math.max(0, Math.min(1, t)) * (c.length - 1);
+    const i = Math.min(c.length - 2, Math.floor(u));
+    return mix(c[i], c[i + 1], u - i);
+  }
+
+  /* ---- 5 · tweening ----------------------------------------------------
+     Exponential easing toward a target, frame-rate independent. State is
+     kept on the sim's own state object so a reset clears it. */
+  function tween(S, key, target, tau, dt) {
+    S._tw = S._tw || {};
+    if (S._tw[key] === undefined || !isFinite(S._tw[key])) { S._tw[key] = target; return target; }
+    const k = 1 - Math.exp(-(dt || 0.016) / Math.max(0.016, tau || 0.18));
+    S._tw[key] += (target - S._tw[key]) * k;
+    if (Math.abs(target - S._tw[key]) < 1e-6) S._tw[key] = target;
+    return S._tw[key];
+  }
+
+  /* ---- 1 · instrument ground ------------------------------------------- */
+  function drawGround(ctx, w, h) {
+    // a faint measurement grid, recessive enough never to compete with data
+    const step = Math.max(38, Math.min(w, h) / 14);
+    ctx.save();
+    ctx.strokeStyle = alpha(theme['line-soft'], 0.30);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = step; x < w; x += step) { ctx.moveTo(Math.round(x) + .5, 0); ctx.lineTo(Math.round(x) + .5, h); }
+    for (let y = step; y < h; y += step) { ctx.moveTo(0, Math.round(y) + .5); ctx.lineTo(w, Math.round(y) + .5); }
+    ctx.stroke();
+    // vignette: pulls the eye to the centre and hides the panel edge
+    const vg = ctx.createRadialGradient(w / 2, h * 0.46, Math.min(w, h) * 0.22,
+      w / 2, h * 0.46, Math.max(w, h) * 0.78);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  /* ---- 2 · bloom -------------------------------------------------------
+     Threshold the bright pixels, blur them and add the result back. This
+     is what makes fields, orbitals and traces read as emissive rather
+     than as flat coloured lines. */
+  function bloom(ctx, w, h, strength) {
+    if (FX.quality < 0.75 || !strength) return;
+    let bc = FX.bloomCanvas;
+    if (!bc) { bc = FX.bloomCanvas = document.createElement('canvas'); }
+    const scale = 0.4;
+    const bw = Math.max(2, Math.round(w * scale)), bh = Math.max(2, Math.round(h * scale));
+    if (bc.width !== bw || bc.height !== bh) { bc.width = bw; bc.height = bh; }
+    const bx = bc.getContext('2d');
+    bx.clearRect(0, 0, bw, bh);
+    bx.drawImage(ctx.canvas, 0, 0, bw, bh);
+    // keep only what is already bright — 'lighter' on itself squares the
+    // channel values, which is a cheap and stable threshold
+    bx.globalCompositeOperation = 'multiply';
+    bx.drawImage(bc, 0, 0);
+    bx.globalCompositeOperation = 'source-over';
+    ctx.save();
+    if (typeof ctx.filter === 'string') ctx.filter = 'blur(' + (7 * scale * 2).toFixed(1) + 'px)';
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = strength;
+    ctx.drawImage(bc, 0, 0, w, h);
+    ctx.restore();
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* ---- 3 · label kit ---------------------------------------------------
+     Every label is registered in a per-frame list. A new label that would
+     overlap one already placed is nudged along its preferred axis until it
+     clears, and a leader line is drawn back to the anchor if it moved far. */
+  function LabelKit(ctx) {
+    const placed = [];
+    const K = {};
+    K.reset = () => { placed.length = 0; };
+    K.measure = (text, size, weight) => {
+      ctx.font = (weight || 500) + ' ' + size + 'px "IBM Plex Mono",monospace';
+      return ctx.measureText(text).width;
+    };
+    K.place = function (x, y, text, o) {
+      o = o || {};
+      const size = o.size || 10, weight = o.weight || 500;
+      const w = K.measure(text, size, weight);
+      const halfW = w / 2 + 3, halfH = size * 0.62 + 2;
+      const align = o.align || 'center';
+      const ox = align === 'left' ? halfW - 3 : align === 'right' ? -(halfW - 3) : 0;
+      let cx = x + ox, cy = y;
+      const dirX = o.push === 'x' ? 1 : 0, dirY = o.push === 'x' ? 0 : 1;
+      let moved = 0;
+      for (let k = 0; k < 26; k++) {
+        const hit = placed.some(p =>
+          Math.abs(p.cx - cx) < (p.hw + halfW) && Math.abs(p.cy - cy) < (p.hh + halfH));
+        if (!hit) break;
+        const step = (k % 2 ? -1 : 1) * Math.ceil((k + 1) / 2) * (size * 1.22);
+        cx = x + ox + dirX * step;
+        cy = y + dirY * step;
+        moved = Math.abs(step);
+      }
+      placed.push({ cx: cx, cy: cy, hw: halfW, hh: halfH });
+      if (moved > size * 1.4 && o.leader !== false) {
+        ctx.save();
+        ctx.strokeStyle = alpha(o.colour || theme['text-3'], .38);
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(cx - ox, cy); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.save();
+      ctx.font = weight + ' ' + size + 'px "IBM Plex Mono",monospace';
+      ctx.textAlign = align; ctx.textBaseline = 'middle';
+      if (o.halo !== false) {
+        ctx.lineWidth = o.haloWidth || 3.2;
+        ctx.strokeStyle = o.haloColour || 'rgba(5,8,15,.88)';
+        ctx.lineJoin = 'round';
+        ctx.strokeText(text, cx - ox, cy);
+      }
+      ctx.fillStyle = o.colour || theme.text;
+      ctx.fillText(text, cx - ox, cy);
+      ctx.restore();
+      return { x: cx - ox, y: cy, w: w, moved: moved };
+    };
+    return K;
+  }
+
+  /* ---- 6 · materials --------------------------------------------------- */
+  function sphere(ctx, x, y, r, colour, o) {
+    o = o || {};
+    const lx = x - r * 0.34, ly = y - r * 0.36;
+    const gr = ctx.createRadialGradient(lx, ly, r * 0.06, x, y, r);
+    gr.addColorStop(0, mix(colour, '#ffffff', o.gloss == null ? 0.55 : o.gloss));
+    gr.addColorStop(0.55, colour);
+    gr.addColorStop(1, mix(colour, '#05080F', 0.55));
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    if (o.rim !== false) {
+      ctx.strokeStyle = alpha(mix(colour, '#ffffff', .4), .35);
+      ctx.lineWidth = Math.max(0.8, r * 0.06);
+      ctx.beginPath(); ctx.arc(x, y, r * 0.97, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+    }
+    if (o.specular !== false && r > 3) {
+      ctx.fillStyle = 'rgba(255,255,255,.38)';
+      ctx.beginPath(); ctx.ellipse(lx, ly, r * 0.22, r * 0.15, -0.6, 0, TAU); ctx.fill();
+    }
+  }
+  function shadow(ctx, blur, colour, fn) {
+    ctx.save();
+    ctx.shadowBlur = blur; ctx.shadowColor = colour || 'rgba(0,0,0,.55)';
+    ctx.shadowOffsetY = Math.max(1, blur * 0.22);
+    fn();
+    ctx.restore();
+  }
+
+  /* ---- 8 · layout grid ------------------------------------------------- */
+  function layout(w, h, cols, rows, pad) {
+    const p = pad == null ? 14 : pad;
+    const cw = (w - p * 2) / cols, ch = (h - p * 2) / rows;
+    return function (c0, r0, cSpan, rSpan) {
+      const x = p + c0 * cw, y = p + r0 * ch;
+      const ww = cw * (cSpan || 1), hh = ch * (rSpan || 1);
+      return { x: x, y: y, w: ww, h: hh, cx: x + ww / 2, cy: y + hh / 2,
+               x1: x + ww, y1: y + hh, r: Math.min(ww, hh) / 2 };
+    };
+  }
+
+  /* ---- 9 · scale chrome ------------------------------------------------ */
+  function scaleBar(ctx, x, y, px, label, colour) {
+    const col = colour || theme['text-3'];
+    ctx.save();
+    ctx.strokeStyle = alpha(col, .9); ctx.lineWidth = 1.4; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 4);
+    ctx.moveTo(x, y); ctx.lineTo(x + px, y);
+    ctx.moveTo(x + px, y - 4); ctx.lineTo(x + px, y + 4);
+    ctx.stroke();
+    ctx.font = '500 9px "IBM Plex Mono",monospace';
+    ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(label, x + px / 2, y - 6);
+    ctx.restore();
+  }
+
   /* ---------------- canvas surface ---------------- */
   function Surface(el, opts) {
     const cv = document.createElement('canvas');
@@ -237,6 +452,12 @@ window.InsightLab = (function () {
       return true;
     };
     S.begin = function () { ctx.setTransform(S.dpr, 0, 0, S.dpr, 0, 0); };
+    S.pointer = null;
+    cv.addEventListener('pointermove', e => {
+      const r = cv.getBoundingClientRect();
+      S.pointer = { x: e.clientX - r.left, y: e.clientY - r.top };
+    });
+    cv.addEventListener('pointerleave', () => { S.pointer = null; });
     if (opts && opts.orbit) {
       let drag = null;
       cv.addEventListener('pointerdown', e => {
@@ -284,6 +505,7 @@ window.InsightLab = (function () {
     { id: 'biology', label: 'Biology', color: 'bio' }
   ];
   function register(def) {
+    (window.__REG || (window.__REG = [])).push(def);
     // normalise the single-plot shorthand into the plots array
     if (!def.plots && def.drawPlot) {
       def.plots = [{ title: def.plotTitle, legend: def.legend, draw: def.drawPlot, hover: def.hoverPlot }];
@@ -416,6 +638,7 @@ window.InsightLab = (function () {
   function buildControl(it, host) {
     const S = R.S, def = R.def;
     const wrap = el('div', 'ctl');
+    wrap.dataset.key = it.key;
     const apply = restructure => {
       if (it.onChange) it.onChange(S);
       if (it.restructure || restructure) { if (def.setup) def.setup(S); }
@@ -523,7 +746,16 @@ window.InsightLab = (function () {
     const host = R.nodes.eq, def = R.def, S = R.S;
     if (host && def.equation) host.innerHTML = def.equation(S);
   }
-  function syncUI() { renderReadouts(); renderEquation(); }
+  function syncUI() { renderReadouts(); renderEquation(); refreshTitles(); }
+
+  // a plot may declare title as a function of state, so it can say what it is
+  // currently showing; those nodes are re-read whenever the UI syncs
+  function refreshTitles() {
+    (R.liveTitles || []).forEach(t => {
+      const v = t.fn(R.S);
+      if (t.node.textContent !== v) t.node.textContent = v;
+    });
+  }
 
   /* ---------------- walkthrough ---------------- */
   function renderWalkthrough() {
@@ -651,6 +883,8 @@ window.InsightLab = (function () {
     R.playing = def.autoplay !== false;
     R.speed = 1;
     R.wtIndex = 0; R.wtShown = false;
+    R.liveTitles = [];
+    window.__S = R.S;
     R.quizIndex = 0; R.quizPick = null;
     R.log = [];
     R.plots = [];
@@ -740,7 +974,9 @@ window.InsightLab = (function () {
     /* plots */
     (def.plots || []).forEach((pdef, idx) => {
       const tools = el('div', 'ptools');
-      const pp = panel(pdef.title || 'Graph', tools);
+      const titleFn = typeof pdef.title === 'function' ? pdef.title : null;
+      const pp = panel((titleFn ? titleFn(R.S) : pdef.title) || 'Graph', tools);
+      if (titleFn) (R.liveTitles || (R.liveTitles = [])).push({ node: pp.head.firstChild, fn: titleFn });
       const pbox = el('div', 'plot');
       pp.body.appendChild(pbox);
       if (pdef.legend) {
@@ -838,11 +1074,55 @@ window.InsightLab = (function () {
     R.stage.resize();
     R.stage.begin();
     if (R.stage.w > 1) {
-      const g = { ctx: R.stage.ctx, w: R.stage.w, h: R.stage.h, theme, alpha, mix, now: now / 1000 };
-      g.ctx.clearRect(0, 0, g.w, g.h);
-      if (S.cam) { S.cam.setViewport(g.w, g.h); S.cam.update(); }
+      const ctx = R.stage.ctx, w = R.stage.w, h = R.stage.h;
+      if (!R.labelKit || R.labelCtx !== ctx) { R.labelKit = LabelKit(ctx); R.labelCtx = ctx; }
+      R.labelKit.reset();
+      R.hits = [];
+      const g = {
+        ctx: ctx, w: w, h: h, theme, alpha, mix, now: now / 1000, dt: dt,
+        // layer 4 — perceptual colour ramps
+        ramp: ramp,
+        // layer 5 — eased parameter changes
+        tween: (key, target, tau) => tween(S, key, target, tau, dt),
+        // layer 3 — collision-aware labels
+        label: (x, y, text, o) => R.labelKit.place(x, y, text, o),
+        // layer 6 — lit materials
+        sphere: (x, y, r, colour, o) => sphere(ctx, x, y, r, colour, o),
+        shadow: (blur, colour, fn) => shadow(ctx, blur, colour, fn),
+        // layer 8 — layout without magic numbers
+        layout: (cols, rows, pad) => layout(w, h, cols, rows, pad),
+        // layer 9 — scale chrome
+        scaleBar: (x, y, px, lab, col) => scaleBar(ctx, x, y, px, lab, col),
+        // layer 7 — interactive elements advertise themselves
+        hit: (x, y, r, id) => { R.hits.push({ x: x, y: y, r: r, id: id }); },
+        pointer: R.stage.pointer || null,
+        quality: FX.quality
+      };
+      ctx.clearRect(0, 0, w, h);
+      // layer 1 — instrument ground, painted under everything
+      if (def.ground !== false) drawGround(ctx, w, h);
+      if (S.cam) { S.cam.setViewport(w, h); S.cam.update(); }
       def.drawStage(S, g);
+      // layer 7 — focus ring on whatever the pointer is nearest
+      const pt = R.stage.pointer;
+      if (pt && R.hits.length) {
+        let best = null, bd = 1e9;
+        R.hits.forEach(q => { const d = Math.hypot(pt.x - q.x, pt.y - q.y); if (d < bd) { bd = d; best = q; } });
+        if (best && bd < best.r * 1.9) {
+          ctx.save();
+          ctx.strokeStyle = alpha(theme.accent, .75); ctx.lineWidth = 1.6;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.arc(best.x, best.y, best.r + 4 + Math.sin(now / 260) * 1.6, 0, TAU);
+          ctx.stroke(); ctx.restore();
+          R.stage.el.style.cursor = 'pointer';
+        } else if (!def.is3D) R.stage.el.style.cursor = 'default';
+      }
+      // layer 2 — bloom over the finished frame
+      bloom(ctx, w, h, def.bloom === false ? 0 : (def.bloom || 0.30));
     }
+    // layer 10 — quality tier follows the measured frame cost
+    FX.frameCost = FX.frameCost * 0.9 + (performance.now() - now) * 0.1;
+    FX.quality = FX.frameCost > 22 ? 0.5 : FX.frameCost > 13 ? 0.75 : 1;
 
     R.plots.forEach((pp, i) => {
       pp.surf.resize(); pp.surf.begin();
