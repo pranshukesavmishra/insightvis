@@ -6,7 +6,7 @@
 > whenever a decision is made or a constraint is discovered.** A stale memory is worse than
 > no memory — fix anything here that no longer matches reality.
 
-Last updated: 2026-09-12 (v3)
+Last updated: 2026-09-14 (v3, artifact v12)
 
 ---
 
@@ -329,6 +329,16 @@ text tokens rather than series colour, legend whenever there are ≥2 series.
 7. **No faked animation in a physics context.** If it moves, something computed why.
 8. **No external JS dependencies** in the lab. The CSP allowlist is narrow and the physics
    is ours.
+9. **Canvas: a path does not survive `beginPath()`.** `clip()` and `stroke()` act on the
+   *current* path, and any loop that calls `beginPath()` replaces it. Every silhouette that is
+   clipped to or stroked more than once must be a **path function**, re-laid each time. Getting
+   this wrong is silent: the clip shrinks to whatever was drawn last, and the stroke outlines
+   the wrong shape somewhere else on the figure.
+10. **`g.mix()` returns `'rgb(...)'`; `RX.mix()` returns hex.** Only hex can be fed back in.
+   Nesting `g.mix` parses to `NaN` and renders **black**, with no error. Any colour that is
+   mixed twice — a saturation ramp, a gradient stop built from a computed base — must use
+   `RX.mix`. This has now cost three figures; treat a black fill as this bug until proven
+   otherwise.
 
 ---
 
@@ -519,6 +529,38 @@ Append only. Never rewrite history.
 ---
 
 ## 13. Session log
+
+- **2026-09-14 (a)** — **Drove the volume pass through four more biology plates** and fixed two
+  renderer bugs that had been silently corrupting figures.
+  - **`ctx.beginPath()` destroys the current path, and `clip()`/`stroke()` use the current
+    path.** In `BIOART.heart` the grain loop's per-dot `beginPath()` meant the spiral muscle
+    bands were clipped to a single grain dot (invisible) and the closing `stroke()` re-stroked
+    the *last band polyline* instead of the silhouette — that was the stray red arc under the
+    heart. Fixed by making the silhouette a reusable `myoPath()` function re-laid before every
+    clip and stroke. **Rule: never rely on a path surviving a loop that calls `beginPath()`.**
+  - **`g.mix()` returns `'rgb(...)'` and cannot be parsed by `g.mix()` again.** Nesting it
+    yields `NaN` → black. This had turned the blood cells and the capillary bed in `ak-heart`
+    solid black. Anything that gets mixed twice must use the hex-returning `RX.mix`. This is the
+    second time this exact trap has cost a figure (see the chamber-cavity bug in §7).
+  - **`ak-heart` rebuilt to the plate standard**: lungs drawn as lobed lungs with fissures and a
+    bronchial tree, gills as four holobranchs with filaments coloured by the oxygen they are
+    loading, the tissues as a real capillary bed whose blood darkens across it, vessels as round
+    `RX.tube` circuits with named leader labels, the animal moved into the header band. The fish
+    circuit was also **factually wrong** — it ran blood into the efferent side of the gills; it
+    now leaves by the ventral aorta, enters afferently, and is collected dorsally.
+  - **`synapse` rebuilt**: the bouton is a lit solid with two cristate mitochondria and smooth ER,
+    the nicotinic receptor is a five-subunit funnel with its two α-binding sites and a pore that
+    opens in proportion, the end plate runs off both edges (the hard rectangle was what made it
+    read as pasted on), and a ×40 inset shows one receptor at the moment of binding.
+  - **`ak-wvs` rebuilt**: a real asteroid — central disc, five tapering arms, ossicle plates,
+    spines, papulae, madreporite with sieve grooves, Tiedemann's bodies. **The arm profile was
+    phase-shifted off the radial canals** (`cos(2.5a)` without the `-π/2` the arm axes carry),
+    so the body lobes sat *between* the arms. Tube feet are drawn under the canals, not over.
+  - **`ak-coelom` rebuilt**: a germ layer is now a sheet of *cells* — a lit band with radial cell
+    walls and a nucleus per cell — and the mesoglea deliberately has none, because it is
+    acellular. The dartboard of flat rings is gone.
+  - Verified: `audit.mjs` CLEAN (26 sims), `shot.mjs` clean, `resz.mjs` stable at all four
+    breakpoints. Published artifact **Version 12**.
 
 - **2026-09-11 (a)** — Cloned repo (near-empty: placeholder README). Established brief, scope,
   architecture, conventions. Wrote `README.md` and `memory.md`. Identified push-access blocker.

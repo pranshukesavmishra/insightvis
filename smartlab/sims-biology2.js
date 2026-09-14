@@ -130,57 +130,59 @@
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
-      const bio = th.bio;
-      const preY = H * 0.28, postY = H * 0.58;
+      const bio = th.bio, Z = window.ZOOART, RXo = window.RX;
+
+      /* ---- plate frame ----
+         The header band is reserved first and every structure is laid out
+         below it, so nothing in the figure can ever reach the title. */
+      const HDR = 54, FOOT = 22;
+      const y0 = HDR, y1 = H - FOOT;
+      const knobH = Math.min(70, (y1 - y0) * 0.19);
+      const preY = y0 + knobH * 1.32;
+      const postY = y0 + (y1 - y0) * 0.52;
       const x0 = W * 0.17, x1 = W * 0.72;
 
-      /* ---- presynaptic terminals: one axon knob per synapse ---- */
       const nSyn = Math.max(1, p.nSyn | 0);
       const laneW = (x1 - x0) / nSyn;
-      const knobW = Math.min(laneW * 0.82, 150), knobH = Math.min(74, H * 0.20);
+      const knobW = Math.min(laneW * 0.82, 150);
       const cleftTop = preY + knobH * 0.5 + 2;
       const memY = postY - 16;
       const laneX = i => x0 + (i + 0.5) * laneW;
-
-      ctx.font = '9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-      ctx.fillText('presynaptic terminal' + (nSyn > 1 ? 's — ' + nSyn : '') + '  ·  ' + p.rate + ' Hz',
-        x0 - knobW * 0.5, preY - knobH * 1.7);
+      // the end plate runs off both edges — a muscle fibre does not stop at
+      // a rectangle, and the hard border was what made it read as pasted on
+      const mL = -30, mR = W + 30;
 
       const caOpen = clamp(p.ca / 3, 0, 1);
       for (let i = 0; i < nSyn; i++) {
         const cx = laneX(i);
-        const K = BIOART.synapticKnob(ctx, cx, preY, knobW, knobH);
+        const K = BIOART.synapticKnob(ctx, cx, preY, knobW, knobH, { axonTop: y0 + 4 });
 
         // reserve pool of vesicles waiting in the terminal
-        ctx.save();
         for (let q = 0; q < 9; q++) {
           const a = q * 2.399;                          // golden-angle scatter
           const rr = knobW * 0.21 * Math.sqrt(q / 9);
           const vx = cx + Math.cos(a) * rr + knobW * 0.12;
           const vy = preY + knobH * 0.02 + Math.sin(a) * rr * 0.7;
-          ctx.strokeStyle = g.alpha(bio, .75); ctx.lineWidth = 1.2;
-          ctx.fillStyle = g.alpha(bio, .18);
-          ctx.beginPath(); ctx.arc(vx, vy, knobH * 0.075, 0, TAU);
-          ctx.fill(); ctx.stroke();
+          RXo.ball(ctx, vx, vy, knobH * 0.085, bio, { rim: 0.4 });
         }
-        ctx.restore();
 
         // voltage-gated Ca²⁺ channels in the active zone
         for (let q = 0; q < 4; q++) {
           const chx = cx + (q - 1.5) * knobW * 0.20;
-          ctx.fillStyle = g.alpha('#7CE0A8', .22 + .65 * caOpen);
-          ctx.fillRect(chx - 5, K.bottom - 5, 10, 9);
-          ctx.strokeStyle = g.alpha('#7CE0A8', .9); ctx.lineWidth = 1;
-          ctx.strokeRect(chx - 5, K.bottom - 5, 10, 9);
+          const ch = c => {
+            c.beginPath();
+            if (c.roundRect) c.roundRect(chx - 5.5, K.bottom - 6, 11, 11, 2.5);
+            else c.rect(chx - 5.5, K.bottom - 6, 11, 11);
+          };
+          RXo.volume(ctx, ch, { fill: g.mix('#2C5A48', '#7CE0A8', caOpen) === null ? '#7CE0A8'
+                                  : RXo.mix('#2C5A48', '#7CE0A8', caOpen),
+                                r: 7, cx: chx, cy: K.bottom - 0.5,
+                                gloss: 0.35, contour: 1 });
         }
         // the active zone itself — the thickened patch vesicles dock at
-        ctx.fillStyle = g.alpha('#9FD8FF', .30);
+        ctx.fillStyle = g.alpha('#9FD8FF', .34);
         ctx.fillRect(cx - knobW * 0.36, K.bottom - 1, knobW * 0.72, 2.5);
       }
-      ctx.fillStyle = '#7CE0A8'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      ctx.font = '9.5px "IBM Plex Mono",monospace';
-      ctx.fillText('Ca²⁺ ' + p.ca.toFixed(2) + ' mM', x0 - knobW * 0.56, preY + knobH * 0.36);
 
       // vesicles migrating to the active zone and fusing with the membrane
       S.vesicles.forEach(v => {
@@ -189,32 +191,25 @@
         const vy = (preY - knobH * 0.22) + v.u * (knobH * 0.72);
         const r = knobH * 0.085 * (1 - v.u * 0.45);
         ctx.save(); ctx.globalAlpha = 1 - v.u * 0.3;
-        // fusion pore opens as u -> 1
-        ctx.strokeStyle = g.alpha(bio, .95); ctx.lineWidth = 1.6;
-        ctx.fillStyle = g.alpha(bio, .30);
-        ctx.beginPath();
-        if (v.u < 0.85) ctx.arc(vx, vy, r, 0, TAU);
-        else ctx.arc(vx, vy, r, Math.PI * 0.15, Math.PI * 0.85, true);   // omega figure
-        ctx.fill(); ctx.stroke();
+        if (v.u < 0.85) {
+          RXo.ball(ctx, vx, vy, r, bio, { rim: 0.5 });
+        } else {                                        // the omega figure
+          ctx.strokeStyle = g.alpha(bio, .95); ctx.lineWidth = 1.8;
+          ctx.fillStyle = g.alpha(bio, .34);
+          ctx.beginPath(); ctx.arc(vx, vy, r, Math.PI * 0.15, Math.PI * 0.85, true);
+          ctx.fill(); ctx.stroke();
+        }
         ctx.restore();
       });
 
       /* ---- synaptic cleft ---- */
-      // bounded below by the dome of the postsynaptic cell, so the gap is
-      // a true cleft and not a rectangle sitting on top of a curve
       const mh = Math.min(24, H * 0.055), mDrop = mh * 1.5;
-      const mL = x0 - knobW * 0.5, mR = x1 + knobW * 0.5;
       const domeY = xx => memY + mDrop * Math.pow(2 * ((xx - mL) / (mR - mL)) - 1, 2);
       ctx.fillStyle = g.alpha(th['ink-900'], .55);
       ctx.beginPath();
       ctx.moveTo(mL, cleftTop); ctx.lineTo(mR, cleftTop);
       for (let q = 60; q >= 0; q--) { const xx = mL + (mR - mL) * q / 60; ctx.lineTo(xx, domeY(xx)); }
       ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      ctx.fillText('synaptic cleft', x0 - knobW * 0.56, (cleftTop + memY) / 2);
-      ctx.fillText('≈20 nm', x0 - knobW * 0.56, (cleftTop + memY) / 2 + 12);
 
       // acetylcholine diffusing across
       S.nt.forEach(o => {
@@ -222,25 +217,78 @@
         const nx = cx + o.j * knobW * 0.62;
         const ny = cleftTop + 2 + o.u * (domeY(nx) - cleftTop - 4);
         ctx.fillStyle = g.alpha(bio, 0.9 * (1 - o.u * 0.3));
-        ctx.beginPath(); ctx.arc(nx, ny, 2.6, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(nx, ny, 2.8, 0, TAU); ctx.fill();
       });
 
       /* ---- postsynaptic membrane with its receptors ---- */
       const occ = S.T / (S.T + 1.0), bound = occ * (1 - p.curare / 100);
       BIOART.postsynapticMembrane(ctx, mL, mR, memY, {
-        occupancy: occ, blocked: p.curare / 100, h: mh,
-        depth: Math.max(mh * 3, H - 24 - memY - mDrop)
+        occupancy: occ, blocked: p.curare / 100, h: mh, n: 13,
+        depth: Math.max(mh * 3, y1 + FOOT - memY - mDrop + 30)
       });
-      ctx.font = '9.5px "IBM Plex Mono",monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = th['text-3'];
-      ctx.fillText('nicotinic ACh', mL - 8, memY + mDrop * 0.7);
-      ctx.fillText('receptors', mL - 8, memY + mDrop * 0.7 + 12);
-      ctx.fillStyle = p.curare > 0 ? th.crit : th['text-2'];
-      ctx.fillText((bound * 100).toFixed(0) + '% activated', mL - 8, memY + mDrop * 0.7 + 26);
-      if (p.curare > 0) ctx.fillText(p.curare + '% curare-blocked', mL - 8, memY + mDrop * 0.7 + 38);
 
-      /* ---- postsynaptic cell body ---- */
-      const bx = W * 0.86, by = postY + 6, br = Math.min(W * 0.10, 44);
+      /* ---- leader labels on the structures themselves ----
+         The left margin is a fixed column of rows, so two captions can
+         never land on the same line however the layout scales. */
+      {
+        const kx = laneX(0), lx = Math.max(10, kx - knobW * 0.86);
+        const cy2 = (cleftTop + memY) / 2;
+        const rx = laneX(0) - knobW * 0.92, ry = domeY(rx);
+        Z.leader(ctx, kx - knobW * 0.30, preY - knobH * 0.10, lx + 4, preY - knobH * 0.44, '#8FB6E8');
+        Z.lbl(ctx, lx, preY - knobH * 0.52, 'presynaptic terminal', '#8FB6E8', 'left', 9.5);
+        Z.leader(ctx, kx - knobW * 0.50, cy2, lx + 4, cy2, th['text-3']);
+        Z.lbl(ctx, lx, cy2 - 6, 'synaptic cleft', th['text-2'], 'left', 9.5);
+        Z.lbl(ctx, lx, cy2 + 7, '≈ 20 nm', th['text-3'], 'left', 9);
+        Z.leader(ctx, rx, ry, Math.max(10, rx - 42) + 4, ry + mDrop * 1.05, '#FF9BC1');
+        Z.lbl(ctx, Math.max(10, rx - 42), ry + mDrop * 1.05 + 8, 'nicotinic ACh receptor',
+              '#FF9BC1', 'left', 9.5);
+        Z.lbl(ctx, Math.max(10, rx - 42), ry + mDrop * 1.05 + 20,
+              (bound * 100).toFixed(0) + '% activated',
+              p.curare > 0 ? th.crit : th['text-2'], 'left', 9);
+        if (p.curare > 0) Z.lbl(ctx, Math.max(10, rx - 42), ry + mDrop * 1.05 + 32,
+              p.curare + '% curare-blocked', th.crit, 'left', 9);
+        // the calcium caption belongs on the other flank, clear of the column
+        const kx2 = laneX(nSyn - 1), rxx = Math.min(W - 12, kx2 + knobW * 0.62);
+        Z.leader(ctx, kx2 + knobW * 0.28, preY + knobH * 0.46, rxx - 4, preY + knobH * 0.80, '#7CE0A8');
+        Z.lbl(ctx, rxx, preY + knobH * 0.88, 'Ca²⁺ channels', '#7CE0A8', 'right', 9.5);
+        Z.lbl(ctx, rxx, preY + knobH * 0.88 + 12, '[Ca²⁺]o = ' + p.ca.toFixed(2) + ' mM',
+              '#7CE0A8', 'right', 9);
+      }
+      g.scaleBar(14, y1 + 6, knobW * 0.55, '≈ 0.5 µm', th['text-3']);
+
+      /* ---- magnified inset: one receptor, at the moment of binding ---- */
+      {
+        const iw = Math.min(W * 0.19, 158), ih = Math.min((y1 - y0) * 0.34, 112);
+        const ix = W - iw - 12, iy = y1 - ih - 4;
+        ctx.save();
+        ctx.fillStyle = g.alpha('#080C16', .90);
+        ctx.strokeStyle = g.alpha(bio, .40); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(ix, iy, iw, ih, 8); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.roundRect(ix, iy, iw, ih, 8); ctx.clip();
+        Z.lbl(ctx, ix + 8, iy + 11, '×40  ONE RECEPTOR', th['text-3'], 'left', 8.5);
+        // a slab of bilayer with a single receptor standing in it
+        const bY = iy + ih * 0.60, bx2 = ix + iw * 0.5;
+        BIOART.postsynapticMembrane(ctx, ix - iw * 0.55, ix + iw * 1.55, bY - ih * 0.10, {
+          occupancy: occ, blocked: p.curare / 100, h: mh * 1.5, n: 3,
+          depth: ih * 0.9
+        });
+        // the two ACh molecules that have to bind before the gate opens
+        const lit = occ > 0.15 && p.curare < 50;
+        [-1, 1].forEach(sg => {
+          const ax = bx2 + sg * iw * 0.085;
+          RXo.ball(ctx, ax, bY - ih * 0.30 - (lit ? 0 : ih * 0.16), 4.2,
+                   lit ? '#FFE9A8' : bio, { rim: 0 });
+        });
+        Z.lbl(ctx, ix + iw * 0.5, iy + ih - 9,
+              p.curare >= 50 ? 'curare occupies the site'
+                             : lit ? '2 ACh bound → gate open' : 'gate shut — no ACh',
+              p.curare >= 50 ? th.crit : lit ? th.ok : th['text-3'], 'center', 8.5);
+        ctx.restore();
+      }
+
+      /* ---- postsynaptic cell body, above the end plate on the right ---- */
+      const br = Math.min(W * 0.075, 38);
+      const bx = W - br - 26, by = y0 + br + 6;
       const t = clamp((S.V + 80) / 110, 0, 1);
       ctx.save(); ctx.globalCompositeOperation = 'lighter';
       const rg = ctx.createRadialGradient(bx, by, 0, bx, by, br * (1.3 + S.flash));
@@ -248,40 +296,39 @@
       rg.addColorStop(1, g.alpha(bio, 0));
       ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, by, br * (1.3 + S.flash), 0, TAU); ctx.fill();
       ctx.restore();
-      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1.5;
+      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1.4;
       ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(mR - 10, domeY(mR - 10) + mh); ctx.lineTo(bx - br, by); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = g.mix('#16263F', '#FFD36B', t);
-      ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1.5; ctx.stroke();
-      ctx.font = '600 11px "IBM Plex Mono",monospace';
-      ctx.fillStyle = th.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(S.V.toFixed(0) + ' mV', bx, by);
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('Vm  postsynaptic cell', bx, by + br + 11);
+      ctx.beginPath();
+      ctx.moveTo(W * 0.80, domeY(W * 0.80)); ctx.lineTo(bx - br * 0.4, by + br * 0.8);
+      ctx.stroke(); ctx.setLineDash([]);
+      RXo.ball(ctx, bx, by, br, RXo.mix('#16263F', '#FFD36B', t), { rim: 0.8 });
+      Z.lbl(ctx, bx, by, S.V.toFixed(0) + ' mV', '#F2F6FF', 'center', 11);
+      Z.lbl(ctx, bx, by + br + 10, 'Vm · postsynaptic cell', th['text-3'], 'center', 9);
 
       /* ---- inhibitory inputs ---- */
       if (p.inhib > 0) {
         ctx.strokeStyle = g.alpha('#5AA9FF', .8); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(bx - br - 26, by - 34); ctx.lineTo(bx - br + 2, by - 12); ctx.stroke();
-        ctx.fillStyle = '#5AA9FF'; ctx.font = '9.5px "IBM Plex Mono",monospace';
-        ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-        ctx.fillText(p.inhib + '× IPSP', bx - br - 28, by - 34);
+        ctx.beginPath();
+        ctx.moveTo(bx - br - 30, by + br * 0.9); ctx.lineTo(bx - br * 0.7, by + br * 0.5);
+        ctx.stroke();
+        Z.lbl(ctx, bx - br - 34, by + br * 0.9, p.inhib + '× IPSP', '#5AA9FF', 'right', 9.5);
       }
 
       /* ---- headline ---- */
       ctx.font = '700 15px "IBM Plex Sans Condensed",sans-serif';
       ctx.fillStyle = th.text; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       const firing = S.spikes > 0 && S.tms > 40;
-      ctx.fillText(firing ? 'POSTSYNAPTIC CELL IS FIRING' : 'SUBTHRESHOLD — no output spike', 14, 10);
+      ctx.fillText(firing ? 'POSTSYNAPTIC CELL IS FIRING' : 'SUBTHRESHOLD — no output spike', 14, 8);
       ctx.font = '500 10px "IBM Plex Mono",monospace';
       ctx.fillStyle = firing ? th.ok : th['text-3'];
       ctx.fillText(S.quanta.toFixed(1) + ' quanta per impulse   ·   ' +
         (S.inputs ? (S.spikes / Math.max(1, S.inputs) * 100).toFixed(0) : '0') +
-        '% of inputs produced an output spike', 14, 30);
+        '% of inputs produced an output spike', 14, 29);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = th['text-3'];
+      ctx.fillText(nSyn + ' presynaptic terminal' + (nSyn > 1 ? 's' : '') + '  ·  ' +
+        p.rate + ' Hz', 14, 41);
     },
-
     plots: [
       { title: 'Postsynaptic membrane potential — summation towards threshold',
         legend: [{ c: '#FF6B9D', label: 'Vm' }, { c: '#63729A', label: 'threshold −55 mV' }],

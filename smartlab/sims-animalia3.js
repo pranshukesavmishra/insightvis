@@ -546,50 +546,75 @@
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
-      const hue = '#E0913A';
-      const cx = W * 0.31, cy = H * 0.52, R = Math.min(W * 0.22, H * 0.40);
+      const Z = window.ZOOART, RXo = window.RX;
+      const SKIN = '#E0913A', CANAL = '#8FD2FF', WATER = '#3E86C4';
 
-      /* ---------------- starfish from above ---------------- */
-      ctx.beginPath();
-      for (let i = 0; i <= 200; i++) {
-        const a = i / 200 * TAU - Math.PI / 2;
-        const r = R * (0.42 + 0.52 * Math.pow(Math.abs(Math.cos(2.5 * a)), 0.55));
-        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      }
-      ctx.closePath();
-      const gr = ctx.createRadialGradient(cx - R * .2, cy - R * .2, R * .1, cx, cy, R);
-      gr.addColorStop(0, g.mix(hue, '#ffffff', .4)); gr.addColorStop(.6, hue);
-      gr.addColorStop(1, g.mix(hue, '#05080F', .5));
-      ctx.fillStyle = gr; ctx.fill();
-      ctx.strokeStyle = g.alpha(hue, .9); ctx.lineWidth = 1.4; ctx.stroke();
+      /* ---------------- plate frame ---------------- */
+      const HDR = 56, FOOT = 28;
+      const y0 = HDR, y1 = H - FOOT, CH = y1 - y0;
+      const cx = W * 0.30, cy = y0 + CH * 0.50;
+      const R = Math.min(W * 0.215, CH * 0.46);
 
-      /* ---------------- canal system ---------------- */
-      if (p.showCanals) {
-        ctx.strokeStyle = g.alpha('#9FD8FF', .85); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(cx, cy, R * 0.16, 0, TAU); ctx.stroke();   // ring canal
-        for (let k = 0; k < 5; k++) {
-          const a = -Math.PI / 2 + k / 5 * TAU;
-          ctx.beginPath();
-          ctx.moveTo(cx + Math.cos(a) * R * 0.16, cy + Math.sin(a) * R * 0.16);
-          ctx.lineTo(cx + Math.cos(a) * R * 0.86, cy + Math.sin(a) * R * 0.86);
-          ctx.stroke();                                                      // radial canals
+      /* ---------------- the animal, from the aboral surface ----------------
+         A real asteroid outline: a central disc with five tapering arms, an
+         ossicle-plated skin carrying spines and papulae, not a flower. */
+      const ARM0 = -Math.PI / 2;                 // the axis of arm 0
+      const armR = a => R * (0.30 + 0.70 *
+        Math.pow(Math.abs(Math.cos(2.5 * (a - ARM0))), 2.1));
+      const bodyPath = c => {
+        c.beginPath();
+        for (let i = 0; i <= 260; i++) {
+          const a = i / 260 * TAU - Math.PI / 2;
+          const r = armR(a);
+          const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+          i ? c.lineTo(x, y) : c.moveTo(x, y);
         }
-        // madreporite + stone canal
-        const ma = -Math.PI / 2 + 0.63;
-        ctx.strokeStyle = g.alpha('#DDF2FF', .95); ctx.lineWidth = 2.4;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(ma) * R * 0.34, cy + Math.sin(ma) * R * 0.34);
-        ctx.lineTo(cx + Math.cos(ma) * R * 0.16, cy + Math.sin(ma) * R * 0.16);
-        ctx.stroke();
-        ctx.fillStyle = '#DDF2FF';
-        ctx.beginPath(); ctx.arc(cx + Math.cos(ma) * R * 0.36, cy + Math.sin(ma) * R * 0.36, R * 0.045, 0, TAU); ctx.fill();
-        ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-2'];
-        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText('madreporite', cx + Math.cos(ma) * R * 0.46, cy + Math.sin(ma) * R * 0.46);
-        ctx.fillStyle = th['text-3'];
-        ctx.fillText('ring canal', cx + R * 0.2, cy + R * 0.04);
+        c.closePath();
+      };
+      RXo.volume(ctx, bodyPath, {
+        fill: SKIN, r: R * 0.72, cx: cx, cy: cy,
+        stipple: 1.4, grain: '#6E3E14', shadow: 0.9, gloss: 0.22,
+        contour: Math.max(1.2, R * 0.014)
+      });
+      ctx.save(); bodyPath(ctx); ctx.clip();
+      // the raised ambulacral ridge running out along each arm
+      for (let k = 0; k < 5; k++) {
+        const a = -Math.PI / 2 + k / 5 * TAU;
+        const ridge = [];
+        for (let q = 0; q <= 12; q++) {
+          const rr = R * (0.17 + q / 12 * 0.75);
+          ridge.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]);
+        }
+        RXo.tube(ctx, ridge, u => R * (0.085 - 0.055 * u),
+                 RXo.mix(SKIN, '#FFD9A0', 0.30), { vivid: false });
       }
+      // calcareous ossicles and the spines they carry
+      for (let k = 0; k < 5; k++) {
+        const a = -Math.PI / 2 + k / 5 * TAU;
+        const nx = -Math.sin(a), ny = Math.cos(a);
+        for (let q = 1; q <= 11; q++) {
+          const rr = R * (0.14 + q / 11 * 0.76);
+          const spread = R * 0.20 * (1 - q / 13);
+          for (let sgi = -2; sgi <= 2; sgi++) {
+            if (Math.abs(sgi) === 1 && q % 2) continue;
+            const px = cx + Math.cos(a) * rr + nx * sgi * spread * 0.55;
+            const py = cy + Math.sin(a) * rr + ny * sgi * spread * 0.55;
+            const rad = R * 0.028 * (1 - q / 16);
+            if (rad < 1) continue;
+            RXo.ball(ctx, px, py, rad,
+                     RXo.mix(SKIN, '#FFE7C4', Math.abs(sgi) === 2 ? 0.42 : 0.18), { rim: 0 });
+          }
+        }
+      }
+      // papulae — the thin-walled skin gills that do the gas exchange
+      for (let i = 0; i < 70; i++) {
+        const a = RXo.hash2(i * 3.1, 5) * TAU;
+        const rr = Math.sqrt(RXo.hash2(i * 7.7, 11)) * R * 0.92;
+        const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
+        ctx.fillStyle = RXo.rgba('#C86A3A', 0.20 + RXo.hash2(i * 5.3, 3) * 0.25);
+        ctx.beginPath(); ctx.arc(px, py, R * 0.012, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
 
       /* ---------------- tube feet in a metachronal wave ---------------- */
       const nPer = Math.min(p.feetPerArm, 30);
@@ -602,106 +627,167 @@
           const phase = (S.t * p.freq - f * p.lag * 4) % 1;
           const stance = phase < S.stanceFrac;
           const e = stance ? 1 : 0.25 + 0.5 * Math.abs(Math.sin(phase * Math.PI));
-          const len = R * 0.11 * e * (0.4 + p.contract * 0.6);
+          const len = R * 0.10 * e * (0.4 + p.contract * 0.6);
           [-1, 1].forEach(sg => {
             const bx = cx + Math.cos(a) * rr + nx * sg * R * 0.035;
             const by = cy + Math.sin(a) * rr + ny * sg * R * 0.035;
-            ctx.strokeStyle = stance ? g.alpha('#9FD8FF', .95) : g.alpha(th['text-3'], .6);
-            ctx.lineWidth = Math.max(1.4, R * 0.022);
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(bx, by);
-            ctx.lineTo(bx + nx * sg * len, by + ny * sg * len);
-            ctx.stroke();
-            if (stance) {
-              ctx.fillStyle = g.alpha('#DDF2FF', .9);
-              ctx.beginPath(); ctx.arc(bx + nx * sg * len, by + ny * sg * len, R * 0.016, 0, TAU); ctx.fill();
-            }
+            const ex = bx + nx * sg * len, ey = by + ny * sg * len;
+            const rad = Math.max(0.9, R * 0.011);
+              ctx.save();
+            ctx.globalAlpha = stance ? 0.95 : 0.45;
+            RXo.tube(ctx, [[bx, by], [ex, ey]], rad,
+                     stance ? CANAL : '#6E7E9E', { vivid: stance });
+            ctx.restore();
+            if (stance) RXo.ball(ctx, ex, ey, rad * 1.6, '#E6F4FF', { rim: 0 });
           });
         }
       }
+      /* ---------------- the water vascular system ---------------- */
+      const ma = -Math.PI / 2 + 0.63;
+      if (p.showCanals) {
+        // ring canal round the mouth
+        const ringPts = [];
+        for (let i = 0; i <= 48; i++) {
+          const a = i / 48 * TAU;
+          ringPts.push([cx + Math.cos(a) * R * 0.16, cy + Math.sin(a) * R * 0.16]);
+        }
+        RXo.tube(ctx, ringPts, R * 0.026, CANAL, { contour: 1 });
+        // five radial canals
+        for (let k = 0; k < 5; k++) {
+          const a = -Math.PI / 2 + k / 5 * TAU;
+          const rad = [];
+          for (let q = 0; q <= 10; q++) {
+            const rr = R * (0.16 + q / 10 * 0.70);
+            rad.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]);
+          }
+          RXo.tube(ctx, rad, u => R * (0.026 - 0.012 * u), CANAL, { contour: 1 });
+        }
+        // Tiedemann's bodies on the ring canal — NCERT names them
+        for (let k = 0; k < 5; k++) {
+          const a = -Math.PI / 2 + (k + 0.5) / 5 * TAU;
+          RXo.ball(ctx, cx + Math.cos(a) * R * 0.16, cy + Math.sin(a) * R * 0.16,
+                   R * 0.030, '#BEE6FF', { rim: 0.4 });
+        }
+        // madreporite and the stone canal that hangs from it
+        RXo.tube(ctx, [[cx + Math.cos(ma) * R * 0.40, cy + Math.sin(ma) * R * 0.40],
+                       [cx + Math.cos(ma) * R * 0.16, cy + Math.sin(ma) * R * 0.16]],
+                 R * 0.024, '#D8EEFF', { contour: 1 });
+        const mx = cx + Math.cos(ma) * R * 0.42, my = cy + Math.sin(ma) * R * 0.42;
+        RXo.ball(ctx, mx, my, R * 0.055, '#E6F4FF', { rim: 0.6 });
+        ctx.save();
+        ctx.beginPath(); ctx.arc(mx, my, R * 0.055, 0, TAU); ctx.clip();
+        ctx.strokeStyle = RXo.rgba('#5E86A8', .8); ctx.lineWidth = Math.max(0.7, R * 0.007);
+        for (let i = -4; i <= 4; i++) {              // the sieve grooves
+          ctx.beginPath();
+          ctx.moveTo(mx - R * 0.06, my + i * R * 0.013);
+          ctx.lineTo(mx + R * 0.06, my + i * R * 0.013 + R * 0.012);
+          ctx.stroke();
+        }
+        ctx.restore();
+        Z.leader(ctx, mx, my, cx - R * 1.02, cy - R * 0.74, '#BEE6FF');
+        Z.lbl(ctx, cx - R * 1.04, cy - R * 0.76, 'madreporite', '#BEE6FF', 'right', 9.5);
+        Z.leader(ctx, cx + R * 0.16, cy, cx - R * 1.02, cy - R * 0.48, '#BEE6FF');
+        Z.lbl(ctx, cx - R * 1.04, cy - R * 0.50, 'ring canal', '#BEE6FF', 'right', 9.5);
+        Z.leader(ctx, cx + Math.cos(-Math.PI / 2 + 0.4 * TAU) * R * 0.60,
+                      cy + Math.sin(-Math.PI / 2 + 0.4 * TAU) * R * 0.60,
+                      cx - R * 1.02, cy - R * 0.22, '#BEE6FF');
+        Z.lbl(ctx, cx - R * 1.04, cy - R * 0.24, 'radial canal', '#BEE6FF', 'right', 9.5);
+      }
 
-      /* ---------------- ampulla + tube foot, magnified ---------------- */
-      const ax = W * 0.70, ay = H * 0.5, AR = Math.min(W * 0.13, H * 0.32);
+      g.scaleBar(cx - R, y1 - 2, R * 0.6, '≈ 3 cm', th['text-3']);
+      Z.lbl(ctx, cx, y0 + 4, 'ABORAL SURFACE  ·  Asterias', th['text-3'], 'center', 9.5, 'top');
+
+      /* ---------------- one foot, magnified ---------------- */
+      const ax = W * 0.735, AR = Math.min(W * 0.135, CH * 0.34);
+      const ay = y0 + CH * 0.40;
       ctx.strokeStyle = g.alpha(th['text-3'], .45); ctx.lineWidth = 1;
       ctx.save(); ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(cx + R * 0.7, cy - R * 0.3); ctx.lineTo(ax - AR * 0.9, ay - AR * 0.7); ctx.stroke();
-      ctx.restore();
+      ctx.beginPath();
+      ctx.moveTo(cx + R * 0.62, cy - R * 0.34); ctx.lineTo(ax - AR * 1.05, ay - AR * 0.80);
+      ctx.stroke(); ctx.restore();
+      Z.lbl(ctx, ax, y0 + 4, '×12  ONE TUBE FOOT', th['text-3'], 'center', 9.5, 'top');
 
       const squeeze = p.contract;
-      // lateral canal + valve
-      ctx.strokeStyle = g.alpha('#9FD8FF', .8); ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(ax - AR * 0.95, ay - AR * 0.55); ctx.lineTo(ax - AR * 0.2, ay - AR * 0.55); ctx.stroke();
+      // lateral canal and its one-way valve
+      RXo.tube(ctx, [[ax - AR * 1.00, ay - AR * 0.55], [ax - AR * 0.22, ay - AR * 0.55]],
+               AR * 0.055, CANAL, { contour: 1 });
       ctx.fillStyle = th.crit;
       ctx.beginPath();
-      ctx.moveTo(ax - AR * 0.26, ay - AR * 0.7); ctx.lineTo(ax - AR * 0.26, ay - AR * 0.4);
-      ctx.lineTo(ax - AR * 0.12, ay - AR * 0.55); ctx.closePath(); ctx.fill();
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-      ctx.fillText('lateral canal', ax - AR * 0.3, ay - AR * 0.62);
-      ctx.textAlign = 'left';
-      ctx.fillStyle = th.crit;
-      ctx.fillText('valve (one-way)', ax - AR * 0.06, ay - AR * 0.62);
+      ctx.moveTo(ax - AR * 0.26, ay - AR * 0.72); ctx.lineTo(ax - AR * 0.26, ay - AR * 0.38);
+      ctx.lineTo(ax - AR * 0.10, ay - AR * 0.55); ctx.closePath(); ctx.fill();
+      Z.leader(ctx, ax - AR * 0.70, ay - AR * 0.55, ax - AR * 0.80, ay - AR * 0.95, CANAL);
+      Z.lbl(ctx, ax - AR * 0.82, ay - AR * 1.02, 'lateral canal', CANAL, 'right', 9.5);
+      Z.leader(ctx, ax - AR * 0.18, ay - AR * 0.55, ax + AR * 0.02, ay - AR * 0.95, th.crit);
+      Z.lbl(ctx, ax + AR * 0.04, ay - AR * 1.02, 'valve (one-way)', th.crit, 'left', 9.5);
 
-      // ampulla — a bulb that flattens as it contracts
-      const aw = AR * (0.34 - 0.14 * squeeze), ah = AR * (0.26 - 0.10 * squeeze);
-      ctx.fillStyle = g.alpha('#3E7BA8', .85);
-      ctx.beginPath(); ctx.ellipse(ax, ay - AR * 0.28, aw, ah, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha('#9FD8FF', .95); ctx.lineWidth = 2; ctx.stroke();
-      // contraction arrows
+      // ampulla — a muscular bulb that flattens as it contracts
+      const aw = AR * (0.36 - 0.15 * squeeze), ah = AR * (0.28 - 0.11 * squeeze);
+      const ampY = ay - AR * 0.26;
+      const amp = c => { c.beginPath(); c.ellipse(ax, ampY, aw, ah, 0, 0, TAU); };
+      RXo.volume(ctx, amp, { fill: WATER, r: aw, cx: ax, cy: ampY,
+                             shadow: 0.7, gloss: 0.34, contour: Math.max(1.2, AR * 0.022) });
+      ctx.save(); amp(ctx); ctx.clip();
+      // circular muscle fibres in the ampulla wall — what does the squeezing
+      ctx.strokeStyle = RXo.rgba('#BEE6FF', .35); ctx.lineWidth = Math.max(0.8, AR * 0.016);
+      for (let i = -3; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.ellipse(ax, ampY, aw * (0.30 + Math.abs(i) * 0.22), ah * 0.94, i * 0.22, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.restore();
       if (squeeze > 0.2) {
-        ctx.strokeStyle = g.alpha(th.warn, .9); ctx.lineWidth = 2;
+        ctx.lineWidth = 2;
         [-1, 1].forEach(sg => {
+          ctx.strokeStyle = g.alpha(th.warn, .9);
           ctx.beginPath();
-          ctx.moveTo(ax + sg * (aw + AR * 0.18), ay - AR * 0.28);
-          ctx.lineTo(ax + sg * (aw + AR * 0.05), ay - AR * 0.28);
+          ctx.moveTo(ax + sg * (aw + AR * 0.22), ampY);
+          ctx.lineTo(ax + sg * (aw + AR * 0.07), ampY);
           ctx.stroke();
+          ctx.fillStyle = g.alpha(th.warn, .9);
           ctx.beginPath();
-          ctx.moveTo(ax + sg * (aw + AR * 0.05), ay - AR * 0.28);
-          ctx.lineTo(ax + sg * (aw + AR * 0.12), ay - AR * 0.34);
-          ctx.lineTo(ax + sg * (aw + AR * 0.12), ay - AR * 0.22);
-          ctx.closePath(); ctx.fillStyle = g.alpha(th.warn, .9); ctx.fill();
+          ctx.moveTo(ax + sg * (aw + AR * 0.04), ampY);
+          ctx.lineTo(ax + sg * (aw + AR * 0.14), ampY - AR * 0.06);
+          ctx.lineTo(ax + sg * (aw + AR * 0.14), ampY + AR * 0.06);
+          ctx.closePath(); ctx.fill();
         });
       }
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-2'];
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText('ampulla', ax + aw + AR * 0.24, ay - AR * 0.28);
+      Z.leader(ctx, ax + aw * 0.7, ampY, ax + aw + AR * 0.30, ampY - AR * 0.16, CANAL);
+      Z.lbl(ctx, ax + aw + AR * 0.32, ampY - AR * 0.18, 'ampulla', CANAL, 'left', 9.5);
 
-      // podium (tube foot) extended by the displaced volume
-      const podLen = AR * (0.28 + 0.85 * squeeze);
-      const podW = AR * 0.10 * (p.rFoot / 0.25);
-      ctx.fillStyle = g.alpha('#5E9CC8', .9);
-      ctx.fillRect(ax - podW, ay - AR * 0.06, podW * 2, podLen);
-      ctx.strokeStyle = g.alpha('#9FD8FF', .9); ctx.lineWidth = 1.6;
-      ctx.strokeRect(ax - podW, ay - AR * 0.06, podW * 2, podLen);
-      // sucker
-      ctx.fillStyle = g.alpha('#DDF2FF', .95);
-      ctx.beginPath();
-      ctx.ellipse(ax, ay - AR * 0.06 + podLen, podW * 1.7, podW * 0.7, 0, 0, TAU); ctx.fill();
-      ctx.fillStyle = th['text-2'];
-      ctx.fillText('podium', ax + podW + AR * 0.14, ay + podLen * 0.4);
-      ctx.fillText('sucker', ax + podW + AR * 0.14, ay - AR * 0.06 + podLen);
-      // substrate
-      ctx.strokeStyle = g.alpha(th['text-3'], .8); ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(ax - AR * 0.9, ay - AR * 0.02 + podLen + podW * 0.8);
-      ctx.lineTo(ax + AR * 0.9, ay - AR * 0.02 + podLen + podW * 0.8);
-      ctx.stroke();
+      // the podium, extended by exactly the volume the ampulla displaced
+      const podLen = AR * (0.30 + 0.85 * squeeze);
+      const podW = Math.max(2, AR * 0.10 * (p.rFoot / 0.25));
+      const podTop = ay - AR * 0.04;
+      RXo.tube(ctx, [[ax, podTop], [ax, podTop + podLen]], podW, WATER,
+               { contour: Math.max(1.2, AR * 0.020) });
+      // the sucker, seen as a disc pressed on the substrate
+      const suckY = podTop + podLen;
+      RXo.volume(ctx, c => { c.beginPath(); c.ellipse(ax, suckY, podW * 1.9, podW * 0.8, 0, 0, TAU); },
+                 { fill: '#BEE6FF', r: podW * 1.6, cx: ax, cy: suckY,
+                   gloss: 0.4, contour: Math.max(1, AR * 0.016) });
+      Z.leader(ctx, ax + podW, podTop + podLen * 0.45, ax + podW + AR * 0.26, podTop + podLen * 0.45, CANAL);
+      Z.lbl(ctx, ax + podW + AR * 0.28, podTop + podLen * 0.45, 'podium', CANAL, 'left', 9.5);
+      Z.leader(ctx, ax - podW * 1.8, suckY, ax - podW - AR * 0.26, suckY - AR * 0.12, '#E6F4FF');
+      Z.lbl(ctx, ax - podW - AR * 0.28, suckY - AR * 0.12, 'sucker', '#E6F4FF', 'right', 9.5);
 
-      // extension readout on the magnified view
-      ctx.font = '600 11px "IBM Plex Mono",monospace'; ctx.fillStyle = th.bio;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.fillText('extends ' + (S.ext * 1000).toFixed(1) + ' mm', ax, ay - AR * 0.02 + podLen + podW * 2.4);
+      // the substrate the animal is walking on
+      const subY = suckY + podW * 0.9;
+      ctx.fillStyle = g.alpha('#2A3550', .9);
+      ctx.fillRect(ax - AR * 1.0, subY, AR * 2.0, Math.max(4, AR * 0.07));
+      ctx.strokeStyle = g.alpha(th['text-3'], .8); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(ax - AR * 1.0, subY); ctx.lineTo(ax + AR * 1.0, subY); ctx.stroke();
+
+      Z.lbl(ctx, ax, subY + AR * 0.22, 'extends ' + (S.ext * 1000).toFixed(1) + ' mm',
+            th.bio, 'center', 11);
 
       /* ---------------- header ---------------- */
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif'; ctx.fillStyle = th.text;
-      ctx.fillText((S.speed * 6000).toFixed(1) + ' cm/min  ·  ' + S.nStance + ' feet gripping', 14, 10);
+      ctx.fillText((S.speed * 6000).toFixed(1) + ' cm/min  ·  ' + S.nStance + ' feet gripping', 14, 8);
       ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
       ctx.fillText('madreporite → stone canal → ring canal → radial canal → lateral canal → ampulla → tube foot',
-        14, 32);
+        14, 31);
     },
-
     plots: [
       { title: 'Volume in, length out — the whole mechanism in one straight line',
         legend: [{ c: '#E0913A', label: 'extension at this foot radius' },

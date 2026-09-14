@@ -657,7 +657,7 @@
       ctx.strokeText(volTxt, hx + sc * 0.32, hy + sc * 0.46);
       ctx.fillStyle = '#F2E3C0'; ctx.fillText(volTxt, hx + sc * 0.32, hy + sc * 0.46);
 
-      g.scaleBar(hx - sc * 0.5, hy + sc * 1.22, sc * 1.0, '≈ 6 cm', th['text-3']);
+      g.scaleBar(hx - sc * 0.5, hy + sc * 1.34, sc * 1.0, '≈ 6 cm', th['text-3']);
 
       /* ---- the four valves, as a state block clear of the figure ---- */
       const vs = [['mitral', S.mvOpen], ['aortic', S.avOpen],
@@ -731,7 +731,7 @@
 
       /* ---- the ECG, lined up with the phase the heart is in ---- */
       if (p.showECG && S.hist.length > 2) {
-        const ex0 = 20, ex1 = W * 0.62, ey = H * 0.945, eh = H * 0.062;
+        const ex0 = 20, ex1 = W * 0.62, ey = H * 0.925, eh = H * 0.055;
         const t0 = S.hist[0][0], t1 = S.hist[S.hist.length - 1][0];
         const span = Math.max(t1 - t0, 1e-3);
         ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;

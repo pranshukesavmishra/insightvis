@@ -123,32 +123,44 @@ window.ZOOART = (function () {
     o = o || {};
     const dir = o.dir == null ? -Math.PI / 2 : o.dir;   // where the flagellum points
     const beat = o.beat || 0;
+    const base = o.colour || C.endo;
     ctx.save(); ctx.translate(x, y); ctx.rotate(dir + Math.PI / 2);
-    // cell body
-    cell(ctx, 0, s * 0.42, s * 0.40, s * 0.44, { colour: o.colour || C.endo, nucleusR: 0.40, stipple: 1.2 });
-    // the collar: microvilli, drawn as individual filaments
+
+    // Below about nine pixels the collar and flagellum are finer than a
+    // pixel; drawing them there produces noise, not detail.
+    if (s < 9) {
+      RX.ball(ctx, 0, s * 0.30, s * 0.42, base, { shadow: false, gloss: 0.6 });
+      RX.tube(ctx, [[0, s * 0.05], [Math.sin(beat * 2) * s * 0.30, -s * 1.05]],
+        Math.max(0.5, s * 0.075), '#FFE9A8', { vivid: false });
+      ctx.restore();
+      return;
+    }
+
+    // the collar: microvilli as lit filaments, drawn behind the cell body
     const nv = 9;
-    ctx.strokeStyle = rgba(mix(o.colour || C.endo, '#ffffff', .5), .9);
-    ctx.lineWidth = Math.max(0.8, s * 0.045);
-    ctx.lineCap = 'round';
     for (let i = 0; i < nv; i++) {
       const u = (i / (nv - 1)) * 2 - 1;
-      ctx.beginPath();
-      ctx.moveTo(u * s * 0.33, s * 0.06);
-      ctx.lineTo(u * s * 0.50, -s * 0.62);
-      ctx.stroke();
+      RX.tube(ctx, [[u * s * 0.33, s * 0.06], [u * s * 0.50, -s * 0.62]],
+        Math.max(0.55, s * 0.035), RX.mix(base, '#ffffff', .45), { vivid: false });
     }
-    // the flagellum, a travelling sine wave — this is what moves the water
-    ctx.strokeStyle = rgba('#FFF0C0', .95);
-    ctx.lineWidth = Math.max(1, s * 0.055);
-    ctx.beginPath();
-    for (let i = 0; i <= 22; i++) {
-      const t = i / 22;
-      const fy = s * 0.06 - t * s * 1.45;
-      const fx = Math.sin(t * 7.2 - beat * 6.2) * s * 0.26 * t;
-      i ? ctx.lineTo(fx, fy) : ctx.moveTo(fx, fy);
+
+    // cell body, with volume
+    RX.volume(ctx, c => c.ellipse(0, s * 0.42, s * 0.40, s * 0.44, 0, 0, TAU), {
+      fill: base, r: s * 0.44, cx: 0, cy: s * 0.42, squash: 1.1,
+      stipple: 1.2, grain: RX.mix(base, '#05080F', .55), gloss: 0.45,
+      shadow: 0.7, contour: Math.max(0.8, s * 0.05)
+    });
+    RX.ball(ctx, -s * 0.06, s * 0.46, s * 0.15, C.nucleus, { shadow: false, gloss: 0.5 });
+
+    // the flagellum: a travelling wave, drawn as a tapering lit filament —
+    // this is the structure that moves every litre of water a sponge filters
+    const wave = [];
+    for (let i = 0; i <= 26; i++) {
+      const t = i / 26;
+      wave.push([Math.sin(t * 7.2 - beat * 6.2) * s * 0.26 * t, s * 0.06 - t * s * 1.45]);
     }
-    ctx.stroke();
+    RX.tube(ctx, wave, t => Math.max(0.5, s * 0.055 * (1 - t * 0.45)), '#FFE9A8',
+      { vivid: false });
     ctx.restore();
   }
 
@@ -318,16 +330,13 @@ window.ZOOART = (function () {
      ===================================================================== */
   function spicule(ctx, x, y, s, rays, rot) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(rot || 0);
-    ctx.strokeStyle = rgba(C.spicule, .85);
-    ctx.lineWidth = Math.max(1, s * 0.10);
-    ctx.lineCap = 'round';
     const n = rays || 1;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI;
-      ctx.beginPath();
-      ctx.moveTo(-Math.cos(a) * s, -Math.sin(a) * s);
-      ctx.lineTo(Math.cos(a) * s, Math.sin(a) * s);
-      ctx.stroke();
+      RX.tube(ctx,
+        [[-Math.cos(a) * s, -Math.sin(a) * s], [0, 0], [Math.cos(a) * s, Math.sin(a) * s]],
+        t => Math.max(0.5, s * 0.10 * (1 - Math.abs(t - 0.5) * 1.2)),
+        C.spicule, { vivid: false });
     }
     ctx.restore();
   }
@@ -504,12 +513,33 @@ window.ZOOART = (function () {
     for (let y = top; y <= bot; y += 3) ctx.lineTo(cx - rAt(y), y);
     for (let y = bot; y >= top; y -= 3) ctx.lineTo(cx + rAt(y), y);
     ctx.closePath();
+    const bodyPath = c => {
+      c.moveTo(cx - rAt(top), top);
+      for (let y = top; y <= bot; y += 3) c.lineTo(cx - rAt(y), y);
+      for (let y = bot; y >= top; y -= 3) c.lineTo(cx + rAt(y), y);
+      c.closePath();
+    };
+    const vividBody = RX.sat(C.endo, 1.22);
     const bg = ctx.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
-    bg.addColorStop(0, mix(C.endo, C.ink, .40));
-    bg.addColorStop(.42, mix(C.endo, '#ffffff', .10));
-    bg.addColorStop(1, mix(C.endo, C.ink, .52));
+    bg.addColorStop(0, RX.mix(vividBody, C.ink, .46));
+    bg.addColorStop(.24, RX.mix(vividBody, '#ffffff', .34));
+    bg.addColorStop(.48, vividBody);
+    bg.addColorStop(.78, RX.mix(vividBody, '#ffffff', .12));
+    bg.addColorStop(1, RX.mix(vividBody, C.ink, .56));
+    ctx.save();
+    ctx.beginPath(); bodyPath(ctx);
     ctx.fillStyle = bg; ctx.fill();
-    ctx.strokeStyle = rgba(mix(C.endo, C.ink, .58), 1); ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.clip();
+    // mesohyl texture — the protein jelly the whole body is built in
+    for (let i = 0; i < 520; i++) {
+      const yy = top + RX.hash2(i * 2.7, 5) * (bot - top);
+      const xx = cx + (RX.hash2(i * 4.1, 9) * 2 - 1) * rAt(yy);
+      ctx.fillStyle = RX.rgba(RX.mix(vividBody, C.ink, .6), 0.07 + RX.hash2(i * 6.3, 13) * 0.18);
+      ctx.beginPath(); ctx.arc(xx, yy, 0.5 + RX.hash2(i * 8.9, 17) * 1.3, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+    ctx.strokeStyle = rgba(mix(C.endo, C.ink, .62), 1); ctx.lineWidth = 1.5;
+    ctx.beginPath(); bodyPath(ctx); ctx.stroke();
 
     /* spongocoel — the central cavity, open at the osculum */
     const sc = kind === 'leucon' ? 0.30 : kind === 'sycon' ? 0.40 : 0.46;

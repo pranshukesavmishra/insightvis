@@ -93,16 +93,74 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const u = p.stage, plan = S.plan;
-      const cx = W * 0.40, cy = H * 0.54;
-      const R = Math.min(W * 0.20, H * 0.34);
+      const Z = window.ZOOART, RXo = window.RX;
+
+      /* ---------------- plate frame ---------------- */
+      const HDR = 56, FOOT = 66;              // the timeline lives in the foot band
+      const y0 = HDR, y1 = H - FOOT, CH = y1 - y0;
+      const cx = W * 0.42, cy = y0 + CH * 0.50;
+      const R = Math.min(W * 0.20, CH * 0.385);
       const tri = plan.layers === 3;
 
-      const ring = (r0, r1, col, a) => {
-        ctx.beginPath();
-        ctx.arc(cx, cy, r1, 0, TAU);
-        ctx.arc(cx, cy, r0, 0, TAU, true);
-        ctx.fillStyle = g.alpha(col, a == null ? 1 : a);
-        ctx.fill('evenodd');
+      /* A germ layer is a SHEET OF CELLS, so it is drawn as one: a lit band
+         with radial cell walls and a nucleus in every cell. Flat rings were
+         what made this read as a dartboard. */
+      const annulus = (c, r0, r1) => {
+        c.beginPath();
+        c.arc(cx, cy, r1, 0, TAU);
+        c.arc(cx, cy, r0, 0, TAU, true);
+      };
+      const cellRing = (r0, r1, col, o) => {
+        o = o || {};
+        if (r1 - r0 < 1.2) return;
+        const a = o.alpha == null ? 1 : o.alpha;
+        ctx.save();
+        ctx.globalAlpha = a;
+        const mid = (r0 + r1) / 2, band = r1 - r0;
+        // the lit band itself — a linear ramp across the ring reads as a
+        // curved surface, a radial one collapses it
+        annulus(ctx, r0, r1);
+        const base = RXo.sat(col, 1.24);
+        const gr = ctx.createLinearGradient(cx - r1, cy - r1, cx + r1, cy + r1);
+        gr.addColorStop(0, RXo.mix(base, '#ffffff', .48));
+        gr.addColorStop(.30, RXo.mix(base, '#ffffff', .14));
+        gr.addColorStop(.66, base);
+        gr.addColorStop(1, RXo.mix(base, '#05080F', .52));
+        ctx.fillStyle = gr; ctx.fill('evenodd');
+        // cell walls and nuclei
+        const n = Math.max(10, Math.round(TAU * mid / Math.max(7, band * 0.95)));
+        ctx.save(); annulus(ctx, r0, r1); ctx.clip('evenodd');
+        ctx.strokeStyle = RXo.rgba(RXo.mix(col, '#05080F', .70), .55);
+        ctx.lineWidth = Math.max(0.7, band * 0.055);
+        for (let i = 0; i < n; i++) {
+          const ang = i / n * TAU + (o.phase || 0);
+          ctx.beginPath();
+          ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0);
+          ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
+          ctx.stroke();
+        }
+        if (band > 7) for (let i = 0; i < n; i++) {
+          const ang = (i + 0.5) / n * TAU + (o.phase || 0);
+          RXo.ball(ctx, cx + Math.cos(ang) * mid, cy + Math.sin(ang) * mid,
+                   Math.min(band * 0.26, 3.4), RXo.mix(col, '#2A1348', .55), { rim: 0 });
+        }
+        ctx.restore();
+        // inner and outer surfaces catch the light differently
+        ctx.strokeStyle = RXo.rgba(RXo.mix(col, '#ffffff', .55), .40);
+        ctx.lineWidth = Math.max(0.8, band * 0.07);
+        ctx.beginPath(); ctx.arc(cx, cy, r1 - ctx.lineWidth / 2, 0, TAU); ctx.stroke();
+        ctx.strokeStyle = RXo.rgba(RXo.mix(col, '#05080F', .78), .70);
+        ctx.beginPath(); ctx.arc(cx, cy, r0 + ctx.lineWidth / 2, 0, TAU); ctx.stroke();
+        ctx.restore();
+      };
+      // a cavity is dark at its centre and lit only where it meets tissue
+      const cavity = (r, label2) => {
+        const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        cg.addColorStop(0, '#05080F');
+        cg.addColorStop(.72, '#080D18');
+        cg.addColorStop(1, RXo.rgba('#2B3A56', .9));
+        ctx.fillStyle = cg;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill();
       };
 
       /* ---------- stage 0–0.16 : zygote & cleavage ---------- */
@@ -113,29 +171,30 @@
           const rr = n === 1 ? 0 : R * 0.42;
           const cr = R * (n === 1 ? 0.78 : 0.42 / Math.sqrt(n) * 1.6);
           const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
-          const gr = ctx.createRadialGradient(x - cr * .3, y - cr * .3, cr * .1, x, y, cr);
-          gr.addColorStop(0, g.mix(ECTO, '#ffffff', .5)); gr.addColorStop(1, g.mix(ECTO, '#05080F', .35));
-          ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, cr, 0, TAU); ctx.fill();
-          ctx.strokeStyle = g.alpha('#05080F', .4); ctx.lineWidth = 1; ctx.stroke();
+          RXo.ball(ctx, x, y, cr, ECTO, { rim: 0.6 });
+          RXo.ball(ctx, x - cr * 0.12, y - cr * 0.08, cr * 0.26, '#6A3FC0', { rim: 0.3 });
+        }
+        if (p.labels) {
+          Z.leader(ctx, cx + R * 0.6, cy - R * 0.55, cx + R * 1.05, cy - R * 0.95, th['text-2']);
+          Z.lbl(ctx, cx + R * 1.08, cy - R * 0.98,
+                n === 1 ? 'zygote — one diploid cell' : n + '-cell stage (holoblastic cleavage)',
+                th['text-2'], 'left', 9.5);
         }
       }
-      /* ---------- 0.16–0.34 : morula → blastula ---------- */
+      /* ---------- 0.16–0.54 : morula → blastula ---------- */
       else if (u < 0.54) {
         const t = clamp((u - 0.16) / 0.38, 0, 1);
         const inner = R * 0.62 * t;
-        ring(inner, R * 0.92, ECTO);
-        if (t > 0.1) {
-          ctx.fillStyle = CAVITY; ctx.beginPath(); ctx.arc(cx, cy, inner, 0, TAU); ctx.fill();
-          if (p.labels && t > 0.4) label(ctx, th, cx, cy, 'blastocoel', th['text-2']);
-        }
-        // cell boundaries on the rim
-        ctx.strokeStyle = g.alpha('#05080F', .3); ctx.lineWidth = 1;
-        for (let i = 0; i < 26; i++) {
-          const a = i / 26 * TAU;
-          ctx.beginPath();
-          ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
-          ctx.lineTo(cx + Math.cos(a) * R * 0.92, cy + Math.sin(a) * R * 0.92);
-          ctx.stroke();
+        if (t > 0.1) cavity(inner);
+        cellRing(inner, R * 0.92, ECTO);
+        if (p.labels) {
+          if (t > 0.4) {
+            Z.leader(ctx, cx, cy, cx - R * 0.30, cy - R * 1.14, th['text-2']);
+            Z.lbl(ctx, cx - R * 0.32, cy - R * 1.18, 'blastocoel', th['text-2'], 'right', 9.5);
+          }
+          Z.leader(ctx, cx + R * 0.66, cy + R * 0.66, cx + R * 1.06, cy + R * 1.00, ECTO);
+          Z.lbl(ctx, cx + R * 1.08, cy + R * 1.02,
+                t > 0.5 ? 'blastoderm — one cell thick' : 'blastomeres', ECTO, 'left', 9.5);
         }
       }
       /* ---------- 0.54 onwards : gastrula, mesoderm, cavity ---------- */
@@ -143,91 +202,162 @@
         const gt = clamp((u - 0.54) / 0.20, 0, 1);          // invagination
         const mt = clamp((u - 0.74) / 0.16, 0, 1);          // mesoderm
         const ct = clamp((u - 0.88) / 0.12, 0, 1);          // cavity
-
-        // outer ectoderm
-        ring(R * 0.80, R * 0.95, ECTO);
-        // blastocoel space
-        ctx.fillStyle = CAVITY; ctx.beginPath(); ctx.arc(cx, cy, R * 0.80, 0, TAU); ctx.fill();
-
-        // endoderm — invaginating archenteron, shown as an inner tube
         const gutR = R * (0.46 - 0.16 * gt) + R * 0.16;
-        const depth = gt;
-        ctx.save();
-        ctx.beginPath(); ctx.arc(cx, cy, R * 0.80, 0, TAU); ctx.clip();
-        ctx.fillStyle = ENDO;
-        if (depth < 1) {
-          // a pouch pushing in from the vegetal pole
-          ctx.beginPath();
-          ctx.moveTo(cx - R * 0.42, cy + R * 0.78);
-          ctx.quadraticCurveTo(cx, cy + R * (0.78 - 1.5 * depth), cx + R * 0.42, cy + R * 0.78);
-          ctx.lineTo(cx + R * 0.52, cy + R * 0.9);
-          ctx.lineTo(cx - R * 0.52, cy + R * 0.9);
-          ctx.closePath(); ctx.fill();
-        } else {
-          ring(gutR * 0.62, gutR * 0.80, ENDO);
-          ctx.fillStyle = CAVITY;
-          ctx.beginPath(); ctx.arc(cx, cy, gutR * 0.62, 0, TAU); ctx.fill();
-        }
-        ctx.restore();
 
-        if (gt >= 1) {
-          ring(gutR * 0.62, gutR * 0.80, ENDO);
-          ctx.fillStyle = CAVITY;
-          ctx.beginPath(); ctx.arc(cx, cy, gutR * 0.62, 0, TAU); ctx.fill();
+        cavity(R * 0.80);                                    // blastocoel
+        cellRing(R * 0.80, R * 0.95, ECTO);                  // outer ectoderm
+
+        // endoderm — invaginating archenteron
+        if (gt < 1) {
+          ctx.save();
+          ctx.beginPath(); ctx.arc(cx, cy, R * 0.80, 0, TAU); ctx.clip();
+          const pouch = c => {
+            c.beginPath();
+            c.moveTo(cx - R * 0.42, cy + R * 0.78);
+            c.quadraticCurveTo(cx, cy + R * (0.78 - 1.5 * gt), cx + R * 0.42, cy + R * 0.78);
+            c.lineTo(cx + R * 0.52, cy + R * 0.9);
+            c.lineTo(cx - R * 0.52, cy + R * 0.9);
+            c.closePath();
+          };
+          RXo.volume(ctx, pouch, { fill: ENDO, r: R * 0.42, cx: cx, cy: cy + R * 0.6,
+                                   gloss: 0.2, contour: 1.2 });
+          ctx.restore();
+        } else {
+          cavity(gutR * 0.62);
+          cellRing(gutR * 0.62, gutR * 0.80, ENDO, { phase: 0.2 });
         }
 
         /* --- the third layer and the cavity --- */
         if (!tri) {
-          // diploblastic: mesoglea between the two layers
-          ring(gutR * 0.80, R * 0.80, '#7A6E8C', 0.35 * Math.max(gt, 0));
-          if (p.labels && gt > 0.6) label(ctx, th, cx, cy - R * 0.62, 'mesoglea', '#B9AFC9');
+          // diploblastic: mesoglea — a non-cellular jelly, so NO cell walls
+          if (gt > 0) {
+            ctx.save(); ctx.globalAlpha = 0.5 * gt;
+            annulus(ctx, gutR * 0.80, R * 0.80);
+            const jg = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+            jg.addColorStop(0, RXo.rgba('#CFE0F7', .55));
+            jg.addColorStop(.6, RXo.rgba('#8E94B8', .40));
+            jg.addColorStop(1, RXo.rgba('#4A4F6E', .55));
+            ctx.fillStyle = jg; ctx.fill('evenodd');
+            ctx.restore();
+            if (p.labels && gt > 0.6) {
+              Z.leader(ctx, cx - (gutR * 0.8 + R * 0.8) / 2, cy, cx - R * 1.06, cy - R * 0.18, '#CFE0F7');
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.20, 'mesoglea — acellular jelly',
+                    '#CFE0F7', 'right', 9.5);
+            }
+          }
         } else if (mt > 0) {
+          const mid = (gutR * 0.80 + R * 0.80) / 2;
           if (plan.id === 'acoelo') {
-            ring(gutR * 0.80, R * 0.80, MESO, mt);
-            if (p.labels && mt > 0.6) label(ctx, th, cx, cy - R * 0.62, 'solid mesoderm — no cavity', MESO);
+            cellRing(gutR * 0.80, R * 0.80, MESO, { alpha: mt, phase: 0.4 });
+            if (p.labels && mt > 0.6) {
+              Z.leader(ctx, cx - mid, cy, cx - R * 1.06, cy - R * 0.18, MESO);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.20, 'solid mesoderm (parenchyma)', MESO, 'right', 9.5);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.20 + 12, 'no cavity at all', th.crit, 'right', 9);
+            }
           } else if (plan.id === 'pseudo') {
             // mesoderm only beneath the ectoderm; the cavity has no inner lining
-            ring(R * 0.66, R * 0.80, MESO, mt);
-            if (ct > 0 && p.labels)
-              label(ctx, th, cx, cy - R * 0.52, 'pseudocoelom — unlined', th['text-2']);
+            cellRing(R * 0.66, R * 0.80, MESO, { alpha: mt, phase: 0.4 });
+            if (p.labels && ct > 0) {
+              Z.leader(ctx, cx - (gutR * 0.8 + R * 0.66) / 2, cy - R * 0.10,
+                       cx - R * 1.06, cy - R * 0.42, th.warn);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.44, 'pseudocoelom', th.warn, 'right', 9.5);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.44 + 12, 'lined on the OUTER side only',
+                    th.warn, 'right', 9);
+              Z.leader(ctx, cx + gutR * 0.80, cy + R * 0.16, cx + R * 1.06, cy + R * 0.46, th.crit);
+              Z.lbl(ctx, cx + R * 1.08, cy + R * 0.46, 'gut wall has no', th.crit, 'left', 9.5);
+              Z.lbl(ctx, cx + R * 1.08, cy + R * 0.46 + 12, 'mesodermal lining', th.crit, 'left', 9.5);
+            }
+          } else if (p.origin === 'entero' && mt < 1) {
+            // enterocoely — pouches budding off the archenteron
+            [-1, 1].forEach(sg => {
+              const pch = c => {
+                c.beginPath();
+                c.ellipse(cx + sg * gutR * 0.95, cy, gutR * 0.26 * mt, gutR * 0.42 * mt, 0, 0, TAU);
+              };
+              RXo.volume(ctx, pch, { fill: MESO, r: gutR * 0.34 * mt,
+                                     cx: cx + sg * gutR * 0.95, cy: cy,
+                                     gloss: 0.25, contour: 1.2 });
+            });
+            if (p.labels) {
+              Z.leader(ctx, cx + gutR * 0.95, cy, cx + R * 1.06, cy - R * 0.30, MESO);
+              Z.lbl(ctx, cx + R * 1.08, cy - R * 0.32, 'enterocoely', MESO, 'left', 9.5);
+              Z.lbl(ctx, cx + R * 1.08, cy - R * 0.32 + 12, 'pouches bud off the archenteron',
+                    th['text-3'], 'left', 9);
+            }
+          } else if (p.origin === 'schizo' && mt < 1) {
+            // schizocoely — a solid mass that splits
+            cellRing(gutR * 0.80, R * 0.80, MESO, { phase: 0.4 });
+            ctx.save();
+            ctx.globalAlpha = mt;
+            cavity(mid + R * 0.05);
+            ctx.restore();
+            cellRing(gutR * 0.80, mid - R * 0.05 * mt, MESO, { phase: 0.4 });
+            cellRing(mid + R * 0.05 * mt, R * 0.80, MESO, { phase: 0.4 });
+            if (p.labels) {
+              Z.leader(ctx, cx - mid, cy, cx - R * 1.06, cy - R * 0.30, MESO);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.32, 'schizocoely', MESO, 'right', 9.5);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.32 + 12, 'the solid mass splits',
+                    th['text-3'], 'right', 9);
+            }
           } else {
-            // coelomate: mesoderm on BOTH surfaces, cavity between
-            if (p.origin === 'entero' && mt < 1) {
-              // enterocoely — pouches budding off the archenteron
-              ctx.fillStyle = g.alpha(MESO, .95);
-              [-1, 1].forEach(sg => {
-                ctx.beginPath();
-                ctx.ellipse(cx + sg * gutR * 0.95, cy, gutR * 0.26 * mt, gutR * 0.4 * mt, 0, 0, TAU);
-                ctx.fill();
-              });
-              if (p.labels) label(ctx, th, cx, cy - R * 0.62, 'enterocoely — pouches from the gut', MESO);
-            } else if (p.origin === 'schizo' && mt < 1) {
-              // schizocoely — a solid mass that splits
-              ring(gutR * 0.80, R * 0.80, MESO, 1);
-              ctx.strokeStyle = g.alpha(CAVITY, mt); ctx.lineWidth = R * 0.06 * mt;
-              ctx.beginPath(); ctx.arc(cx, cy, (gutR * 0.80 + R * 0.80) / 2, 0, TAU); ctx.stroke();
-              if (p.labels) label(ctx, th, cx, cy - R * 0.62, 'schizocoely — the mass splits', MESO);
-            } else {
-              const mid = (gutR * 0.80 + R * 0.80) / 2;
-              ring(gutR * 0.80, mid - R * 0.07 * ct, MESO);     // visceral peritoneum
-              ring(mid + R * 0.07 * ct, R * 0.80, MESO);        // parietal peritoneum
-              if (p.labels && ct > 0.5) {
-                label(ctx, th, cx, cy - mid, 'true coelom', th.text);
-                label(ctx, th, cx + mid * 0.72, cy + mid * 0.72, 'peritoneum', MESO);
+            // the finished coelomate section
+            const wall = R * 0.07 * ct;
+            ctx.save();
+            annulus(ctx, gutR * 0.80, R * 0.80);
+            ctx.clip('evenodd');
+            cavity(R * 0.80);
+            ctx.restore();
+            cellRing(gutR * 0.80, mid - wall, MESO, { phase: 0.4 });    // visceral peritoneum
+            cellRing(mid + wall, R * 0.80, MESO, { phase: 0.4 });       // parietal peritoneum
+            if (ct > 0.4) {
+              // organs suspended in the coelom — this is what a coelom is FOR
+              const mes = [];
+              for (let q = 0; q <= 8; q++) {
+                const rr = gutR * 0.80 + (R * 0.80 - gutR * 0.80) * q / 8;
+                mes.push([cx + Math.cos(-Math.PI / 2) * rr, cy + Math.sin(-Math.PI / 2) * rr]);
               }
+              RXo.tube(ctx, mes, R * 0.012, MESO, { vivid: false });    // mesentery
+              // a blood vessel and a nerve cord running in the mesoderm
+              const vr = (gutR * 0.80 + mid - wall) / 2;
+              RXo.ball(ctx, cx + Math.cos(0.9) * vr, cy + Math.sin(0.9) * vr,
+                       Math.max(2, R * 0.030), '#E8455E', { rim: 0.4 });
+              RXo.ball(ctx, cx + Math.cos(Math.PI / 2) * ((mid + wall + R * 0.80) / 2),
+                       cy + Math.sin(Math.PI / 2) * ((mid + wall + R * 0.80) / 2),
+                       Math.max(2, R * 0.030), '#FFE08A', { rim: 0.4 });
+            }
+            if (p.labels && ct > 0.5) {
+              Z.leader(ctx, cx - mid, cy - R * 0.10, cx - R * 1.06, cy - R * 0.44, th.text);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.46, 'true coelom', th.text, 'right', 9.5);
+              Z.lbl(ctx, cx - R * 1.08, cy - R * 0.46 + 12, 'mesoderm on BOTH surfaces',
+                    th.ok, 'right', 9);
+              Z.leader(ctx, cx + (mid + wall + R * 0.80) / 2 * 0.72,
+                       cy + (mid + wall + R * 0.80) / 2 * 0.72,
+                       cx + R * 1.06, cy + R * 0.62, MESO);
+              Z.lbl(ctx, cx + R * 1.08, cy + R * 0.62, 'parietal peritoneum', MESO, 'left', 9.5);
+              Z.leader(ctx, cx + (gutR * 0.80 + mid) / 2 * 0.60,
+                       cy - (gutR * 0.80 + mid) / 2 * 0.60,
+                       cx + R * 1.06, cy - R * 0.62, MESO);
+              Z.lbl(ctx, cx + R * 1.08, cy - R * 0.62, 'visceral peritoneum', MESO, 'left', 9.5);
             }
           }
         }
 
         if (p.labels && gt > 0.5) {
-          label(ctx, th, cx, cy + R * 1.12, 'blastopore', ENDO);
-          label(ctx, th, cx - R * 1.18, cy - R * 0.5, 'ectoderm', ECTO);
-          if (gt >= 1) label(ctx, th, cx, cy, 'archenteron', ENDO);
+          Z.leader(ctx, cx, cy + R * 0.92, cx - R * 0.34, cy + R * 1.18, ENDO);
+          Z.lbl(ctx, cx - R * 0.36, cy + R * 1.20, 'blastopore', ENDO, 'right', 9.5);
+          Z.leader(ctx, cx - R * 0.88, cy - R * 0.36, cx - R * 1.06, cy - R * 0.72, ECTO);
+          Z.lbl(ctx, cx - R * 1.08, cy - R * 0.74, 'ectoderm', ECTO, 'right', 9.5);
+          if (gt >= 1) {
+            Z.leader(ctx, cx, cy, cx + R * 0.42, cy + R * 1.18, ENDO);
+            Z.lbl(ctx, cx + R * 0.44, cy + R * 1.20, 'archenteron (endoderm)', ENDO, 'left', 9.5);
+          }
         }
       }
+      g.scaleBar(14, y1 - 4, R * 0.5, '≈ 100 µm', th['text-3']);
+      Z.lbl(ctx, cx, y0 + 2, 'TRANSVERSE SECTION', th['text-3'], 'center', 9.5, 'top');
 
-      /* ---------- developmental timeline ---------- */
-      const tx0 = 14, tx1 = W - 14, ty = H - 26;
+      /* ---------- developmental timeline, in its own band ---------- */
+      const tx0 = 14, tx1 = W - 14, ty = H - 30;
       ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(tx0, ty); ctx.lineTo(tx1, ty); ctx.stroke();
       ctx.strokeStyle = g.alpha(th.bio, .9);
@@ -239,33 +369,34 @@
         ctx.beginPath(); ctx.arc(x, ty, on ? 4 : 3, 0, TAU); ctx.fill();
         ctx.font = (on ? '600 ' : '400 ') + '9px "IBM Plex Mono",monospace';
         ctx.fillStyle = on ? th.text : th['text-3'];
-        ctx.textAlign = i === STAGES.length - 1 ? 'right' : 'left'; ctx.textBaseline = 'bottom';
-        ctx.fillText(st.name, i === STAGES.length - 1 ? tx1 : x, ty - 8);
+        ctx.textAlign = i === STAGES.length - 1 ? 'right' : i === 0 ? 'left' : 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(st.name, i === STAGES.length - 1 ? tx1 : i === 0 ? tx0 : x, ty - 8);
       });
 
       /* ---------- header ---------- */
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif'; ctx.fillStyle = th.text;
-      ctx.fillText(plan.name, 14, 10);
+      ctx.fillText(plan.name, 14, 8);
       ctx.font = '500 10.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText(STAGES[S.stageIdx].name + ' — ' + STAGES[S.stageIdx].note, 14, 32);
+      ctx.fillText(STAGES[S.stageIdx].name + ' — ' + STAGES[S.stageIdx].note, 14, 31);
 
       /* ---------- germ-layer key ---------- */
-      const kx = W - 150, ky = 14;
-      [['Ectoderm', ECTO, 'skin, nervous system'],
-       ['Mesoderm', MESO, 'muscle, skeleton, blood'],
-       ['Endoderm', ENDO, 'gut lining, liver, lungs']].forEach((row, i) => {
+      const kx = W - 158, ky = 6;
+      [['Ectoderm', ECTO, 'skin, nerves'],
+       ['Mesoderm', MESO, 'muscle, blood'],
+       ['Endoderm', ENDO, 'gut lining']].forEach((row, i) => {
         if (!tri && i === 1) return;
         ctx.fillStyle = row[1];
-        ctx.fillRect(kx, ky + i * 26, 10, 10);
-        ctx.font = '600 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th.text;
+        ctx.fillRect(kx, ky + i * 17, 9, 9);
+        ctx.font = '600 9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th.text;
         ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        ctx.fillText(row[0], kx + 15, ky + i * 26);
-        ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-        ctx.fillText(row[2], kx + 15, ky + i * 26 + 12);
+        ctx.fillText(row[0], kx + 14, ky + i * 17);
+        ctx.font = '8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+        ctx.textAlign = 'right';
+        ctx.fillText(row[2], W - 8, ky + i * 17 + 1);
       });
     },
-
     plots: [
       { title: 'How the eleven phyla divide by body cavity',
         legend: [{ c: '#63729A', label: 'no cavity' }, { c: '#E8B64C', label: 'pseudocoelom' },

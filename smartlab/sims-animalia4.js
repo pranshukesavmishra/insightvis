@@ -112,37 +112,192 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const h = S.h;
-      const satCol = s => g.mix(DEOXY, OXY, clamp((s - 55) / 45, 0, 1));
+      const Z = window.ZOOART, RXo = window.RX;
+      // NOTE: g.mix() returns 'rgb(...)', which cannot be parsed by g.mix()
+      // again. Anything that gets mixed a second time must stay hex, so the
+      // blood colour ramp runs through RX.mix.
+      const satCol = s => RXo.mix(DEOXY, OXY, clamp((s - 55) / 45, 0, 1));
 
-      /* ---------------- circulation loop ---------------- */
-      const hx = W * 0.50, hy = H * 0.44;
-      const R = Math.min(W * 0.155, H * 0.26);
-      const gasX = W * 0.24, bodyX = W * 0.76;
+      /* ---------------- plate frame ----------------
+         The header band and the hint strip are reserved first, and every
+         piece of anatomy is laid out inside what is left. Nothing may
+         cross into either band. */
+      const HDR = 64, FOOT = 34;
+      const y0 = HDR, y1 = H - FOOT, CH = y1 - y0;
+      const hx = W * 0.50, hy = y0 + CH * 0.46;
+      const sc = Math.min(W * 0.150, CH * 0.33);
+      const R = sc * 1.42;
+      const gasX = W * 0.185, bodyX = W * 0.815;
+      const organR = Math.min(W * 0.125, CH * 0.26);
 
-      // gas exchange organ
-      ctx.fillStyle = g.alpha(OXY, .16);
-      ctx.beginPath(); ctx.ellipse(gasX, hy, R * .78, R * .95, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha(OXY, .65); ctx.lineWidth = 1.4; ctx.stroke();
-      ctx.font = '600 11px "IBM Plex Mono",monospace'; ctx.fillStyle = th.text;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(h.gas.toUpperCase(), gasX, hy);
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('picks up O₂', gasX, hy + 16);
+      /* ---------------- gas-exchange organ ----------------
+         Lungs are drawn as lobed lungs and gills as a stack of gill
+         arches: which organ it is, is itself an examinable fact. */
+      const gasIsGill = /gill/.test(h.gas);
+      const lungCol = '#E88AA0', gillCol = '#E4667A';
+      if (gasIsGill) {
+        // Four holobranchs on a gill bar: a pale cartilaginous arch carrying
+        // two rows of filaments, each filament red with the blood inside it.
+        // Deoxygenated blood enters at the bottom, oxygenated leaves at the top.
+        for (let a = 0; a < 4; a++) {
+          const ax = gasX - organR * 0.60 + a * organR * 0.40;
+          const arch = RXo.quadPts(ax, hy - organR * 0.88, ax - organR * 0.26, hy,
+                                   ax, hy + organR * 0.88, 20);
+          RXo.tube(ctx, arch, organR * 0.052, '#C4D2E8', { contour: 1 });
+          ctx.lineCap = 'round';
+          for (let f = 1; f < 20; f++) {
+            const t = f / 20, pt = arch[f];
+            const len = organR * 0.17 * Math.sin(Math.PI * t);
+            if (len < 1.5) continue;
+            // the filament carries blood that is loading oxygen as it rises
+            ctx.strokeStyle = RXo.mix(DEOXY, OXY, clamp(1 - t * 1.15, 0, 1));
+            ctx.lineWidth = Math.max(1.2, organR * 0.030);
+            [-1, 1].forEach(sg => {
+              ctx.beginPath();
+              ctx.moveTo(pt[0], pt[1]);
+              ctx.lineTo(pt[0] + sg * len, pt[1] - len * 0.26);
+              ctx.stroke();
+            });
+          }
+        }
+        // afferent and efferent branchial vessels, which is what the circuit
+        // actually connects to
+        RXo.tube(ctx, [[gasX - organR * 0.72, hy + organR * 0.98],
+                       [gasX + organR * 0.62, hy + organR * 0.98]],
+                 organR * 0.055, DEOXY, { contour: 1 });
+        RXo.tube(ctx, [[gasX - organR * 0.72, hy - organR * 0.98],
+                       [gasX + organR * 0.62, hy - organR * 0.98]],
+                 organR * 0.055, OXY, { contour: 1 });
+        Z.lbl(ctx, gasX + organR * 0.68, hy + organR * 0.98, 'afferent', DEOXY, 'left', 8.5);
+        Z.lbl(ctx, gasX + organR * 0.68, hy - organR * 0.98, 'efferent', OXY, 'left', 8.5);
+      } else {
+        // two lungs, each with lobes, and a trachea splitting into bronchi
+        [-1, 1].forEach(sg => {
+          const lx = gasX + sg * organR * 0.42;
+          const path = c => {
+            c.beginPath();
+            c.moveTo(lx + sg * organR * 0.04, hy - organR * 0.92);
+            c.bezierCurveTo(lx + sg * organR * 0.62, hy - organR * 0.62,
+                            lx + sg * organR * 0.74, hy + organR * 0.34,
+                            lx + sg * organR * 0.30, hy + organR * 0.90);
+            c.bezierCurveTo(lx + sg * organR * 0.06, hy + organR * 1.02,
+                            lx - sg * organR * 0.28, hy + organR * 0.60,
+                            lx - sg * organR * 0.26, hy - organR * 0.10);
+            c.bezierCurveTo(lx - sg * organR * 0.24, hy - organR * 0.58,
+                            lx - sg * organR * 0.10, hy - organR * 0.88,
+                            lx + sg * organR * 0.04, hy - organR * 0.92);
+            c.closePath();
+          };
+          RXo.volume(ctx, path, {
+            fill: lungCol, r: organR * 0.72, cx: lx + sg * organR * 0.16, cy: hy,
+            stipple: 1.5, grain: '#8E3D52', shadow: 0.8, gloss: 0.20,
+            contour: Math.max(1, organR * 0.030)
+          });
+          // lobar fissures
+          ctx.save(); path(ctx); ctx.clip();
+          ctx.strokeStyle = g.alpha('#7A2F42', .55); ctx.lineWidth = Math.max(1, organR * 0.022);
+          [0.12, 0.52].forEach(fy => {
+            ctx.beginPath();
+            ctx.moveTo(lx - organR * 0.9, hy + organR * (fy - 0.18));
+            ctx.quadraticCurveTo(lx, hy + organR * fy, lx + organR * 0.9, hy + organR * (fy + 0.22));
+            ctx.stroke();
+          });
+          ctx.restore();
+          // bronchial tree inside the lung
+          ctx.save(); path(ctx); ctx.clip();
+          const root = [lx - sg * organR * 0.22, hy - organR * 0.18];
+          ctx.globalAlpha = 0.55;
+          RXo.tube(ctx, RXo.quadPts(root[0], root[1], lx, hy - organR * 0.05,
+                                    lx + sg * organR * 0.18, hy + organR * 0.22, 10),
+                   organR * 0.030, '#C6D6EC', { vivid: false });
+          ctx.strokeStyle = g.alpha('#C6D6EC', .40);
+          ctx.lineWidth = Math.max(0.9, organR * 0.016); ctx.lineCap = 'round';
+          for (let k = 0; k < 9; k++) {
+            const t = 0.10 + k * 0.10;
+            const bx = lx + sg * organR * (-0.20 + t * 0.55), by = hy + organR * (-0.20 + t * 0.62);
+            const ln = organR * (0.30 - 0.014 * k);
+            ctx.beginPath(); ctx.moveTo(bx, by);
+            ctx.lineTo(bx + sg * ln, by - organR * 0.20 + k * organR * 0.055);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        });
+        // trachea and the two main bronchi
+        RXo.tube(ctx, [[gasX, hy - organR * 1.34], [gasX, hy - organR * 1.10]],
+                 organR * 0.046, '#DCE7F6', { vivid: false, contour: 1 });
+        [-1, 1].forEach(sg => RXo.tube(ctx,
+          [[gasX, hy - organR * 1.12], [gasX + sg * organR * 0.34, hy - organR * 0.78]],
+          organR * 0.034, '#DCE7F6', { vivid: false }));
+        // the pulmonary artery branches to both lungs below, and the pulmonary
+        // veins collect from both above — the circuit meets these, not the
+        // middle of the lung, so the captions below stay clear
+        RXo.tube(ctx, [[gasX - organR * 0.72, hy + organR * 0.98],
+                       [gasX + organR * 0.62, hy + organR * 0.98]],
+                 organR * 0.055, DEOXY, { contour: 1 });
+        RXo.tube(ctx, [[gasX - organR * 0.72, hy - organR * 0.98],
+                       [gasX + organR * 0.62, hy - organR * 0.98]],
+                 organR * 0.055, OXY, { contour: 1 });
+        [-1, 1].forEach(sg => {
+          const lx2 = gasX + sg * organR * 0.42;
+          RXo.tube(ctx, [[lx2, hy + organR * 0.98], [lx2 + sg * organR * 0.10, hy + organR * 0.74]],
+                   organR * 0.034, DEOXY, { vivid: false });
+          RXo.tube(ctx, [[lx2, hy - organR * 0.98], [lx2 + sg * organR * 0.10, hy - organR * 0.74]],
+                   organR * 0.034, OXY, { vivid: false });
+        });
+      }
+      Z.lbl(ctx, gasX, hy + organR * 1.16, h.gas.toUpperCase(), th.text, 'center', 10.5);
+      Z.lbl(ctx, gasX, hy + organR * 1.16 + 13, 'blood loads O₂', th['text-3'], 'center', 9);
 
-      // body tissues
-      ctx.fillStyle = g.alpha(DEOXY, .16);
-      ctx.beginPath(); ctx.ellipse(bodyX, hy, R * .78, R * .95, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = g.alpha(DEOXY, .65); ctx.lineWidth = 1.4; ctx.stroke();
-      ctx.font = '600 11px "IBM Plex Mono",monospace'; ctx.fillStyle = th.text;
-      ctx.fillText('BODY', bodyX, hy);
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('gives up O₂', bodyX, hy + 16);
+      /* ---------------- the tissues ----------------
+         A capillary bed, not a labelled ellipse: an arteriole splits into
+         a mesh of capillaries that reconverge on a venule, and the blood
+         darkens across it because that is where the oxygen is spent. */
+      {
+        const path = c => {
+          c.beginPath();
+          c.ellipse(bodyX, hy, organR * 0.80, organR * 0.98, 0, 0, TAU);
+        };
+        RXo.volume(ctx, path, {
+          fill: '#8E6F8C', r: organR * 0.86, cx: bodyX, cy: hy,
+          stipple: 1.8, grain: '#3A2740', shadow: 0.8, gloss: 0.14,
+          contour: Math.max(1, organR * 0.026)
+        });
+        ctx.save(); path(ctx); ctx.clip();
+        // capillary mesh, coloured by how much oxygen is left along it
+        for (let k = 0; k < 7; k++) {
+          const yy = hy + organR * (-0.72 + k * 0.24);
+          const pts = [];
+          for (let i = 0; i <= 20; i++) {
+            const t = i / 20;
+            pts.push([bodyX - organR * 0.92 + t * organR * 1.84,
+                      yy + Math.sin(t * Math.PI * 2.4 + k) * organR * 0.06]);
+          }
+          ctx.lineWidth = Math.max(1.6, organR * 0.048); ctx.lineCap = 'round';
+          for (let i = 0; i < pts.length - 1; i++) {
+            const t = i / (pts.length - 1);
+            ctx.strokeStyle = RXo.mix(satCol(S.satSystemic), DEOXY, t);
+            ctx.beginPath();
+            ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i + 1][0], pts[i + 1][1]);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+        // arteriole in, venule out
+        RXo.tube(ctx, [[bodyX - organR * 1.02, hy - organR * 0.30],
+                       [bodyX - organR * 0.62, hy - organR * 0.12]],
+                 organR * 0.055, satCol(S.satSystemic), { contour: 1 });
+        RXo.tube(ctx, [[bodyX + organR * 0.62, hy + organR * 0.12],
+                       [bodyX + organR * 1.02, hy + organR * 0.30]],
+                 organR * 0.055, DEOXY, { contour: 1 });
+      }
+      Z.lbl(ctx, bodyX, hy + organR * 1.16, 'BODY TISSUES', th.text, 'center', 10.5);
+      Z.lbl(ctx, bodyX, hy + organR * 1.16 + 13, 'capillary bed unloads O₂', th['text-3'], 'center', 9);
 
-      /* ---------------- the heart, drawn as the organ ---------------- */
-      // Anterior view: the right heart is on the viewer's left, which puts
-      // it on the same side as the gas-exchange organ — so the pulmonary
-      // limb is short and the systemic limb runs to the body on the right.
-      const sc = Math.min(R * 0.72, H * 0.20);
+      /* ---------------- the heart ----------------
+         Anterior view: the right heart is on the viewer's left, which puts
+         it on the same side as the gas-exchange organ — so the pulmonary
+         limb is short and the systemic limb runs to the body on the right. */
       const beat = 0.5 - 0.5 * Math.cos(S.t * 2 * Math.PI * 1.2);
       BIOART.heart(ctx, hx, hy, sc, {
         chambers: h.chambers,
@@ -156,10 +311,15 @@
         labels: true, leaders: false, vessels: false
       });
       if (h.id === 'reptile') {
-        ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th.warn;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-        ctx.fillText('incomplete septum', hx, hy + sc * 1.16);
+        Z.leader(ctx, hx + sc * 0.02, hy + sc * 0.50, hx + sc * 0.86, hy + sc * 0.96, th.warn);
+        Z.lbl(ctx, hx + sc * 0.90, hy + sc * 0.98, 'incomplete septum', th.warn, 'left', 9.5);
       }
+      if (h.id === 'croc') {
+        Z.leader(ctx, hx + sc * 0.04, hy + sc * 0.44, hx + sc * 0.86, hy + sc * 0.96, th.ok);
+        Z.lbl(ctx, hx + sc * 0.90, hy + sc * 0.98, 'complete septum — the reptilian exception',
+              th.ok, 'left', 9.5);
+      }
+      g.scaleBar(16, y1 - 8, sc * 1.0, '≈ 6 cm', th['text-3']);
 
       // where each circuit leaves and re-enters the heart
       const ANCH = h.chambers === 4
@@ -171,7 +331,7 @@
         : { pOut: [hx + sc * 0.74, hy - sc * 0.76], pIn: null,
             sOut: null, sIn: [hx - sc * 0.62, hy + sc * 0.76] };
 
-      /* ---------------- mixing warning ---------------- */
+      /* ---------------- mixing ---------------- */
       if (S.mix > 0.01) {
         ctx.save(); ctx.globalCompositeOperation = 'lighter';
         const mg = ctx.createRadialGradient(hx, hy + sc * 0.28, 0, hx, hy + sc * 0.28, sc * 0.62);
@@ -181,23 +341,37 @@
         ctx.restore();
       }
 
-      /* ---------------- flow paths ---------------- */
-      // Two orthogonal loops: pulmonary on the left, systemic on the right.
-      // Each leaves the heart low, travels out, and returns high.
-      const botY = Math.min(hy + R * 1.55, H - 96), topY1 = hy - R * 1.28, topY2 = hy - R * 1.62;
-      // Fish run ONE circuit: heart -> gills -> body -> heart, with no
-      // return to the heart in between. Everything else runs two.
+      /* ---------------- the circuits ----------------
+         Both loops are kept strictly inside the plate frame: the top
+         return runs below the header band and the bottom outflow above
+         the hint strip. */
+      const botY = Math.min(hy + R * 1.05, y1 - 52);
+      // The outer return always runs above the inner one, and both must clear
+      // the header band with enough room for their captions.
+      const topY2 = Math.max(hy - R * 1.06, y0 + 42);
+      const topY1 = topY2 + 26;
+      // A fish runs ONE circuit and the direction matters: blood leaves the
+      // heart through the VENTRAL aorta, enters the gills afferently at the
+      // bottom, is collected efferently at the top into the DORSAL aorta,
+      // and only then reaches the body. Running it the other way round is
+      // the classic exam trap, so the plate has to get it right.
       const LOOPS = h.chambers === 2 ? [
-        [ANCH.pOut, [ANCH.pOut[0], topY1], [gasX, topY1], [gasX, hy - R * 0.92]],
-        [[gasX, hy + R * 0.92], [gasX, botY], [bodyX, botY], [bodyX, hy + R * 0.92]],
-        [[bodyX, hy + R * 0.92], [bodyX + R * 0.95, hy + R * 0.45],
-         [bodyX + R * 0.95, hy - R * 0.45], [bodyX, hy - R * 0.92]],
-        [[bodyX, hy - R * 0.92], [bodyX, topY2], [ANCH.sIn[0], topY2], ANCH.sIn]
+        [ANCH.pOut, [ANCH.pOut[0], topY1], [gasX - organR * 1.02, topY1],
+         [gasX - organR * 1.02, hy + organR * 0.98], [gasX - organR * 0.72, hy + organR * 0.98]],
+        [[gasX + organR * 0.62, hy - organR * 0.98], [gasX + organR * 0.62, topY2],
+         [bodyX - organR * 1.02, topY2], [bodyX - organR * 1.02, hy - organR * 0.30]],
+        [[bodyX + organR * 1.02, hy + organR * 0.30], [bodyX + organR * 1.28, hy + organR * 0.30],
+         [bodyX + organR * 1.28, botY], [ANCH.sIn[0], botY]],
+        [[ANCH.sIn[0], botY], ANCH.sIn]
       ] : [
-        [ANCH.pOut, [ANCH.pOut[0] - sc * 0.3, botY], [gasX, botY], [gasX, hy + R * 0.95]],
-        [[gasX, hy - R * 0.95], [gasX, topY1], [ANCH.pIn[0], topY1], ANCH.pIn],
-        [ANCH.sOut, [ANCH.sOut[0] + sc * 0.3, botY], [bodyX, botY], [bodyX, hy + R * 0.95]],
-        [[bodyX, hy - R * 0.95], [bodyX, topY2], [ANCH.sIn[0], topY2], ANCH.sIn]
+        [ANCH.pOut, [ANCH.pOut[0] - sc * 0.3, botY], [gasX - organR * 0.72, botY],
+         [gasX - organR * 0.72, hy + organR * 0.98]],
+        [[gasX + organR * 0.62, hy - organR * 0.98], [gasX + organR * 0.62, topY1],
+         [ANCH.pIn[0], topY1], ANCH.pIn],
+        [ANCH.sOut, [ANCH.sOut[0] + sc * 0.3, botY], [bodyX - organR * 1.02, botY],
+         [bodyX - organR * 1.02, hy - organR * 0.30]],
+        [[bodyX + organR * 1.02, hy + organR * 0.30], [bodyX + organR * 1.28, hy + organR * 0.30],
+         [bodyX + organR * 1.28, topY2], [ANCH.sIn[0], topY2], ANCH.sIn]
       ];
       const along = (pts, t) => {
         let total = 0; const seg = [];
@@ -221,58 +395,106 @@
         return along(LOOPS[k], (u * 4) - k);
       };
       const satAt = u => {
-        if (h.chambers === 2) return u < 0.25 ? 60 : u < 0.5 ? 95 : u < 0.75 ? 95 * 0.92 : 60;
+        if (h.chambers === 2) return u < 0.25 ? 60 : u < 0.5 ? 95 : 60;
         return u < 0.25 ? 60 : u < 0.5 ? 98 : u < 0.75 ? S.satSystemic : 60;
       };
-      ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      // Round the corners, then run each loop through the tube renderer —
+      // a vessel is a tube, and a 2px polyline never read as one.
+      const round = (pts, rad) => {
+        const out = [pts[0]];
+        for (let i = 1; i < pts.length - 1; i++) {
+          const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+          const d1 = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+          const d2 = Math.hypot(c[0] - b[0], c[1] - b[1]) || 1;
+          const r = Math.min(rad, d1 * 0.45, d2 * 0.45);
+          const p1 = [b[0] + (a[0] - b[0]) / d1 * r, b[1] + (a[1] - b[1]) / d1 * r];
+          const p2 = [b[0] + (c[0] - b[0]) / d2 * r, b[1] + (c[1] - b[1]) / d2 * r];
+          for (let k = 0; k <= 8; k++) {
+            const t = k / 8, u = 1 - t;
+            out.push([u * u * p1[0] + 2 * u * t * b[0] + t * t * p2[0],
+                      u * u * p1[1] + 2 * u * t * b[1] + t * t * p2[1]]);
+          }
+        }
+        out.push(pts[pts.length - 1]);
+        return out;
+      };
+      const vesselR = Math.max(3.2, sc * 0.075);
       LOOPS.forEach((pts, i) => {
-        ctx.strokeStyle = g.alpha(i === 1 || i === 2 ? OXY : DEOXY, .30);
-        ctx.beginPath();
-        pts.forEach((q, k) => k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]));
-        ctx.stroke();
+        // a fish oxygenates on ONE limb only — the dorsal aorta
+        const oxygenated = h.chambers === 2 ? (i === 1) : (i === 1 || i === 2);
+        RXo.tube(ctx, round(pts, vesselR * 3.4), vesselR,
+                 oxygenated ? OXY : DEOXY, { contour: 1 });
+      });
+      // vessel names — the exam asks for these by name, so they are labelled
+      const NAMES = h.chambers === 2
+        ? [[0.10, 'ventral aorta', DEOXY], [0.40, 'dorsal aorta', OXY], [0.78, 'cardinal vein', DEOXY]]
+        : [[0.12, 'pulmonary artery', DEOXY], [0.40, 'pulmonary vein', OXY],
+           [0.60, 'aorta', OXY], [0.90, 'vena cava', DEOXY]];
+      NAMES.forEach(([u, name, col]) => {
+        const a = pathPt(u), b = pathPt(u + 0.02);
+        const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        const nx = -Math.sin(ang), ny = Math.cos(ang);
+        const side = (a[1] < hy) ? -1 : 1;
+        const off = vesselR + 15;
+        const lx = a[0] + nx * off * side, ly = a[1] + ny * off * side;
+        Z.leader(ctx, a[0], a[1], lx, ly, col);
+        // the caption continues in the same direction the leader left in,
+        // so it can never fall back onto the vessel it names
+        const ty = ly + (ny * side >= 0 ? 9 : -9);
+        Z.lbl(ctx, lx, ty, name, col,
+              lx > W * 0.72 ? 'right' : lx < W * 0.28 ? 'left' : 'center', 9);
       });
       // direction arrows
-      [[0.12, 0], [0.37, 1], [0.62, 2], [0.87, 3]].forEach(([u, i]) => {
+      [[0.18, 0], [0.43, 1], [0.68, 2], [0.93, 3]].forEach(([u, i]) => {
         const a = pathPt(u), b = pathPt(u + 0.012);
         const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
-        ctx.fillStyle = g.alpha(i === 1 || i === 2 ? OXY : DEOXY, .8);
+        ctx.fillStyle = '#F3F7FF';
         ctx.beginPath();
-        ctx.moveTo(b[0], b[1]);
-        ctx.lineTo(b[0] - 8 * Math.cos(ang - 0.45), b[1] - 8 * Math.sin(ang - 0.45));
-        ctx.lineTo(b[0] - 8 * Math.cos(ang + 0.45), b[1] - 8 * Math.sin(ang + 0.45));
+        ctx.moveTo(b[0] + vesselR * 1.1 * Math.cos(ang), b[1] + vesselR * 1.1 * Math.sin(ang));
+        ctx.lineTo(b[0] - vesselR * Math.cos(ang - 0.7), b[1] - vesselR * Math.sin(ang - 0.7));
+        ctx.lineTo(b[0] - vesselR * Math.cos(ang + 0.7), b[1] - vesselR * Math.sin(ang + 0.7));
         ctx.closePath(); ctx.fill();
       });
       if (p.particles) {
+        // Blood, not beads: the lit-sphere shader washes out at this radius,
+        // so each cell is its saturation colour with a single key highlight.
         S.parts.forEach(q => {
-          const pos = pathPt(q.u);
-          ctx.fillStyle = satCol(satAt(q.u));
-          ctx.beginPath(); ctx.arc(pos[0], pos[1], 3.1, 0, TAU); ctx.fill();
+          const pos = pathPt(q.u), rr = vesselR * 0.66;
+          const c = satCol(satAt(q.u));
+          const gg = ctx.createRadialGradient(pos[0] - rr * .38, pos[1] - rr * .42, rr * .05,
+                                              pos[0], pos[1], rr);
+          gg.addColorStop(0, RXo.mix(c, '#ffffff', .82));
+          gg.addColorStop(.50, RXo.mix(c, '#ffffff', .18));
+          gg.addColorStop(1, RXo.mix(c, '#3A0A14', .30));
+          ctx.fillStyle = gg;
+          ctx.beginPath(); ctx.arc(pos[0], pos[1], rr, 0, TAU); ctx.fill();
         });
       }
 
-      /* ---------------- animal portrait ---------------- */
-      ART.draw(ctx, h.art, W * 0.5, H * 0.885, Math.min(W * 0.065, H * 0.105), h.hue, S.t, 0.95);
-
       /* ---------------- header + verdict ---------------- */
+      // the animal itself rides in the header band, where no part of the
+      // circuit can ever reach it
+      const px0 = 14, pw = 52;
+      ART.draw(ctx, h.art, px0 + pw * 0.5, 40, Math.min(pw * 0.21, 13), h.hue, S.t, 0.95);
+      const tx = px0 + pw + 12;
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif'; ctx.fillStyle = th.text;
-      ctx.fillText(h.chambers + '-chambered  ·  ' + h.circ + ' circulation', 14, 10);
+      ctx.fillText(h.chambers + '-chambered  ·  ' + h.circ + ' circulation', tx, 6);
       ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText(h.klass + '  ·  ' + h.examples, 14, 32);
+      ctx.fillText(h.klass + '  ·  ' + h.examples, tx, 29);
       ctx.fillStyle = S.mix > 0.01 ? th.warn : th.ok;
       ctx.fillText(S.mix > 0.01
         ? (S.mix * 100).toFixed(0) + '% mixing → systemic blood only ' + S.satSystemic.toFixed(1) + '% saturated'
-        : 'no mixing → systemic blood ' + S.satSystemic.toFixed(1) + '% saturated', 14, 48);
+        : 'no mixing → systemic blood ' + S.satSystemic.toFixed(1) + '% saturated', tx, 44);
 
       ctx.textAlign = 'right'; ctx.textBaseline = 'top';
       ctx.font = '600 11px "IBM Plex Mono",monospace';
       ctx.fillStyle = S.ok ? th.ok : th.crit;
-      ctx.fillText(S.ok ? 'O₂ supply meets demand' : 'O₂ supply CANNOT meet demand', W - 14, 10);
+      ctx.fillText(S.ok ? 'O₂ supply meets demand' : 'O₂ supply CANNOT meet demand', W - 14, 8);
       ctx.font = '9.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('supply / demand = ' + S.margin.toFixed(2), W - 14, 26);
-      ctx.fillText(h.thermo, W - 14, 40);
+      ctx.fillText('supply / demand = ' + S.margin.toFixed(2), W - 14, 25);
+      ctx.fillText(h.thermo, W - 14, 39);
     },
-
     plots: [
       { title: 'Systemic oxygen saturation across the vertebrate classes',
         legend: [{ c: '#FF5E6C', label: 'oxygen saturation reaching the tissues' }],
