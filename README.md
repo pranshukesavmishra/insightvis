@@ -101,11 +101,11 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v5 (shipped)
+## 4. Insight Smart Lab — v6 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Twenty-one experiments across seven chapters.** Six chapters
-carry two experiments each; **Animal Kingdom carries nine**, because it is the highest-preference
-topic for this client.
+Source: [`smartlab/`](./smartlab). **Thirty-one experiments across seventeen chapters.**
+**Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
+**Physics now spans seven chapters** after the v6 round.
 
 ### Physics · Moving Charges & Magnetism
 **1 · Charged Particle in Crossed E and B Fields**
@@ -127,6 +127,36 @@ Immersion in a medium narrows every fringe by μ.
 **4 · Diffraction & Resolving Power — the Rayleigh Criterion**
 The true **Airy pattern** from the Bessel function J₁ — not a Gaussian stand-in. Two point sources are
 summed and the lab reports resolved / just resolved / unresolved against θ_min = 1.22 λ/D.
+
+### Physics · System of Particles & Rotational Motion
+**27 · Rolling, Slipping and the Moment of Inertia**
+Nothing is told to roll. The friction that rolling *requires* is computed every step and tested
+against μN; when it cannot be supplied the two equations decouple and the body genuinely slips.
+Four bodies race from the same height, and mass and radius cancel out of the answer entirely.
+
+### Physics · Oscillations
+**28 · Resonance, Damping and Normal Modes**
+RK4 on the damped driven equation, so the switch-on transient is a real transient that decays at
+the system's own frequency. The coupled pair is solved by **diagonalising the stiffness matrix** —
+the normal-mode frequencies on screen are its eigenvalues and the mode cards draw its eigenvectors.
+
+### Physics · Electric Charges & Fields
+**29 · Electric Field, Potential and Gauss's Law**
+The flux is **measured, not asserted**: E·n̂ is summed over a Fibonacci lattice of six hundred points
+on a real sphere and printed next to q_enc/ε₀. Field lines are traced by integrating dr/ds = Ê and
+equipotentials by marching squares. Move the surface and the number does not budge.
+
+### Physics · Alternating Current
+**30 · Series LCR — Phasors, Resonance and Power Factor**
+The circuit equation is integrated, with the option of starting already on the steady-state solution.
+Rotating phasors, an impedance triangle that flips with the sign of X_L − X_C, and voltmeter bars
+scaled so that at high Q the **supply** bar is the short one.
+
+### Physics · Dual Nature of Radiation & Matter
+**31 · The Photoelectric Effect and Matter Waves**
+Einstein's equation driving a real photo-cell: the I–V family, the V₀–ν line whose slope is h/e for
+every metal, and the energy-level picture of the surface. Turn the lamp down and the electrons still
+come out — just fewer of them.
 
 ### Chemistry · Structure of Atom
 **5 · Hydrogen Atomic Orbitals — Shape, Phase and Nodes**

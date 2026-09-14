@@ -6,7 +6,7 @@
 > whenever a decision is made or a constraint is discovered.** A stale memory is worse than
 > no memory — fix anything here that no longer matches reality.
 
-Last updated: 2026-09-14 (v3, artifact v12)
+Last updated: 2026-09-14 (v4, artifact v13)
 
 ---
 
@@ -529,6 +529,35 @@ Append only. Never rewrite history.
 ---
 
 ## 13. Session log
+
+- **2026-09-14 (b)** — **Shipped five new physics labs.** Client: *"now make next 5 best experiments
+  for physics, more best than organic chemistry, with high JEE Mains and Advance level of experiments
+  for ultra visualisation."* Physics had only four labs across two chapters; these five open five new
+  chapters, all top-weight for JEE Main + Advanced.
+  - **`art-physics.js`** — the physics figure library, the counterpart of `art-bio.js`/`art-organic.js`
+    (mandate §2.5 item 3). Lit rigid bodies with surface markings (the rotation has to be *visible* or
+    rolling and sliding look identical), wound springs, hatched surfaces, proportional vectors, real
+    circuit components, flat instrument dials, an evacuated photo-cell, and a wavelength→visible-colour
+    ramp so 400 nm actually looks violet.
+  - **`rolling`** (System of Particles & Rotational Motion) — nothing is told to roll. The friction
+    rolling *requires* is computed each step and tested against μN; fail it and the equations decouple
+    and the body slips. Bodies run out along the flat afterwards, which both stops them piling on the
+    finish line and shows that rolling on a horizontal surface needs no friction at all.
+  - **`resonance`** (Oscillations) — RK4 on the damped driven ODE, so the transient is a real transient.
+    The coupled pair is solved by **diagonalising the stiffness matrix**: the normal-mode frequencies on
+    screen are its eigenvalues and the mode cards draw the eigenvectors.
+  - **`gauss`** (Electric Charges & Fields) — the flux is **measured**, not asserted: E·n̂ summed over a
+    Fibonacci lattice of 600 points on a real sphere, printed next to q_enc/ε₀. Field lines are traced by
+    integrating dr/ds = Ê; equipotentials by marching squares.
+  - **`lcr`** (Alternating Current) — the circuit equation integrated, with an option to start on the
+    steady-state solution instead. Rotating phasors, impedance triangle that flips with the sign of
+    X_L−X_C, and voltmeter bars scaled so that at high Q the *supply* bar is the short one.
+  - **`photoelectric`** (Dual Nature) — Einstein's equation driving a real photo-cell, the I–V family,
+    the V₀–ν line whose slope is h/e for every metal, and the energy-level picture of the surface.
+  - Verified: `audit.mjs` CLEAN across **31 sims / 17 chapters**, `shot.mjs` clean, `resz.mjs` stable at
+    all four breakpoints. Published artifact **Version 13**.
+  - `audit.mjs` earned its keep again: it caught two controls I had declared and never read
+    (`resonance.trace`, `lcr.showTransient`). Both are now wired to real behaviour rather than deleted.
 
 - **2026-09-14 (a)** — **Drove the volume pass through four more biology plates** and fixed two
   renderer bugs that had been silently corrupting figures.
