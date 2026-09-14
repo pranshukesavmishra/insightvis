@@ -56,6 +56,95 @@ in correct anteroposterior order, a neuron with soma, dendrites, hillock, myelin
 a bilayer with heads and tails. `art-bio.js` is the single library for these; a lab never
 hand-draws anatomy again.
 
+### 2.11 THE BUILD METHOD — how every experiment in this project is made
+Written down at the client's explicit request (2026-09-14): *"whatever methods using put that into
+memory file so in future can be designed in same ways."* **Follow this procedure for every new
+experiment, in this order.** It is not a description of what was done; it is the instruction.
+
+**Step 1 — Pick the chapter by exam weight, not by what is easy to draw.**
+Open a chapter that is not yet covered and that JEE/NEET actually load marks onto. Check §4 for what
+exists so two labs never cover the same ground.
+
+**Step 2 — Find the real computation at the core.**
+Every lab integrates or solves something a student could do by hand but never would: an ODE by RK4,
+a matrix diagonalised, a surface integral summed over a lattice, a Boltzmann sum, an N-body
+collision. **The exam rule must be the OUTPUT, never the input.** If a lab has to state the rule and
+then illustrate it, the lab is wrong. Test: could the student read the answer off the screen without
+the formula ever appearing? If not, rebuild the core.
+
+**Step 3 — Make the trap reachable with a control.**
+List the mistakes the paper actually punishes, then make each one something the student can *drive
+the apparatus into*: detune the RF, drop μ until the body slips, enclose nothing in the Gaussian
+surface, raise the lamp to maximum below threshold. A trap that cannot be reached by moving a
+control is not in the lab.
+
+**Step 4 — Draw through the subject's figure library, never by hand.**
+`art-bio.js`, `art-zoo.js`, `art-organic.js`, `art-physics.js`, all sitting on `render.js`. If a new
+subject has no library, **build the library first** — that is what keeps the whole suite looking
+like one instrument rather than 31 separate drawings.
+
+**Step 5 — Lay the plate out to §2.7 before drawing anything in it.**
+Reserve the header band and the foot band as numbers at the top of `drawStage` (`HDR`, `FOOT`,
+`y0`, `y1`, `CH`) and lay every structure out inside what is left. Nothing may cross into either
+band. Every examinable structure gets a leader label; a scale bar; a magnified inset where a detail
+matters.
+
+**Step 6 — Two plots that answer different questions.**
+One about *this* system as it is set; one placing it on the landscape of all comparable systems
+(every metal's V₀–ν line, every body's k, every damping's resonance curve). The second plot is
+where the generalisation lives.
+
+**Step 7 — Let the student build the input.**
+Register handles with `g.handle(x, y, r, id)` and implement `def.onDrag(S, e)`. Dragging a charge
+onto the field is a larger act of learning than picking its position from a slider. The engine keeps
+the sliders in sync automatically (`R.ctlSync`).
+
+**Step 8 — Write the teaching text last, and make it ask before it tells.**
+`walkthrough` steps each carry `ask` and `reveal` and a `params` set that puts the apparatus into
+the state being discussed. `problems` carry a real exam question and a committed numeric prediction
+that is then checked against what the apparatus actually computes. `quiz` and `notes` carry the
+exam patterns and the single trap most likely to cost a mark.
+
+**Step 9 — Verify before claiming anything.**
+`node audit.mjs` must print CLEAN — it clicks every control and preset on every sim and catches
+controls that are declared and never read. Then `node shot.mjs`, `node resz.mjs`, and a screenshot
+of every changed plate that I actually look at. **Reading the screenshot is part of the build, not
+an optional check**: every layout fault in this project's history was visible in one and found only
+because someone looked.
+
+**Step 10 — Ship the whole increment.**
+Publish the artifact, sync to `smartlab/`, update `README.md` §4 and this file's §13, commit with a
+message that explains the physics and the bugs, push.
+
+### 2.10 CALIBRATION — the client's own scores, and what they mean
+The client scores rounds in percentages. These are the only reliable measure of the bar and they
+are **lower than they look**, because each score is given on work I had already verified.
+
+| Round | Verdict | What it means |
+|---|---|---|
+| Organic chemistry, 5 labs (2026-09-13) | **"50% matching my expectations"** | The *shape* was right and became the template (§2.5). |
+| Biology, first pass | *"too bad"*, *"the graphics the most I didn't like"* | Led to `art-zoo.js`, then `render.js`. |
+| Physics, 5 labs (2026-09-14) | **"I like only 40%"** | **Lower than organic.** Correctness and layout were not the problem; the ceiling is much higher than I have been building to. |
+
+**Read the 40% as an instruction, not a grade.** The physics round was audited clean, laid out to the
+plate standard and numerically correct — and still scored below the organic round. So the gap is
+**not** in the things I have been verifying. Where it actually is, in priority order:
+
+1. **The apparatus does not look like apparatus.** Physics plates are schematic diagrams that happen
+   to be lit. The biology figures got a volume pass and became objects; the physics benches did not.
+   An incline is a hatched quadrilateral, a photo-cell is a rounded rectangle. They need the same
+   treatment tissue got: real materials, thickness, wear, cast shadows, depth.
+2. **Nothing is in 3D.** The engine has a working camera (`is3D`, `Camera`, orbit drag) and **not one
+   physics lab uses it**. Rolling bodies, field lines round a dipole, a magnet falling through a
+   coil, gas molecules in a box and a PV surface are all genuinely three-dimensional and are being
+   drawn flat. This is the single biggest visible gap.
+3. **Density of detail.** §2.9 says *more parts*. A physics stage typically carries one object and
+   two labels where the biology plates carry twenty labelled structures.
+4. **The student still only turns sliders.** §2.5 asked for building the input; the engine now
+   supports it (§2.11 step 7) and the labs must actually use it.
+
+**Never present a round as finished because it verified clean.** Clean is the floor.
+
 ### 2.9 The agreed look: rich, volumetric, vivid, dense
 Asked directly on 2026-09-13, the client chose **all three** of rich 3D realism, vivid colour and
 more detail per figure, with no reference — my judgement. That is now the target, and `render.js`

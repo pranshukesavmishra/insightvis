@@ -494,7 +494,9 @@ window.InsightLab = (function () {
         send(e);
       });
       cv.addEventListener('pointermove', send);
-      cv.addEventListener('pointerup', e => { try { cv.releasePointerCapture(e.pointerId); } catch (_) {} send(e); });
+      const done = e => { try { cv.releasePointerCapture(e.pointerId); } catch (_) {} send(e); };
+      cv.addEventListener('pointerup', done);
+      cv.addEventListener('pointercancel', done);
     }
     return S;
   }
@@ -612,6 +614,10 @@ window.InsightLab = (function () {
   function buildControls(host) {
     const def = R.def, S = R.S;
     host.innerHTML = '';
+    // Dragging on the stage writes straight into S.p, so every widget keeps a
+    // closure that pulls its own value back out. Without this the slider and
+    // the figure disagree the moment the student drags something.
+    R.ctlSync = [];
     if (def.presets && def.presets.length) {
       const grp = el('div', 'ctlgroup');
       grp.appendChild(el('div', 'ctlgroup-name', 'Preset scenarios'));
@@ -651,6 +657,10 @@ window.InsightLab = (function () {
     if (it.type === 'select') {
       wrap.appendChild(el('div', 'ctl-top', '<span class="ctl-label">' + it.label + '</span>'));
       const seg = el('div', 'seg' + (it.options.length > 3 ? ' seg-wrap' : ''));
+      R.ctlSync.push(() => {
+        seg.querySelectorAll('button').forEach((x, i) =>
+          x.setAttribute('aria-pressed', String(it.options[i].value === S.p[it.key])));
+      });
       it.options.forEach(o => {
         const b = el('button', null, o.label);
         b.setAttribute('aria-pressed', String(S.p[it.key] === o.value));
@@ -674,6 +684,9 @@ window.InsightLab = (function () {
       lab.appendChild(inp); lab.appendChild(track);
       lab.appendChild(el('span', 'switch-label', it.label));
       inp.addEventListener('change', () => { S.p[it.key] = inp.checked; apply(false); });
+      R.ctlSync.push(() => {
+        if (document.activeElement !== inp && inp.checked !== !!S.p[it.key]) inp.checked = !!S.p[it.key];
+      });
       wrap.appendChild(lab);
       return wrap;
     }
@@ -696,6 +709,12 @@ window.InsightLab = (function () {
       inp.style.setProperty('--fill', ((v - it.min) / (it.max - it.min) * 100) + '%');
     };
     inp.addEventListener('input', () => { S.p[it.key] = +inp.value; show(); apply(false); });
+    R.ctlSync.push(() => {
+      if (document.activeElement === inp) return;          // do not fight the user
+      if (Math.abs(+inp.value - S.p[it.key]) > (+inp.step || 1e-9) / 2) {
+        inp.value = S.p[it.key]; show();
+      }
+    });
 
     valBtn.addEventListener('click', () => {
       const num = document.createElement('input');
@@ -748,7 +767,10 @@ window.InsightLab = (function () {
     const host = R.nodes.eq, def = R.def, S = R.S;
     if (host && def.equation) host.innerHTML = def.equation(S);
   }
-  function syncUI() { renderReadouts(); renderEquation(); refreshTitles(); }
+  function syncUI() {
+    renderReadouts(); renderEquation(); refreshTitles();
+    (R.ctlSync || []).forEach(fn => fn());
+  }
 
   // a plot may declare title as a function of state, so it can say what it is
   // currently showing; those nodes are re-read whenever the UI syncs
@@ -799,6 +821,86 @@ window.InsightLab = (function () {
       buildControls(R.nodes.controls);
     }
     renderWalkthrough(); syncUI();
+  }
+
+  /* ---------------- worked problems: predict, then check ----------------
+     A real exam question is loaded into the apparatus, the student commits to
+     a number BEFORE seeing anything, and then the simulation's own computation
+     is put next to it. Getting it wrong and seeing exactly where is worth more
+     than reading the solution, which is why the working stays hidden until a
+     prediction has been committed. */
+  function renderProblems() {
+    const host = R.nodes.prob, def = R.def;
+    const ps = def.problems || [];
+    if (!host || !ps.length) return;
+    const i = clamp(R.probIndex, 0, ps.length - 1);
+    const pr = ps[i];
+    host.innerHTML = '';
+
+    const bar = el('div', 'wt-progress');
+    ps.forEach((_, k) => { const sp = el('span'); if (k <= i) sp.className = 'done'; bar.appendChild(sp); });
+    host.appendChild(bar);
+
+    const body = el('div', 'wt-step');
+    if (pr.source) body.appendChild(el('div', 'prob-src', pr.source));
+    body.appendChild(el('p', 'prob-q', pr.q));
+    host.appendChild(body);
+
+    const truth = pr.measure ? pr.measure(R.S) : null;
+
+    if (R.probDone) {
+      const mine = R.probAnswer;
+      const ok = truth != null && isFinite(mine) &&
+        Math.abs(mine - truth) <= Math.abs(truth) * (pr.predict.tol == null ? 0.03 : pr.predict.tol);
+      const cmp = el('div', 'prob-cmp');
+      cmp.appendChild(el('div', 'prob-cell',
+        '<b>you said</b><u>' + (isFinite(mine) ? fmt(mine, 4) : '—') +
+        ' ' + (pr.predict.unit || '') + '</u>'));
+      cmp.appendChild(el('div', 'prob-cell' + (ok ? ' right' : ' wrong'),
+        '<b>the apparatus gives</b><u>' + fmt(truth, 4) + ' ' + (pr.predict.unit || '') + '</u>'));
+      host.appendChild(cmp);
+      host.appendChild(el('div', 'quiz-why',
+        (ok ? '<b>That matches.</b> ' : '<b>Not what the apparatus does.</b> ') + pr.working));
+    } else {
+      const row = el('div', 'prob-input');
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.step = 'any';
+      inp.placeholder = pr.predict.label + (pr.predict.unit ? '  (' + pr.predict.unit + ')' : '');
+      inp.className = 'prob-num';
+      row.appendChild(inp);
+      const commit = () => {
+        if (inp.value === '') return;
+        R.probAnswer = +inp.value; R.probDone = true; renderProblems();
+      };
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); });
+      const btn = miniBtn('Commit', commit, 'primary');
+      row.appendChild(btn);
+      host.appendChild(row);
+      host.appendChild(el('div', 'prob-hint',
+        'The apparatus is already set to these conditions — work it out on paper first, ' +
+        'then commit and the simulation will tell you what it actually does.'));
+    }
+
+    const nav = el('div', 'wt-nav');
+    const prev = miniBtn('← Back', () => goProblem(i - 1));
+    prev.disabled = i === 0; prev.style.opacity = i === 0 ? .4 : 1;
+    nav.appendChild(prev);
+    nav.appendChild(miniBtn(i === ps.length - 1 ? 'Restart' : 'Next problem →',
+      () => goProblem(i === ps.length - 1 ? 0 : i + 1), 'primary'));
+    nav.appendChild(el('span', 'wt-count', (i + 1) + ' / ' + ps.length));
+    host.appendChild(nav);
+  }
+  function goProblem(i) {
+    const def = R.def, S = R.S, ps = def.problems || [];
+    R.probIndex = clamp(i, 0, ps.length - 1);
+    R.probAnswer = null; R.probDone = false;
+    const pr = ps[R.probIndex];
+    if (pr && pr.params) {
+      Object.assign(S.p, pr.params);
+      if (def.setup) def.setup(S);
+      buildControls(R.nodes.controls);
+    }
+    renderProblems(); syncUI();
   }
 
   /* ---------------- self-check quiz ---------------- */
@@ -1028,6 +1130,14 @@ window.InsightLab = (function () {
       renderWalkthrough();
     } else R.nodes.wt = null;
 
+    /* worked problems */
+    if (def.problems && def.problems.length) {
+      const pp2 = panel('Worked problem · predict, then check');
+      R.nodes.prob = pp2.body; right.appendChild(pp2);
+      R.probIndex = 0; R.probAnswer = null; R.probDone = false;
+      goProblem(0);
+    } else R.nodes.prob = null;
+
     /* quiz */
     if (def.quiz && def.quiz.length) {
       const qp = panel('Check yourself');
@@ -1051,16 +1161,56 @@ window.InsightLab = (function () {
       right.appendChild(np);
     }
 
+    R.handles = []; R.drag = null;
     R.stage = Surface(stageBox, {
       orbit: !!def.is3D,
       cam: () => R.S.cam,
-      onPointer: def.onPointer ? (x, y, down, type) => def.onPointer(R.S, x, y, down, type, R.stage) : null
+      onPointer: (x, y, down, type) => {
+        routeDrag(x, y, type);
+        if (def.onPointer) def.onPointer(R.S, x, y, down, type, R.stage);
+      }
     });
     if (def.setup) def.setup(R.S);
     syncUI();
     window.scrollTo(0, 0);
     R.lastT = performance.now();
     R.raf = requestAnimationFrame(loop);
+  }
+
+  /* ---------------- dragging on the stage ----------------
+     A sim registers handles inside drawStage with g.handle(x, y, r, id) and
+     receives def.onDrag(S, {id, x, y, dx, dy, phase}) in stage pixels. This is
+     what lets a student BUILD the input — drag a charge, pull a mass, set an
+     angle — instead of only choosing numbers from a slider. */
+  function routeDrag(x, y, type) {
+    const def = R.def, S = R.S;
+    if (!def) return;
+    // onDrag owns its own recomputation — it is a method on the definition, so
+    // it can call this.setup(S) when it needs to and leave state alone when it
+    // does not. The engine never calls setup() behind the sim's back.
+    const fire = (id, px, py, dx, dy, phase) => {
+      if (def.onDrag) def.onDrag(S, { id: id, x: px, y: py, dx: dx, dy: dy, phase: phase });
+      syncUI();
+    };
+    if (type === 'pointerdown') {
+      let best = null, bd = 1e9;
+      (R.handles || []).forEach(h => {
+        const d = Math.hypot(x - h.x, y - h.y);
+        if (d < bd) { bd = d; best = h; }
+      });
+      if (best && bd <= best.r + 10) {
+        // grab-point offset, so the handle does not jump to the cursor
+        R.drag = { id: best.id, ox: best.x - x, oy: best.y - y, px: best.x, py: best.y };
+        fire(best.id, best.x, best.y, 0, 0, 'start');
+      }
+    } else if (type === 'pointermove' && R.drag) {
+      const nx = x + R.drag.ox, ny = y + R.drag.oy;
+      fire(R.drag.id, nx, ny, nx - R.drag.px, ny - R.drag.py, 'move');
+      R.drag.px = nx; R.drag.py = ny;
+    } else if ((type === 'pointerup' || type === 'pointercancel') && R.drag) {
+      fire(R.drag.id, R.drag.px, R.drag.py, 0, 0, 'end');
+      R.drag = null;
+    }
   }
 
   /* ---------------- main loop ---------------- */
@@ -1079,7 +1229,7 @@ window.InsightLab = (function () {
       const ctx = R.stage.ctx, w = R.stage.w, h = R.stage.h;
       if (!R.labelKit || R.labelCtx !== ctx) { R.labelKit = LabelKit(ctx); R.labelCtx = ctx; }
       R.labelKit.reset();
-      R.hits = [];
+      R.hits = []; R.handles = [];
       const g = {
         ctx: ctx, w: w, h: h, theme, alpha, mix, now: now / 1000, dt: dt,
         // layer 4 — perceptual colour ramps
@@ -1097,6 +1247,9 @@ window.InsightLab = (function () {
         scaleBar: (x, y, px, lab, col) => scaleBar(ctx, x, y, px, lab, col),
         // layer 7 — interactive elements advertise themselves
         hit: (x, y, r, id) => { R.hits.push({ x: x, y: y, r: r, id: id }); },
+        // layer 7b — a handle the student can actually take hold of
+        handle: (x, y, r, id) => { R.handles.push({ x: x, y: y, r: r, id: id }); },
+        dragging: R.drag ? R.drag.id : null,
         pointer: R.stage.pointer || null,
         quality: FX.quality
       };
@@ -1105,6 +1258,28 @@ window.InsightLab = (function () {
       if (def.ground !== false) drawGround(ctx, w, h);
       if (S.cam) { S.cam.setViewport(w, h); S.cam.update(); }
       def.drawStage(S, g);
+      // layer 7b — handles advertise themselves, and say when they are held
+      {
+        const pt2 = R.stage.pointer;
+        let near = null, nd = 1e9;
+        if (pt2) R.handles.forEach(h => {
+          const d = Math.hypot(pt2.x - h.x, pt2.y - h.y);
+          if (d < nd) { nd = d; near = h; }
+        });
+        const held = R.drag ? R.handles.find(h => h.id === R.drag.id) : null;
+        const show = held || (near && nd <= near.r + 10 ? near : null);
+        if (show) {
+          ctx.save();
+          ctx.strokeStyle = alpha(theme.accent, held ? .95 : .6);
+          ctx.lineWidth = held ? 2.2 : 1.6;
+          ctx.setLineDash([5, 4]);
+          ctx.lineDashOffset = -now / 40;
+          ctx.beginPath(); ctx.arc(show.x, show.y, show.r + 6, 0, TAU); ctx.stroke();
+          ctx.restore();
+          R.stage.el.style.cursor = held ? 'grabbing' : 'grab';
+        } else if (!def.is3D && !R.hits.length) R.stage.el.style.cursor = 'default';
+      }
+
       // layer 7 — focus ring on whatever the pointer is nearest
       const pt = R.stage.pointer;
       if (pt && R.hits.length) {
