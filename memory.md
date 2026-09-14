@@ -6,7 +6,7 @@
 > whenever a decision is made or a constraint is discovered.** A stale memory is worse than
 > no memory — fix anything here that no longer matches reality.
 
-Last updated: 2026-09-14 (v4, artifact v13)
+Last updated: 2026-09-14 (v5, artifact v14)
 
 ---
 
@@ -618,6 +618,35 @@ Append only. Never rewrite history.
 ---
 
 ## 13. Session log
+
+- **2026-09-14 (c)** — **Acted on the 40%.** Client: *"i like what you built, but i like only 40% so it
+  still need very much upgradations."* Recorded the build method and the calibration table (§2.11, §2.10)
+  at the client's explicit request, then went after the gap those sections name.
+  - **`render3d.js`** — the 3D apparatus layer, and the biggest single change. The engine has had a
+    working camera since v2 and **not one physics lab used it**. Primitives are submitted to a frame,
+    depth-sorted and drawn in one pass: lit spheres, cylinders and tubes (each wall quad shaded by its
+    own normal, so a body genuinely turns as the camera moves), boxes, gridded planes, 3D arrows,
+    coils, contact shadows, wireframe spheres, world-anchored labels, and a cheap `polyline` for paths
+    of thousands of points — field lines would cost more than the rest of the frame as lit cylinders.
+  - **Five benches are now genuinely 3D**: `rolling` (a wedge with thickness, four bodies abreast in
+    lanes, spokes on the end faces), `gauss` (field lines traced in 3D, a real wireframe Gaussian
+    sphere carrying its sample points and normals), `kinetic`, `induction`, `heatengine`.
+  - **The student builds the input** (§2.5, long outstanding): `g.handle` + `def.onDrag` in lab-core,
+    with the control widgets kept in sync by `R.ctlSync` so a drag moves the slider that owns the
+    parameter. Wired to the gauss charges and Gaussian sphere, the rolling release gate and incline,
+    and the resonance mass. Verified end to end by `drag.mjs`.
+  - **Worked problems** — a predict-then-check panel: a real exam question, a committed numeric answer,
+    then the value the apparatus itself computes, and the working. On six physics labs so far.
+  - **Three new labs**: kinetic theory, induction, heat engines. All three validate against theory on
+    screen (Carnot reproduces its own limit to 0.05%; net ΔS ≈ 10⁻¹⁷ J/K; measured pressure within a
+    few percent of nkT).
+  - Bugs found and fixed while building: the kinetic-theory cell list applied its `j <= i` filter
+    across cells as well as within them, silently dropping **half** the collisions — it showed up as a
+    mean free path nearly twice too short. The Carnot construction let the volume run far past the
+    assumed maximum, so the cycle is now rescaled before integration. The worked-problem panel was
+    overriding every lab's defaults at mount, and ran before `def.setup`.
+  - Verified: `audit.mjs` CLEAN across **34 sims / 20 chapters**, `shot.mjs` clean, `resz.mjs` stable
+    at all four breakpoints, `drag.mjs` confirms each handle writes through.
 
 - **2026-09-14 (b)** — **Shipped five new physics labs.** Client: *"now make next 5 best experiments
   for physics, more best than organic chemistry, with high JEE Mains and Advance level of experiments

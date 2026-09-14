@@ -544,6 +544,34 @@
         params: { metal: 'na', lam: 400, V: -0.35 } }
     ],
 
+    problems: [
+      { source: 'NEET pattern · Einstein equation',
+        q: 'Light of wavelength 400 nm falls on sodium, whose work function is 2.75 eV. Find the maximum kinetic energy of the photoelectrons, in eV.',
+        params: { metal: 'na', lam: 400, intensity: 1, V: 0 },
+        predict: { label: 'KE_max', unit: 'eV', tol: 0.03 },
+        measure: S => S.KEmax,
+        working: 'hν = 1240/400 = 3.10 eV, so KE_max = 3.10 − 2.75 = <b>0.35 eV</b>. ' +
+          'Using hc = 1240 eV·nm turns this into mental arithmetic and is worth memorising; ' +
+          'the stopping potential is then 0.35 V, numerically equal because the charge is one e.' },
+      { source: 'JEE Main pattern · threshold',
+        q: 'A metal has a work function of 4.73 eV. Find its threshold wavelength, in nanometres.',
+        params: { metal: 'ag', lam: 250, intensity: 1 },
+        predict: { label: 'threshold wavelength', unit: 'nm', tol: 0.02 },
+        measure: S => S.lam0,
+        working: 'λ₀ = hc/φ = 1240/4.73 = <b>262 nm</b> — in the ultraviolet, which is why silver ' +
+          'shows no photoelectric effect in visible light at all. Longer wavelength means lower ' +
+          'photon energy, so light beyond λ₀ produces nothing however bright it is.' },
+      { source: 'JEE Advanced pattern · de Broglie',
+        q: 'Photoelectrons emerge from a metal with a maximum kinetic energy of 0.350 eV. Find the de Broglie wavelength of the fastest of them, in nanometres.',
+        params: { metal: 'na', lam: 400, intensity: 1 },
+        predict: { label: 'de Broglie wavelength', unit: 'nm', tol: 0.04 },
+        measure: S => S.lamDB,
+        working: 'λ = h/p with p = √(2mKE). KE = 0.350 × 1.602×10⁻¹⁹ = 5.61×10⁻²⁰ J, so ' +
+          'p = √(2 × 9.11×10⁻³¹ × 5.61×10⁻²⁰) = 3.20×10⁻²⁵ kg·m/s and λ = 6.626×10⁻³⁴/3.20×10⁻²⁵ = ' +
+          '<b>2.07 nm</b>. The shortcut λ(nm) = 1.226/√(V) with V in volts gives the same answer ' +
+          'and is far quicker under exam conditions.' }
+    ],
+
     quiz: [
       { q: 'The intensity of light falling on a photosensitive metal is doubled, the frequency unchanged. Which quantity doubles?',
         options: ['the maximum kinetic energy of the photoelectrons', 'the stopping potential',

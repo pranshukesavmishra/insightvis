@@ -846,9 +846,8 @@ window.InsightLab = (function () {
     body.appendChild(el('p', 'prob-q', pr.q));
     host.appendChild(body);
 
-    const truth = pr.measure ? pr.measure(R.S) : null;
-
     if (R.probDone) {
+      const truth = pr.measure ? pr.measure(R.S) : null;
       const mine = R.probAnswer;
       const ok = truth != null && isFinite(mine) &&
         Math.abs(mine - truth) <= Math.abs(truth) * (pr.predict.tol == null ? 0.03 : pr.predict.tol);
@@ -876,9 +875,20 @@ window.InsightLab = (function () {
       const btn = miniBtn('Commit', commit, 'primary');
       row.appendChild(btn);
       host.appendChild(row);
+      const load = el('div', 'prob-input');
+      load.appendChild(miniBtn('Set the apparatus to these conditions', () => {
+        if (pr.params) {
+          Object.assign(R.S.p, pr.params);
+          if (def.setup) def.setup(R.S);
+          buildControls(R.nodes.controls);
+          syncUI();
+        }
+        renderProblems();
+      }, 'wide'));
+      host.appendChild(load);
       host.appendChild(el('div', 'prob-hint',
-        'The apparatus is already set to these conditions — work it out on paper first, ' +
-        'then commit and the simulation will tell you what it actually does.'));
+        'Work it out on paper first. Commit your answer and the simulation will ' +
+        'tell you what the apparatus actually does.'));
     }
 
     const nav = el('div', 'wt-nav');
@@ -890,12 +900,15 @@ window.InsightLab = (function () {
     nav.appendChild(el('span', 'wt-count', (i + 1) + ' / ' + ps.length));
     host.appendChild(nav);
   }
-  function goProblem(i) {
+  /* `apply` is false on the very first render: opening a lab must show the
+     lab's OWN default conditions, not problem 1's. The conditions are loaded
+     the moment the student actually moves to a problem. */
+  function goProblem(i, apply) {
     const def = R.def, S = R.S, ps = def.problems || [];
     R.probIndex = clamp(i, 0, ps.length - 1);
     R.probAnswer = null; R.probDone = false;
     const pr = ps[R.probIndex];
-    if (pr && pr.params) {
+    if (apply !== false && pr && pr.params) {
       Object.assign(S.p, pr.params);
       if (def.setup) def.setup(S);
       buildControls(R.nodes.controls);
@@ -988,7 +1001,7 @@ window.InsightLab = (function () {
     R.speed = 1;
     R.wtIndex = 0; R.wtShown = false;
     R.liveTitles = [];
-    window.__S = R.S;
+    window.__S = R.S; window.__R = R;   // the harness needs the live runtime, not just state
     R.quizIndex = 0; R.quizPick = null;
     R.log = [];
     R.plots = [];
@@ -1135,7 +1148,7 @@ window.InsightLab = (function () {
       const pp2 = panel('Worked problem · predict, then check');
       R.nodes.prob = pp2.body; right.appendChild(pp2);
       R.probIndex = 0; R.probAnswer = null; R.probDone = false;
-      goProblem(0);
+      renderProblems();
     } else R.nodes.prob = null;
 
     /* quiz */

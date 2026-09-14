@@ -217,10 +217,19 @@
       R3.plane(F, [0, -halfW, 0], [runout + 0.6, 0, 0], [0, 2 * halfW, 0], '#46557A',
                { grid: 7, gridColour: '#CBD9F5', gridAlpha: 0.20 });
 
-      /* ---------------- the release gate and the height ---------------- */
+      /* ---------------- the release gate and the height ----------------
+         Both are HANDLES: the gate sets the release height and the toe sets
+         the angle, so the student can build the experiment rather than only
+         dial it in from the control deck. */
       R3.box(F, [-run - 0.05, 0, rise + 0.10], [0.06, 2 * halfW * 0.98, 0.20], '#8FA3C0',
              { shadow: false });
-      R3.label(F, [-run - 0.05, 0, rise + 0.28], 'release gate', th['text-3'], { size: 9 });
+      R3.label(F, [-run - 0.05, 0, rise + 0.28], 'release gate · drag', th['text-3'], { size: 9 });
+      {
+        const qg = cam.project([-run - 0.05, 0, rise + 0.10]);
+        if (qg.ok) g.handle(qg.x, qg.y, 18, 'gate');
+        const qt = cam.project([0.10, 0, 0]);
+        if (qt.ok) g.handle(qt.x, qt.y, 16, 'toe');
+      }
       // the drop, marked as a height because the energy argument uses it
       {
         const hy = halfW + 0.12;
@@ -373,6 +382,23 @@
         });
       }
     },
+    /* The bench is built by hand: drag the gate up and down to set the release
+       height, drag near the toe to steepen or flatten the slope. Both write
+       into S.p, so the control deck follows along. */
+    onDrag(S, e) {
+      const cam = S.cam;
+      if (!cam || e.phase === 'end') { if (e.phase === 'end') this.setup(S); return; }
+      // how many metres one screen pixel is worth at the target distance
+      const perPx = cam.dist / Math.max(cam._k, 1);
+      if (e.id === 'gate') {
+        S.p.hRelease = clamp(S.p.hRelease - e.dy * perPx, 0.3, 2.5);
+        this.setup(S);
+      } else if (e.id === 'toe') {
+        S.p.theta = clamp(S.p.theta - e.dy * perPx * 90, 5, 70);
+        this.setup(S);
+      }
+    },
+
     plots: [
       { title: 'Speed down the slope — the order is set before anything moves',
         legend: SHAPES.map(s => ({ c: COL[s.id], label: s.name })),
@@ -541,6 +567,40 @@
           'kinetic friction does real work, and energy is genuinely lost as heat — visible in the red ' +
           'segment of the energy bar.',
         params: { shape: 'sphere', theta: 55, mu: 0.14, race: false } }
+    ],
+
+    problems: [
+      { source: 'NEET pattern · rolling',
+        q: 'A solid sphere rolls without slipping from rest down an incline, falling through a vertical height of 1.40 m. Find its speed at the bottom, in m/s. (g = 9.8 m/s²)',
+        params: { shape: 'sphere', theta: 30, hRelease: 1.40, mu: 0.5, race: false },
+        predict: { label: 'speed at the bottom', unit: 'm/s', tol: 0.02 },
+        measure: S => Math.sqrt(2 * G * S.p.hRelease / (1 + 0.4)),
+        working: 'Energy: mgh = ½mv² + ½Iω², and with I = ⅖mR² and ω = v/R this becomes ' +
+          'mgh = ½mv²(1 + ⅖). So v = √(2gh/1.4) = √(2 × 9.8 × 1.40 / 1.4) = <b>4.43 m/s</b>. ' +
+          'Neither the mass nor the radius appears, and neither does the angle of the incline — ' +
+          'only the height fallen and the value of k.' },
+      { source: 'JEE Main pattern · minimum friction',
+        q: 'A solid cylinder (k = ½) is to roll without slipping down an incline of 30°. Find the minimum coefficient of static friction required.',
+        params: { shape: 'disc', theta: 30, mu: 0.5, race: false },
+        predict: { label: 'minimum μ', unit: '', tol: 0.03 },
+        measure: S => {
+          const sel = S.runs.find(q => q.sh.id === 'disc') || S.runs[0];
+          return sel.muMin;
+        },
+        working: 'μ_min = k tanθ/(1+k) = (½ × tan30°)/(1 + ½) = (0.5 × 0.5774)/1.5 = <b>0.192</b>. ' +
+          'A ring would need ½tan30° = 0.289 and a solid sphere only ²⁄₇tan30° = 0.165 — the body ' +
+          'that most wants to rotate needs the most grip to do it.' },
+      { source: 'JEE Advanced pattern · energy split',
+        q: 'A ring rolls without slipping. What percentage of its total kinetic energy is rotational?',
+        params: { shape: 'ring', theta: 25, mu: 0.6, race: false },
+        predict: { label: 'rotational fraction', unit: '%', tol: 0.02 },
+        measure: S => {
+          const sel = S.runs.find(q => q.sh.id === 'ring') || S.runs[0];
+          return 100 * sel.sh.k / (1 + sel.sh.k);
+        },
+        working: 'The split is k/(1+k). For a ring k = 1, so the answer is exactly <b>50%</b>. ' +
+          'A solid sphere gives ²⁄₇ ≈ 28.6% and a solid cylinder ⅓. Note the fraction depends on ' +
+          'nothing but k — not on the speed, the height, or the angle of the incline.' }
     ],
 
     quiz: [
@@ -792,9 +852,14 @@
         PA.wire(ctx, [[dx2, drivenY + 8 + barrelH * 0.35], [dx2, massY - mh / 2]], '#8FA3C0', { r: 3 });
         PA.lbl(ctx, dx2 + 18, drivenY + 8 + barrelH / 2, 'b = ' + p.b.toFixed(2), '#8FA3C0', 'left', 9);
 
-        // the mass
+        // the mass — and it is a handle, so the student can pull it and let go
         PA.plate(ctx, cx, massY, mw, mh, '#4E86BE', 0);
         PA.lbl(ctx, cx, massY, p.m.toFixed(2) + ' kg', '#F2F6FF', 'center', 11);
+        g.handle(cx, massY, Math.max(mw, mh) * 0.6, 'mass');
+        S.pxPerM = pxPerM; S.restY = rest;
+        if (g.dragging === 'mass') {
+          PA.lbl(ctx, cx, massY + mh, 'let go to release', th.accent, 'center', 9);
+        }
 
         // equilibrium line and the live amplitude
         ctx.save(); ctx.setLineDash([4, 4]);
@@ -959,6 +1024,17 @@
           ? 'beat period 2π/(ω₂−ω₁) = ' + (isFinite(S.tBeat) ? S.tBeat.toFixed(2) + ' s' : '∞')
           : 'a single mode — every part moves at one frequency and stays there', 14, 44);
       }
+    },
+
+    /* Pull the mass away from equilibrium and let go. Releasing sets the
+       displacement and zeroes the velocity, which is exactly the initial
+       condition the textbook problem starts from. */
+    onDrag(S, e) {
+      if (S.p.mode !== 'driven' || e.id !== 'mass' || !S.pxPerM) return;
+      if (e.phase === 'start') S.wasPlaying = true;
+      S.y = clamp((e.y - S.restY) / S.pxPerM, -0.6, 0.6);
+      S.yd = 0;
+      if (e.phase === 'end') S.settled = 0;      // a fresh transient to watch die
     },
 
     plots: [
@@ -1236,6 +1312,34 @@
           'and mass 2 has all the energy. <b>Weaker coupling ⇒ closer frequencies ⇒ slower beats</b> — which is ' +
           'why the beat period grows without limit as k_c → 0.',
         params: { mode: 'coupled', start: 'beat', kc: 1.2 } }
+    ],
+
+    problems: [
+      { source: 'JEE Main pattern · SHM',
+        q: 'A mass of 1.00 kg hangs on a spring of stiffness 40.0 N/m. Find the natural angular frequency ω₀, in rad/s.',
+        params: { mode: 'driven', m: 1.0, k: 40, b: 1.6, wDrive: 6.32 },
+        predict: { label: 'ω₀', unit: 'rad/s', tol: 0.02 },
+        measure: S => S.w0,
+        working: 'ω₀ = √(k/m) = √(40/1) = <b>6.32 rad/s</b>, which is f₀ = ω₀/2π ≈ 1.01 Hz. ' +
+          'The commonest slip is to report the frequency in hertz when the question asked for the ' +
+          'angular frequency, or the reverse — the factor of 2π between them is worth a mark every time.' },
+      { source: 'JEE Advanced pattern · resonance',
+        q: 'An oscillator of mass 1.00 kg and stiffness 40.0 N/m has damping b = 1.60 N·s/m and is driven by a force of peak value 1.00 N at its resonant frequency. Find the steady-state amplitude, in metres.',
+        params: { mode: 'driven', m: 1.0, k: 40, b: 1.6, F0: 1.0, wDrive: 6.32 },
+        predict: { label: 'amplitude', unit: 'm', tol: 0.04 },
+        measure: S => S.A,
+        working: 'At ω = ω₀ the two terms in the denominator collapse to just 2γω₀, so ' +
+          'A = F₀/(bω₀) = 1.00/(1.60 × 6.32) = <b>0.0989 m</b>. Note what is <b>absent</b>: the spring ' +
+          'constant. At resonance the amplitude is set entirely by the <b>damping</b>, which is why a ' +
+          'question giving you F₀, k and b is testing this exact point.' },
+      { source: 'JEE Advanced pattern · coupled modes',
+        q: 'Two 1.00 kg masses, each tied to a wall by a spring of 40.0 N/m, are joined to each other by a spring of 4.00 N/m. Find the angular frequency of the out-of-phase normal mode, in rad/s.',
+        params: { mode: 'coupled', m: 1.0, k: 40, kc: 4.0, start: 'anti' },
+        predict: { label: 'ω of mode 2', unit: 'rad/s', tol: 0.02 },
+        measure: S => S.wMode[1],
+        working: 'Moving oppositely stretches the coupling spring by twice each displacement, so the ' +
+          'effective stiffness is k + 2k_c: ω₂ = √((40 + 8)/1) = √48 = <b>6.93 rad/s</b>. ' +
+          'The in-phase mode never stretches that spring at all and stays at √(40) = 6.32 rad/s.' }
     ],
 
     quiz: [

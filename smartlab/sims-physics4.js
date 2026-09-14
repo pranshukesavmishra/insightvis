@@ -626,6 +626,26 @@
         params: { setup: 'quad', samples: 2000 } }
     ],
 
+    problems: [
+      { source: 'NEET pattern · Gauss',
+        q: 'A point charge of +1.00 nC sits at the centre of a spherical Gaussian surface of radius 0.80 m. Find the electric flux through the surface, in N·m²/C.',
+        params: { setup: 'single', qScale: 1, gx: 0, gy: 0, gR: 0.8, samples: 900 },
+        predict: { label: 'flux', unit: 'N·m²/C', tol: 0.03 },
+        measure: S => S.fluxGauss,
+        working: 'Φ = q/ε₀ = 1.00×10⁻⁹ / 8.854×10⁻¹² = <b>113 N·m²/C</b>. The radius is a red herring: ' +
+          'it does not appear in the answer, and neither would the shape if the surface were a cube. ' +
+          'Compare it with the measured integral in the panel — they agree to a fraction of a percent.' },
+      { source: 'JEE Main pattern · dipole flux',
+        q: 'A Gaussian sphere encloses BOTH charges of an electric dipole (+1 nC and −1 nC). Find the net flux through it, in N·m²/C.',
+        params: { setup: 'dipole', sep: 1.0, gx: 0, gy: 0, gR: 1.9, samples: 900 },
+        predict: { label: 'net flux', unit: 'N·m²/C', tol: 0.05 },
+        measure: S => S.fluxGauss,
+        working: 'q_enc = +q − q = 0, so the flux is <b>exactly zero</b>. Look at the sample dots on ' +
+          'the sphere while you read that: the field is emphatically not zero, it is outward on one ' +
+          'side and inward on the other. <b>Zero flux does not mean zero field</b> — every line that ' +
+          'leaves also returns.' }
+    ],
+
     quiz: [
       { q: 'A point charge q is placed at the centre of a cube of side a. The electric flux through one face is:',
         options: ['q/ε₀', 'q/6ε₀', 'q/4ε₀', 'qa²/ε₀'], answer: 1,
@@ -1112,6 +1132,35 @@
           'their average power is <b>exactly zero</b>. The current component that does this is the ' +
           '<b>wattless current</b>, and at φ = 90° the entire current is wattless.',
         params: { R: 40, f: 40 } }
+    ],
+
+    problems: [
+      { source: 'JEE Main pattern · resonance',
+        q: 'A series LCR circuit has L = 0.200 H and C = 20.0 µF. Find its resonant frequency in hertz.',
+        params: { R: 40, Lh: 0.20, Cuf: 20, V0: 20, f: 79.577 },
+        predict: { label: 'resonant frequency', unit: 'Hz', tol: 0.02 },
+        measure: S => S.f0,
+        working: 'f₀ = 1/(2π√(LC)) = 1/(2π√(0.200 × 20.0×10⁻⁶)) = 1/(2π × 2.0×10⁻³) = ' +
+          '<b>79.6 Hz</b>. Watch the microfarads: using 20 instead of 20×10⁻⁶ is out by a factor ' +
+          'of 1000, and √1000 ≈ 31.6 in the answer.' },
+      { source: 'JEE Advanced pattern · voltage magnification',
+        q: 'A series LCR circuit with R = 5.00 Ω, L = 0.200 H and C = 20.0 µF is driven at resonance by a supply of peak voltage 20.0 V. Find the peak voltage across the inductor, in volts.',
+        params: { R: 5, Lh: 0.20, Cuf: 20, V0: 20, f: 79.577 },
+        predict: { label: 'peak V across L', unit: 'V', tol: 0.03 },
+        measure: S => S.VL,
+        working: 'At resonance Z = R, so I₀ = 20.0/5.00 = 4.00 A, and X_L = ωL = 2π(79.6)(0.200) = ' +
+          '100 Ω. So V_L = I₀X_L = <b>400 V</b> — twenty times the supply. The magnification factor ' +
+          'is exactly Q = (1/R)√(L/C) = 20. V_C is the same 400 V, in antiphase, so the two cancel ' +
+          'and Kirchhoff is perfectly satisfied.' },
+      { source: 'NEET pattern · power',
+        q: 'In an AC circuit the rms voltage is 220 V, the rms current is 5.00 A and the phase angle between them is 60°. Find the average power consumed, in watts.',
+        params: { R: 40, Lh: 0.20, Cuf: 20, f: 40 },
+        predict: { label: 'average power', unit: 'W', tol: 0.02 },
+        measure: () => 220 * 5.0 * Math.cos(Math.PI / 3),
+        working: 'P = V_rms I_rms cos φ = 220 × 5.00 × cos60° = 220 × 5.00 × 0.500 = <b>550 W</b>. ' +
+          'The apparent power V_rms I_rms is 1100 W; the other half is never delivered at all. ' +
+          'The current component responsible is the <b>wattless</b> one, and at φ = 90° the whole ' +
+          'current would be wattless.' }
     ],
 
     quiz: [

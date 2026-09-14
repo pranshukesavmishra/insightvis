@@ -101,11 +101,12 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v6 (shipped)
+## 4. Insight Smart Lab — v7 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Thirty-one experiments across seventeen chapters.**
+Source: [`smartlab/`](./smartlab). **Thirty-four experiments across twenty chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
-**Physics now spans seven chapters** after the v6 round.
+**Physics now spans ten chapters** — five of its benches are built in true 3D on `render3d.js`,
+and the student can drag the apparatus into shape rather than only dial it in.
 
 ### Physics · Moving Charges & Magnetism
 **1 · Charged Particle in Crossed E and B Fields**
@@ -157,6 +158,28 @@ scaled so that at high Q the **supply** bar is the short one.
 Einstein's equation driving a real photo-cell: the I–V family, the V₀–ν line whose slope is h/e for
 every metal, and the energy-level picture of the surface. Turn the lamp down and the electrons still
 come out — just fewer of them.
+
+### Physics · Kinetic Theory of Gases
+**32 · Kinetic Theory — Where the Maxwell Curve Comes From**
+The curve is **not drawn**. A box of molecules is given random velocities, they collide elastically
+with each other on a cell list and with the walls, and the histogram of their speeds is measured as
+the simulation runs — settling onto the analytic curve nobody put there. Pressure is measured the
+same way, from the momentum actually delivered to the walls, and comes out within a few percent of
+nkT.
+
+### Physics · Electromagnetic Induction
+**33 · Electromagnetic Induction — Lenz's Law, Measured**
+A magnet falls through a coil. The flux linkage is integrated from the real dipole field,
+differentiated for the emf, divided by the resistance for the current, and the force on that current
+is fed back into the magnet's equation of motion. It brakes because the numbers say so — and a
+free-falling twin drops alongside for comparison.
+
+### Physics · Thermodynamics
+**34 · Heat Engines — the PV Cycle and the Carnot Limit**
+Carnot, Otto, Diesel and Stirling, with the work obtained by **numerically integrating P dV** round
+the loop and the heat per leg from the first law. The Carnot cycle reproduces its own limit to
+within 0.05%, and the net entropy change round any cycle comes out at 10⁻¹⁷ J/K — both of which are
+checks on the integrator, not assumptions fed into it.
 
 ### Chemistry · Structure of Atom
 **5 · Hydrogen Atomic Orbitals — Shape, Phase and Nodes**
