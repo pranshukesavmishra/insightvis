@@ -5,7 +5,8 @@
 (function (L) {
   'use strict';
   const { clamp, TAU, fmt, E } = L;
-  const PA = window.PHYSART;
+  const PA = window.PHYSART, R3 = window.R3, RX = window.RX;
+  const Camera = L.Camera;
   const G = 9.80665;
 
   /* =========================================================================
@@ -30,8 +31,8 @@
     chapter: 'System of Particles & Rotational Motion',
     exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
     weight: 'Very high yield',
-    is3D: false,
-    stageHint: 'Friction is not assumed — the force needed to roll is computed every step and tested against μN',
+    is3D: true,
+    stageHint: 'Drag to orbit the bench · friction is not assumed, it is computed each step and tested against μN',
     lede: 'Four bodies are released together from the same height. They arrive in a fixed order that does ' +
       '<b>not depend on their mass or their radius</b> — only on how that mass is distributed. This lab does not ' +
       'draw the answer: it integrates <b>Ma = Mg sinθ − f</b> and <b>Iα = fR</b> for each body and checks at ' +
@@ -73,7 +74,9 @@
       S.th = th;
       S.list = p.race ? SHAPES.slice() : SHAPES.filter(s => s.id === p.shape);
       S.len = p.hRelease / Math.max(Math.sin(th), 1e-3);       // slope length, metres
-      S.R = 0.10;                                              // every body: 10 cm radius
+      // R cancels out of a, v and mu_min alike, so the drawn radius is chosen
+      // for legibility rather than realism — and the lab says so out loud.
+      S.R = Math.max(0.14, S.len * 0.085);
       S.M = 1.0;                                               // and 1 kg — so the student
                                                                // can see they cancel
 
@@ -93,6 +96,23 @@
         };
       });
       S.runout = S.len * 0.55;                 // flat run-out past the finish line
+      // Frame the bench on the track that was actually built. A three-quarter
+      // view, NOT side-on: the four bodies run in lanes across the bench, and
+      // a side-on camera puts those lanes straight down the depth axis where
+      // they hide behind one another.
+      {
+        const run = S.len * Math.cos(th), rise = S.len * Math.sin(th);
+        const span = run + S.runout;
+        const tgt = [(-run + S.runout) / 2, 0, rise * 0.34];
+        if (!S.cam) {
+          S.cam = Camera({ theta: -2.12, phi: 0.33, dist: span * 1.14, target: tgt });
+          S.cam.minDist = 1.0; S.cam.maxDist = 20;
+        } else {
+          S.cam.target = tgt;
+          S.cam.home.dist = span * 1.14;
+          if (!S.camTouched) S.cam.dist = span * 1.14;
+        }
+      }
       S.tSim = 0; S.finished = 0; S.hold = 0;
       S.trace = S.runs.map(() => []);
     },
@@ -156,104 +176,164 @@
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
+      const cam = S.cam;
+      const F = R3.Frame(ctx, cam, { ambient: 0.28, floorZ: 0 });
 
-      const HDR = 58, FOOT = 26;
-      const y0 = HDR, y1 = H - FOOT;
-      // the incline, drawn to fit whatever angle was asked for
-      const ax = W * 0.07, topY = y0 + 14;
-      const maxW = W * 0.66, maxH = (y1 - topY) - 30;
-      let slopeW = maxW, slopeH = slopeW * Math.tan(S.th);
-      if (slopeH > maxH) { slopeH = maxH; slopeW = slopeH / Math.tan(S.th); }
-      const bx = ax + slopeW, by = topY + slopeH;
-      const mPerPx = S.len / Math.hypot(slopeW, slopeH);       // metres per pixel
-      const Rpx = clamp(S.R / mPerPx, 15, 34);
+      /* ---------------- the bench, in metres ----------------
+         x runs down the slope's shadow, y across the bench, z up.
+         The incline is a real wedge: a ramp face, two side walls and a
+         base, so it has thickness and casts a shadow like a solid. */
+      const th0 = S.th, run = S.len * Math.cos(th0), rise = S.len * Math.sin(th0);
+      // four bodies run abreast, so the bench must be wide enough that they
+      // never intersect: one lane is 2.7 radii wide
+      const laneW = S.R * 2.7;
+      const halfW = Math.max(0.42, laneW * S.runs.length / 2 + S.R * 0.9);
+      const runout = S.runout * Math.cos(0);
 
-      PA.surface(ctx, ax, topY, bx, by, 24, '#3A4766');
-      PA.surface(ctx, bx, by, W - 10, by, 24, '#3A4766');
+      // floor
+      R3.plane(F, [-run - 0.20, -halfW - 0.30, 0], [run + runout + 0.8, 0, 0],
+               [0, 2 * halfW + 0.60, 0], '#1E2740',
+               { grid: 12, gridColour: '#4E6392', gridAlpha: 0.20, edge: false });
 
-      // the release height, marked as a height because that is what the
-      // energy argument uses
-      ctx.save(); ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = g.alpha(th['text-3'], .55); ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(ax, topY); ctx.lineTo(W - 14, topY); ctx.stroke();
-      ctx.restore();
-      PA.vector(ctx, W - 26, topY, W - 26, by, th['text-3'], { width: 2, shadow: false });
-      PA.vector(ctx, W - 26, by, W - 26, topY, th['text-3'], { width: 2, shadow: false });
-      PA.lbl(ctx, W - 32, (topY + by) / 2, 'h = ' + p.hRelease.toFixed(2) + ' m',
-             th['text-2'], 'right', 9.5);
+      // the ramp face itself
+      const top = [-run, 0, rise], toe = [0, 0, 0];
+      R3.plane(F, [-run, -halfW, rise], [run, 0, -rise], [0, 2 * halfW, 0], '#54658C',
+               { grid: 10, gridColour: '#CBD9F5', gridAlpha: 0.22 });
+      // the two side walls, which is what gives the wedge its solidity
+      [-1, 1].forEach(sg => {
+        const yy = sg * halfW;
+        F.push([-run / 2, yy, rise / 2], () => {
+          const q = [[-run, yy, rise], [0, yy, 0], [0, yy, -0.10], [-run, yy, -0.10]]
+            .map(pt => cam.project(pt));
+          if (q.some(x => !x.ok)) return;
+          ctx.fillStyle = F.shade('#2A3552', [0, sg, 0], { ambient: 0.34 });
+          ctx.beginPath();
+          q.forEach((x, k) => k ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+          ctx.closePath(); ctx.fill();
+          ctx.strokeStyle = 'rgba(159,180,222,.35)'; ctx.lineWidth = 1; ctx.stroke();
+        });
+      });
+      // the flat run-out the bodies roll onto
+      R3.plane(F, [0, -halfW, 0], [runout + 0.6, 0, 0], [0, 2 * halfW, 0], '#46557A',
+               { grid: 7, gridColour: '#CBD9F5', gridAlpha: 0.20 });
 
-      // the angle
-      ctx.strokeStyle = g.alpha(th.accent, .8); ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.arc(bx, by, 42, Math.PI, Math.PI + S.th, false); ctx.stroke();
-      PA.lbl(ctx, bx - 56, by - 12, 'θ = ' + p.theta.toFixed(1) + '°', th.accent, 'right', 10);
+      /* ---------------- the release gate and the height ---------------- */
+      R3.box(F, [-run - 0.05, 0, rise + 0.10], [0.06, 2 * halfW * 0.98, 0.20], '#8FA3C0',
+             { shadow: false });
+      R3.label(F, [-run - 0.05, 0, rise + 0.28], 'release gate', th['text-3'], { size: 9 });
+      // the drop, marked as a height because the energy argument uses it
+      {
+        const hy = halfW + 0.12;
+        R3.arrow(F, [-run, hy, rise], [-run, hy, 0], S.R * 0.07, '#FFD36B',
+                 { head: S.R * 0.34, shadow: false });
+        R3.arrow(F, [-run, hy, 0], [-run, hy, rise], S.R * 0.07, '#FFD36B',
+                 { head: S.R * 0.34, shadow: false });
+        R3.callout(F, [-run, hy, rise * 0.5], -18, 0,
+                   'h = ' + p.hRelease.toFixed(2) + ' m', '#FFD36B');
+      }
 
-      const ux = Math.cos(S.th), uy = -Math.sin(S.th);   // unit vector UP the slope
-      const nxv = Math.sin(S.th), nyv = Math.cos(S.th);  // unit normal, into the slope
+      // the angle, as an arc on the bench floor
+      {
+        const arcPts = [];
+        for (let i = 0; i <= 18; i++) {
+          const a = th0 * i / 18;
+          arcPts.push([-0.55 * Math.cos(a), -halfW - 0.14, 0.55 * Math.sin(a)]);
+        }
+        R3.tube(F, arcPts, 0.012, '#3DD6F5', { round: false, shadow: false });
+        R3.callout(F, [-0.62 * Math.cos(th0 / 2), -halfW - 0.14, 0.62 * Math.sin(th0 / 2)],
+                   18, -8, 'θ = ' + p.theta.toFixed(1) + '°', '#3DD6F5');
+      }
 
-      // one mapping from distance travelled to a point on the track, used by
-      // the bodies and by the force vectors alike
-      const contact = sMetres => {
-        const d = sMetres / mPerPx;
-        const slopePx = Math.hypot(slopeW, slopeH);
-        if (d <= slopePx) return { x: ax + Math.cos(S.th) * d, y: topY + Math.sin(S.th) * d,
-                                   nx: nxv, ny: nyv, onSlope: true };
-        return { x: bx + (d - slopePx), y: by, nx: 0, ny: 1, onSlope: false };
+      /* ---------------- the bodies ---------------- */
+      const along = sMetres => {
+        // position of the CONTACT POINT along the track
+        if (sMetres <= S.len) {
+          return { p: [-run + sMetres * Math.cos(th0), 0, rise - sMetres * Math.sin(th0)],
+                   n: [Math.sin(th0), 0, Math.cos(th0)],
+                   t: [Math.cos(th0), 0, -Math.sin(th0)], onSlope: true };
+        }
+        return { p: [(sMetres - S.len), 0, 0], n: [0, 0, 1], t: [1, 0, 0], onSlope: false };
       };
 
+      const lanes = S.runs.length;
       S.runs.forEach((r, idx) => {
-        const c = contact(r.s);
-        const px = c.x, py = c.y;
-        const cxF = px + c.nx * Rpx, cyF = py - c.ny * Rpx;
-
-        PA.body(ctx, cxF, cyF, Rpx, r.sh.id, r.phi, r.col, { groundY: py });
-
-        if (S.runs.length > 1) {
-          // staggered rows, so four captions on one track never stack
-          PA.lbl(ctx, cxF, cyF - Rpx - 10 - idx * 11, (r.place ? '#' + r.place + ' ' : '') +
-                 r.sh.name, r.col, 'center', 9);
+        const c = along(r.s);
+        const lane = lanes > 1 ? (idx - (lanes - 1) / 2) * laneW : 0;
+        const centre = [c.p[0] + c.n[0] * S.R, lane, c.p[2] + c.n[2] * S.R];
+        // the rotation axis is across the bench
+        const a = [centre[0], centre[1] - S.R * 0.45, centre[2]];
+        const b = [centre[0], centre[1] + S.R * 0.45, centre[2]];
+        const spherical = r.sh.id === 'sphere' || r.sh.id === 'shell';
+        if (spherical) {
+          R3.sphere(F, centre, S.R, r.col, { rim: 0.8, sub: 0.45 });
+          // a painted meridian so the spin is visible on a sphere too
+          const mer = [];
+          for (let i = 0; i <= 30; i++) {
+            const t = i / 30 * TAU;
+            const ca = Math.cos(r.phi), sa = Math.sin(r.phi);
+            const lx = Math.cos(t) * S.R * 0.99, lz = Math.sin(t) * S.R * 0.99;
+            mer.push([centre[0] + lx * ca - lz * sa, lane, centre[2] + lx * sa + lz * ca]);
+          }
+          R3.tube(F, mer, S.R * 0.055, RX.mix(r.col, '#05080F', 0.45),
+                  { round: false, shadow: false, bias: -S.R * 0.9 });
+        } else {
+          R3.cylinder(F, a, b, S.R, r.col, {
+            segments: 30, spokes: 8, phase: r.phi,
+            inner: r.sh.id === 'ring' ? S.R * 0.74 : 0,
+            capColour: RX.mix(r.col, '#ffffff', 0.10)
+          });
+        }
+        if (lanes > 1) {
+          R3.callout(F, [centre[0], lane, centre[2] + S.R * 1.25], 0, -10 - idx * 11,
+                     (r.place ? '#' + r.place + ' ' : '') + r.sh.name, r.col, { size: 9 });
         }
         if (!r.rolls) {
-          PA.lbl(ctx, cxF, cyF + Rpx + 11, 'SLIPPING', th.crit, 'center', 8.5);
+          R3.label(F, [centre[0], lane, centre[2] - S.R * 1.5], 'SLIPPING', th.crit, { size: 8.5 });
         }
       });
 
-      /* ---- force vectors on the selected body ---- */
+      /* ---------------- the force vectors, at the contact point ---------------- */
       if (p.vectors) {
         const r = S.runs.find(q => q.sh.id === p.shape) || S.runs[0];
-        const c = contact(r.s);
-        const px = c.x, py = c.y;
-        const cxF = px + c.nx * Rpx, cyF = py - c.ny * Rpx;
-        const sc = 4.2;                               // pixels per newton
-        // weight
-        PA.vector(ctx, cxF, cyF, cxF, cyF + S.M * G * sc, '#FFD36B',
-                  { width: 3, label: 'Mg' });
-        // normal reaction, at the contact point
-        const N = S.M * G * (c.onSlope ? Math.cos(S.th) : 1);
-        PA.vector(ctx, px, py, px + c.nx * N * sc, py - c.ny * N * sc,
-                  '#8FA3C0', { width: 3, label: 'N' });
-        // friction, UP the slope, with the value that was actually applied
+        const idx = S.runs.indexOf(r);
+        const lane = lanes > 1 ? (idx - (lanes - 1) / 2) * laneW : 0;
+        const c = along(r.s);
+        const foot = [c.p[0], lane, c.p[2]];
+        const cen = [c.p[0] + c.n[0] * S.R, lane, c.p[2] + c.n[2] * S.R];
+        const sc = S.R * 0.11;                       // metres per newton
+        const ar = S.R * 0.085;
+        R3.arrow(F, cen, [cen[0], lane, cen[2] - S.M * 9.80665 * sc], ar, '#FFD36B',
+                 { label: 'Mg', head: S.R * 0.36 });
+        const N = S.M * 9.80665 * (c.onSlope ? Math.cos(th0) : 1);
+        R3.arrow(F, foot, [foot[0] + c.n[0] * N * sc, lane, foot[2] + c.n[2] * N * sc],
+                 ar, '#8FA3C0', { label: 'N', head: S.R * 0.36 });
         if (r.f > 0.01) {
-          PA.vector(ctx, px, py, px - c.ny * r.f * sc, py - c.nx * r.f * sc,
-                    r.rolls ? '#7CE0A8' : '#FB7185', { width: 3,
-                    label: 'f = ' + r.f.toFixed(2) + ' N' });
+          R3.arrow(F, foot, [foot[0] - c.t[0] * r.f * sc, lane, foot[2] - c.t[2] * r.f * sc],
+                   ar, r.rolls ? '#7CE0A8' : '#FB7185',
+                   { label: 'f = ' + r.f.toFixed(2) + ' N', head: S.R * 0.36 });
+        }
+        // and the angular velocity, about the axis it actually turns on
+        if (Math.abs(r.w) > 0.2) {
+          R3.arrow(F, [cen[0], lane - S.R * 1.5, cen[2]], [cen[0], lane - S.R * 2.4, cen[2]],
+                   ar * 0.8, '#B07CC6', { label: 'ω', head: S.R * 0.3 });
         }
       }
 
-      /* ---- energy partition bar ---- */
+      F.render();
+
+      /* ---------------- 2D overlays on top of the 3D scene ---------------- */
+      const HDR = 58;
       {
         const r = S.runs.find(q => q.sh.id === p.shape) || S.runs[0];
         const KEt = 0.5 * S.M * r.v * r.v;
         const KEr = 0.5 * (r.sh.k * S.M * S.R * S.R) * r.w * r.w;
-        // only the slope contributes height — on the flat run-out the body
-        // has stopped descending, and counting it drops phantom "heat" in
         const drop = Math.min(r.s, S.len) * Math.sin(S.th);
-        const lost = Math.max(0, S.M * G * drop - KEt - KEr);
+        const lost = Math.max(0, S.M * 9.80665 * drop - KEt - KEr);
         const tot = Math.max(KEt + KEr + lost, 1e-9);
         const bw = Math.min(W * 0.30, 250), bhh = 15;
-        const bx0 = W - bw - 14, by0 = y1 - bhh - 30;
+        const bx0 = W - bw - 14, by0 = H - bhh - 44;
         let cur = bx0;
-        [[KEt, '#3DD6F5', 'translation'], [KEr, '#FFAE4C', 'rotation'],
-         [lost, '#FB7185', 'heat']].forEach(([val, col, nm]) => {
+        [[KEt, '#3DD6F5'], [KEr, '#FFAE4C'], [lost, '#FB7185']].forEach(([val, col]) => {
           const wpx = bw * val / tot;
           if (wpx < 0.4) return;
           ctx.fillStyle = g.alpha(col, .85);
@@ -265,11 +345,10 @@
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.strokeRect(bx0, by0, bw, bhh);
         PA.lbl(ctx, bx0, by0 - 8, 'where the potential energy went', th['text-3'], 'left', 9);
-        PA.lbl(ctx, bx0, by0 + bhh + 9,
+        PA.lbl(ctx, bx0, by0 + bhh + 10,
                'translation  ·  rotation  ·  heat', th['text-3'], 'left', 8.5);
       }
 
-      /* ---- header ---- */
       const sel = S.runs.find(q => q.sh.id === p.shape) || S.runs[0];
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif'; ctx.fillStyle = th.text;
@@ -284,7 +363,7 @@
       ctx.fillText('a = g sinθ/(1+k) = ' + sel.aRoll.toFixed(3) + ' m/s²   ·   ' +
         'k = I/MR² = ' + sel.sh.k.toFixed(3) + '   ·   μ_min = ' + sel.muMin.toFixed(3), 14, 44);
 
-      if (S.finished >= S.runs.length && S.runs.length > 1) {
+      if (S.runs.every(q => q.done) && S.runs.length > 1) {
         const order = S.runs.slice().sort((a, b) => a.tFinish - b.tFinish);
         PA.lbl(ctx, W - 14, 10, 'FINISH ORDER', th.text, 'right', 11, 'top');
         order.forEach((r, i) => {
@@ -294,7 +373,6 @@
         });
       }
     },
-
     plots: [
       { title: 'Speed down the slope — the order is set before anything moves',
         legend: SHAPES.map(s => ({ c: COL[s.id], label: s.name })),

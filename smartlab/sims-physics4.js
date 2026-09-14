@@ -4,7 +4,8 @@
 (function (L) {
   'use strict';
   const { clamp, TAU, fmt, E } = L;
-  const PA = window.PHYSART;
+  const PA = window.PHYSART, R3 = window.R3, RX = window.RX;
+  const Camera = L.Camera;
 
   const KE = 8.9875517873681764e9;      // 1/4πε₀
   const EPS0 = 8.8541878128e-12;
@@ -39,8 +40,8 @@
     chapter: 'Electric Charges & Fields',
     exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
     weight: 'Very high yield',
-    is3D: false,
-    stageHint: 'Move the Gaussian sphere — the flux is integrated over 600 points on it, not looked up',
+    is3D: true,
+    stageHint: 'Drag a charge or the sphere · scroll to zoom · the flux is integrated over 600 points on it',
     lede: 'Gauss\'s law is usually met as a formula to be trusted. Here it is <b>measured</b>: the field of ' +
       'every charge is summed at six hundred points spread over a real sphere, <b>E·n̂ is integrated</b> over ' +
       'that surface, and the answer is put next to q<sub>enc</sub>/ε₀. Slide the sphere around and the ' +
@@ -89,11 +90,23 @@
     setup(S) {
       const p = S.p;
       const cfg = SETUPS[p.setup] || SETUPS.dipole;
+      const sameCfg = S.cfg === cfg && S.Q && S.Q.length === cfg.q.length;
       S.cfg = cfg;
-      // charges in metres / coulombs
-      S.Q = cfg.q.map(([x, y, w]) => ({
-        x: x * p.sep, y: y * p.sep, q: w * p.qScale * 1e-9
-      }));
+      if (!S.cam) {
+        S.cam = Camera({ theta: -1.15, phi: 0.28, dist: 8.4, target: [0, 0, 0] });
+        S.cam.minDist = 1.6; S.cam.maxDist = 22;
+      }
+      // Charges in metres / coulombs. Once the student has dragged them the
+      // layout is THEIRS, so a restructure keeps the positions and only
+      // refreshes the magnitudes — changing the configuration resets them.
+      if (sameCfg && S.moved) {
+        S.Q.forEach((c, i) => { c.q = cfg.q[i][2] * p.qScale * 1e-9; });
+      } else {
+        S.moved = false;
+        S.Q = cfg.q.map(([x, y, w]) => ({
+          x: x * p.sep, y: y * p.sep, q: w * p.qScale * 1e-9
+        }));
+      }
       S.qTot = S.Q.reduce((a, c) => a + c.q, 0);
 
       // field and potential at a point, summed over every charge
@@ -131,6 +144,16 @@
       }
       S.fluxNum = flux * area / n;                  // ∮E·dA
       S.lat = lat;
+      // the dots drawn on the surface: fixed until something moves, so they
+      // are computed here rather than 420 field evaluations per frame
+      S.dots = [];
+      const nShow = Math.min(n, 300);
+      for (let i = 0; i < nShow; i++) {
+        const nh = lat[Math.floor(i * n / nShow)];
+        const px = p.gx + nh[0] * R, py = p.gy + nh[1] * R, pz = nh[2] * R;
+        const [ex, ey, ez] = S.Efield(px, py, pz);
+        S.dots.push({ p: [px, py, pz], d: ex * nh[0] + ey * nh[1] + ez * nh[2] });
+      }
 
       // what Gauss says it should be
       S.qEnc = 0; S.nEnc = 0;
@@ -145,252 +168,231 @@
       const scale = Math.max.apply(null, S.Q.map(c => Math.abs(c.q))) / EPS0 || 1;
       S.err = Math.abs(S.fluxNum - S.fluxGauss) / Math.max(Math.abs(S.fluxGauss), scale) * 100;
 
-      /* ---- field lines, traced by integrating dr/ds = Ê ---- */
-      /* ---- flux against radius, computed once rather than every frame ---- */
-      {
-        const rmax = 3.0, lat2 = sphereLattice(240);
-        S.curveMeas = []; S.curvePred = []; S.curveMax = 1;
-        for (let i = 1; i <= 70; i++) {
-          const R2 = rmax * i / 70;
-          let f = 0;
-          for (const [nx, ny, nz] of lat2) {
-            const [ex, ey, ez] = S.Efield(p.gx + nx * R2, p.gy + ny * R2, nz * R2);
-            f += ex * nx + ey * ny + ez * nz;
-          }
-          const fm = f * 2 * TAU * R2 * R2 / lat2.length;
-          let qe = 0;
-          S.Q.forEach(c => { if (Math.hypot(c.x - p.gx, c.y - p.gy) < R2) qe += c.q; });
-          S.curveMeas.push([R2, fm]); S.curvePred.push([R2, qe / EPS0]);
-          S.curveMax = Math.max(S.curveMax, Math.abs(fm), Math.abs(qe / EPS0));
-        }
-      }
+      /* ---- field lines, traced in 3D by integrating dr/ds = Ê ---- */
+      this.retrace(S);
 
-      S.lines = [];
-      if (p.lines) {
-        const nSeed = 16;
-        S.Q.forEach(c => {
-          if (c.q === 0) return;
-          const sgn = Math.sign(c.q);
-          const seeds = Math.max(6, Math.round(nSeed * Math.min(Math.abs(c.q) / 1e-9, 4)));
-          for (let i = 0; i < seeds; i++) {
-            const a = (i + 0.5) / seeds * TAU;
-            let x = c.x + Math.cos(a) * 0.045, y = c.y + Math.sin(a) * 0.045;
-            const path = [[x, y]];
-            const hstep = 0.022;
-            for (let k = 0; k < 900; k++) {
-              // RK2 along the normalised field, so the step is arc-length
-              const f = (xx, yy) => {
-                const [ex, ey] = S.Efield(xx, yy, 0);
-                const m = Math.hypot(ex, ey) || 1e-30;
-                return [sgn * ex / m, sgn * ey / m];
-              };
-              const [d1x, d1y] = f(x, y);
-              const [d2x, d2y] = f(x + d1x * hstep / 2, y + d1y * hstep / 2);
-              x += d2x * hstep; y += d2y * hstep;
-              path.push([x, y]);
-              if (Math.abs(x) > 5 || Math.abs(y) > 4) break;
-              // stop on arrival at another charge
-              let hit = false;
-              for (const o of S.Q) {
-                if (Math.hypot(x - o.x, y - o.y) < 0.05 && Math.sign(o.q) === -sgn) hit = true;
-              }
-              if (hit) break;
-            }
-            if (path.length > 3) S.lines.push({ path: path, q: c.q });
-          }
-        });
-      }
       S.t = 0;
+    },
+
+    /* Re-traced whenever the charges move. Seeds are spread over a small
+       sphere round each charge by the same Fibonacci lattice the flux uses, so
+       the lines leave evenly in three dimensions instead of in one plane. */
+    retrace(S) {
+      const p = S.p;
+      S.lines = [];
+      if (!p.lines) return;
+      S.Q.forEach((c, ci) => {
+        if (c.q === 0) return;
+        const sgn = Math.sign(c.q);
+        const n = clamp(Math.round(18 * Math.min(Math.abs(c.q) / 1e-9, 3)), 10, 42);
+        const seeds = sphereLattice(n);
+        seeds.forEach((d, si) => {
+          let x = c.x + d[0] * 0.055, y = c.y + d[1] * 0.055, z = d[2] * 0.055;
+          const path = [[x, y, z]];
+          const hstep = 0.05;
+          for (let k = 0; k < 340; k++) {
+            const f = (xx, yy, zz) => {
+              const [ex, ey, ez] = S.Efield(xx, yy, zz);
+              const m = Math.hypot(ex, ey, ez) || 1e-30;
+              return [sgn * ex / m, sgn * ey / m, sgn * ez / m];
+            };
+            const d1 = f(x, y, z);
+            const d2 = f(x + d1[0] * hstep / 2, y + d1[1] * hstep / 2, z + d1[2] * hstep / 2);
+            x += d2[0] * hstep; y += d2[1] * hstep; z += d2[2] * hstep;
+            path.push([x, y, z]);
+            if (Math.hypot(x, y, z) > 3.4) break;
+            let hit = false;
+            for (const o of S.Q) {
+              if (Math.hypot(x - o.x, y - o.y, z) < 0.08 && Math.sign(o.q) === -sgn) hit = true;
+            }
+            if (hit) break;
+          }
+          if (path.length > 3) S.lines.push({ path: path, q: c.q, seed: (si * 0.37 + ci * 0.11) % 1 });
+        });
+      });
     },
 
     step(S, dt) { S.t = (S.t || 0) + dt; },
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
-      const HDR = 62, FOOT = 26;
-      const y0 = HDR, y1 = H - FOOT, CH = y1 - y0;
-      const cx = W * 0.44, cy = y0 + CH * 0.50;
-      const SCALE = Math.min(W * 0.155, CH * 0.30);     // pixels per metre
-      const X = x => cx + x * SCALE, Y = y => cy - y * SCALE;
+      const cam = S.cam;
+      const F = R3.Frame(ctx, cam, { ambient: 0.30, floorZ: null });
+      const POS = '#FF8A96', NEG = '#7FAEF5', SURF = '#7CE0A8';
 
-      /* ---------------- equipotentials, by marching the grid ---------------- */
+      /* ---------------- the reference frame ----------------
+         Three faint axes and a ground grid, because a field in empty space
+         has nothing to give the eye a sense of depth. */
+      {
+        const ext = 3.2;
+        R3.plane(F, [-ext, -ext, -1.9], [2 * ext, 0, 0], [0, 2 * ext, 0], '#0C1322',
+                 { grid: 16, gridColour: '#33486F', gridAlpha: 0.16, edge: false });
+      }
+
+      /* ---------------- equipotentials, contoured on the z = 0 slice ----------------
+         In three dimensions an equipotential is a SURFACE, and drawing a nest
+         of them hides everything else. So the plane the charges lie in is
+         contoured instead, and the contours are laid in 3D at z = 0 — they
+         tilt with the camera, which is what shows they belong to a slice. */
       if (p.equi) {
-        const NG = 92;
-        const xmin = (0 - cx) / SCALE, xmax = (W - cx) / SCALE;
-        const ymin = (cy - y1) / SCALE, ymax = (cy - y0) / SCALE;
+        const NG = 76, ext = 2.6;
         const V = [];
         for (let j = 0; j <= NG; j++) {
           const row = [];
-          const yy = ymin + (ymax - ymin) * j / NG;
-          for (let i = 0; i <= NG; i++) {
-            row.push(S.Vpot(xmin + (xmax - xmin) * i / NG, yy, 0));
-          }
+          const yy = -ext + 2 * ext * j / NG;
+          for (let i = 0; i <= NG; i++) row.push(S.Vpot(-ext + 2 * ext * i / NG, yy, 0));
           V.push(row);
         }
         const levels = [];
         [1, 2, 4, 8, 16, 32].forEach(m => { levels.push(m * 3, -m * 3); });
-        ctx.lineWidth = 1;
         levels.forEach(lev => {
-          ctx.strokeStyle = g.alpha(lev > 0 ? '#FF8A96' : '#7FAEF5', .28);
-          ctx.beginPath();
+          const segs = [];
           for (let j = 0; j < NG; j++) for (let i = 0; i < NG; i++) {
-            const gx0 = xmin + (xmax - xmin) * i / NG, gx1 = xmin + (xmax - xmin) * (i + 1) / NG;
-            const gy0 = ymin + (ymax - ymin) * j / NG, gy1 = ymin + (ymax - ymin) * (j + 1) / NG;
+            const gx0 = -ext + 2 * ext * i / NG, gx1 = -ext + 2 * ext * (i + 1) / NG;
+            const gy0 = -ext + 2 * ext * j / NG, gy1 = -ext + 2 * ext * (j + 1) / NG;
             const v00 = V[j][i], v10 = V[j][i + 1], v01 = V[j + 1][i], v11 = V[j + 1][i + 1];
-            // marching squares, linear interpolation on each crossed edge
             const seg = [];
             const ed = (va, vb, xa, ya, xb, yb) => {
               if ((va - lev) * (vb - lev) >= 0) return;
               const t = (lev - va) / (vb - va);
-              seg.push([xa + (xb - xa) * t, ya + (yb - ya) * t]);
+              seg.push([xa + (xb - xa) * t, ya + (yb - ya) * t, 0]);
             };
             ed(v00, v10, gx0, gy0, gx1, gy0);
             ed(v10, v11, gx1, gy0, gx1, gy1);
             ed(v11, v01, gx1, gy1, gx0, gy1);
             ed(v01, v00, gx0, gy1, gx0, gy0);
-            if (seg.length >= 2) {
-              ctx.moveTo(X(seg[0][0]), Y(seg[0][1]));
-              ctx.lineTo(X(seg[1][0]), Y(seg[1][1]));
-            }
+            if (seg.length >= 2) segs.push([seg[0], seg[1]]);
           }
-          ctx.stroke();
+          segs.forEach(sg => R3.polyline(F, sg, lev > 0 ? POS : NEG,
+                                         { alpha: 0.30, width: 1.2 }));
         });
       }
 
-      /* ---------------- field-vector grid ---------------- */
+      /* ---------------- a lattice of field vectors in 3D ---------------- */
       if (p.grid) {
-        const stepPx = 34;
-        for (let px = stepPx / 2; px < W; px += stepPx) {
-          for (let py = y0 + stepPx / 2; py < y1; py += stepPx) {
-            const wx = (px - cx) / SCALE, wy = (cy - py) / SCALE;
-            const [ex, ey] = S.Efield(wx, wy, 0);
-            const m = Math.hypot(ex, ey);
-            if (m < 1e-3) continue;
-            const len = clamp(Math.log10(1 + m) * 4.2, 3, stepPx * 0.44);
-            const ux = ex / m, uy = -ey / m;
-            ctx.strokeStyle = g.alpha('#3DD6F5', clamp(Math.log10(1 + m) / 5, .12, .55));
-            ctx.lineWidth = 1.4; ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(px - ux * len, py - uy * len);
-            ctx.lineTo(px + ux * len, py + uy * len);
-            ctx.stroke();
-            ctx.fillStyle = g.alpha('#3DD6F5', clamp(Math.log10(1 + m) / 5, .12, .6));
-            ctx.beginPath();
-            ctx.arc(px + ux * len, py + uy * len, 1.6, 0, TAU); ctx.fill();
-          }
+        const n = 5, ext = 1.9;
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) for (let k = 0; k < n; k++) {
+          const x = -ext + 2 * ext * (i + 0.5) / n;
+          const y = -ext + 2 * ext * (j + 0.5) / n;
+          const z = -ext + 2 * ext * (k + 0.5) / n;
+          let tooClose = false;
+          S.Q.forEach(c => { if (Math.hypot(x - c.x, y - c.y, z) < 0.30) tooClose = true; });
+          if (tooClose) continue;
+          const [ex, ey, ez] = S.Efield(x, y, z);
+          const m = Math.hypot(ex, ey, ez);
+          if (m < 1e-2) continue;
+          const len = clamp(Math.log10(1 + m) * 0.055, 0.07, 0.30);
+          R3.arrow(F, [x, y, z],
+                   [x + ex / m * len, y + ey / m * len, z + ez / m * len],
+                   0.012, '#3DD6F5', { head: 0.055, shadow: false, ambient: 0.55 });
         }
       }
 
-      /* ---------------- field lines ---------------- */
+      /* ---------------- field lines, traced in three dimensions ---------------- */
       if (p.lines) {
         S.lines.forEach(ln => {
           const pos = ln.q > 0;
-          ctx.strokeStyle = g.alpha(pos ? '#FF8A96' : '#7FAEF5', .48);
-          ctx.lineWidth = 1.3;
-          ctx.beginPath();
-          ln.path.forEach((q, i) => {
-            const px = X(q[0]), py = Y(q[1]);
-            i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
-          });
-          ctx.stroke();
-          // one arrow per line, drifting outward so the direction animates
-          const u = (S.t * 0.12 + (ln.path.length % 7) / 7) % 1;
+          R3.polyline(F, ln.path, pos ? POS : NEG, { alpha: 0.55, width: 1.3 });
+          // one arrowhead per line, drifting outward so direction animates
+          const u = (S.t * 0.14 + ln.seed) % 1;
           const k = Math.floor(u * (ln.path.length - 2));
           const a = ln.path[k], b = ln.path[k + 1];
           if (a && b) {
-            const ang = Math.atan2(-(b[1] - a[1]), b[0] - a[0]);
-            ctx.fillStyle = g.alpha(pos ? '#FF8A96' : '#7FAEF5', .95);
-            ctx.save();
-            ctx.translate(X(a[0]), Y(a[1])); ctx.rotate(ang);
-            ctx.beginPath();
-            ctx.moveTo(5, 0); ctx.lineTo(-3, 3); ctx.lineTo(-3, -3);
-            ctx.closePath(); ctx.fill();
-            ctx.restore();
+            const qa = cam.project(a), qb = cam.project(b);
+            if (qa.ok && qb.ok) {
+              F.push(a, () => {
+                const ang = Math.atan2(qb.y - qa.y, qb.x - qa.x);
+                ctx.save();
+                ctx.translate(qa.x, qa.y); ctx.rotate(ang);
+                ctx.fillStyle = g.alpha(pos ? POS : NEG, .95);
+                ctx.beginPath();
+                ctx.moveTo(5, 0); ctx.lineTo(-3.2, 3.2); ctx.lineTo(-3.2, -3.2);
+                ctx.closePath(); ctx.fill();
+                ctx.restore();
+              });
+            }
           }
         });
       }
 
-      /* ---------------- the Gaussian surface ---------------- */
+      /* ---------------- the Gaussian surface, as a real sphere ---------------- */
       {
-        const gcx = X(p.gx), gcy = Y(p.gy), gr = p.gR * SCALE;
-        // the sphere, drawn as a sphere: a bright limb and a transparent body
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        const sg = ctx.createRadialGradient(gcx, gcy, gr * 0.62, gcx, gcy, gr);
-        sg.addColorStop(0, 'rgba(124,224,168,0)');
-        sg.addColorStop(0.82, 'rgba(124,224,168,.10)');
-        sg.addColorStop(1, 'rgba(124,224,168,.34)');
-        ctx.fillStyle = sg;
-        ctx.beginPath(); ctx.arc(gcx, gcy, gr, 0, TAU); ctx.fill();
-        ctx.restore();
-        ctx.strokeStyle = g.alpha('#7CE0A8', .95); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(gcx, gcy, gr, 0, TAU); ctx.stroke();
-        // the equator, so it reads as a sphere rather than a circle
-        ctx.strokeStyle = g.alpha('#7CE0A8', .38); ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.ellipse(gcx, gcy, gr, gr * 0.26, 0, 0, TAU); ctx.stroke();
-
-        // the sample points that the flux was actually integrated over
-        const shown = Math.min(S.lat.length, 260);
-        for (let i = 0; i < shown; i++) {
-          const [nx, ny, nz] = S.lat[Math.floor(i * S.lat.length / shown)];
-          const px = gcx + nx * gr, py = gcy - ny * gr;
-          const [ex, ey, ez] = S.Efield(p.gx + nx * p.gR, p.gy + ny * p.gR, nz * p.gR);
-          const dot = ex * nx + ey * ny + ez * nz;
-          const depth = 0.45 + 0.55 * (nz * 0.5 + 0.5);      // fade the far side
-          ctx.fillStyle = g.alpha(dot >= 0 ? '#FF8A96' : '#7FAEF5',
-                                  clamp(Math.abs(dot) / 40, .10, .85) * depth);
-          ctx.beginPath(); ctx.arc(px, py, 1.7, 0, TAU); ctx.fill();
+        const c = [p.gx, p.gy, 0];
+        R3.wireSphere(F, c, p.gR, SURF, { lat: 5, lon: 8, alpha: 0.22, limbAlpha: 0.85 });
+        // the sample points the flux was actually integrated over, each one
+        // coloured by the sign of E·n̂ there — red leaving, blue entering
+        S.dots.forEach(dot => {
+          const q = cam.project(dot.p);
+          if (!q.ok) return;
+          const col = dot.d >= 0 ? POS : NEG;
+          F.push(dot.p, () => {
+            ctx.fillStyle = g.alpha(col, clamp(Math.abs(dot.d) / 40, .16, .92));
+            ctx.beginPath(); ctx.arc(q.x, q.y, 2.0, 0, TAU); ctx.fill();
+          });
+        });
+        // a few outward normals, so "E·n̂" is a picture and not a symbol
+        for (let i = 0; i < 10; i++) {
+          const nHat = S.lat[Math.floor(i * S.lat.length / 10)];
+          const base = [c[0] + nHat[0] * p.gR, c[1] + nHat[1] * p.gR, c[2] + nHat[2] * p.gR];
+          const tip = [c[0] + nHat[0] * p.gR * 1.16, c[1] + nHat[1] * p.gR * 1.16,
+                       c[2] + nHat[2] * p.gR * 1.16];
+          R3.arrow(F, base, tip, p.gR * 0.016, SURF, { head: p.gR * 0.09, shadow: false });
         }
-        // a big sphere's caption would otherwise ride up into the header
-        const capY = gcy - gr - 10 > y0 + 8 ? gcy - gr - 10
-                   : gcy + gr + 12 < y1 - 8 ? gcy + gr + 12 : y0 + 10;
-        PA.lbl(ctx, clamp(gcx, 80, W - 80), capY,
-               'Gaussian sphere  R = ' + p.gR.toFixed(2) + ' m', '#7CE0A8', 'center', 9.5);
+        g.handle(cam.project(c).x, cam.project(c).y, 16, 'sphere');
+        R3.callout(F, [c[0], c[1], c[2] + p.gR], 0, -26,
+                   'Gaussian sphere  R = ' + p.gR.toFixed(2) + ' m', SURF);
       }
 
       /* ---------------- the charges ---------------- */
-      S.Q.forEach(c => {
-        const r = clamp(Math.abs(c.q) / 1e-9 * 5 + 7, 8, 18);
-        PA.charge(ctx, X(c.x), Y(c.y), r, c.q);
-        PA.lbl(ctx, X(c.x), Y(c.y) + r + 11,
-               (c.q * 1e9 >= 0 ? '+' : '') + (c.q * 1e9).toFixed(2) + ' nC',
-               c.q >= 0 ? '#FF8A96' : '#7FAEF5', 'center', 9);
+      S.Q.forEach((c, i) => {
+        const r = clamp(Math.abs(c.q) / 1e-9 * 0.020 + 0.055, 0.05, 0.14);
+        const pos = c.q >= 0;
+        // the glow first, behind the bead
+        const q = cam.project([c.x, c.y, 0]);
+        if (q.ok) {
+          F.push([c.x, c.y, 0], () => {
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            const rr = r * q.s * 3.6;
+            const gg = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, rr);
+            gg.addColorStop(0, g.alpha(pos ? POS : NEG, .30));
+            gg.addColorStop(1, g.alpha(pos ? POS : NEG, 0));
+            ctx.fillStyle = gg;
+            ctx.beginPath(); ctx.arc(q.x, q.y, rr, 0, TAU); ctx.fill();
+            ctx.restore();
+          }, 1e5);
+          g.handle(q.x, q.y, Math.max(12, r * q.s + 6), 'q' + i);
+        }
+        R3.sphere(F, [c.x, c.y, 0], r, pos ? POS : NEG, { shadow: false, rim: 0.85, sub: 0.5 });
+        // the sign, cut into the bead
+        F.push([c.x, c.y, 0], () => {
+          if (!q.ok) return;
+          const rp = r * q.s;
+          ctx.strokeStyle = 'rgba(255,255,255,.95)';
+          ctx.lineWidth = Math.max(1.6, rp * 0.24); ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(q.x - rp * 0.44, q.y); ctx.lineTo(q.x + rp * 0.44, q.y);
+          if (pos) { ctx.moveTo(q.x, q.y - rp * 0.44); ctx.lineTo(q.x, q.y + rp * 0.44); }
+          ctx.stroke();
+        }, -r * 1.02);
+        R3.callout(F, [c.x, c.y, 0], (c.x < 0 ? -1 : 1) * 30, 24,
+                   (c.q * 1e9 >= 0 ? '+' : '') + (c.q * 1e9).toFixed(2) + ' nC',
+                   pos ? POS : NEG);
       });
 
-      /* ---------------- live probe under the pointer ---------------- */
-      if (g.pointer) {
-        const wx = (g.pointer.x - cx) / SCALE, wy = (cy - g.pointer.y) / SCALE;
-        const [ex, ey] = S.Efield(wx, wy, 0);
-        const m = Math.hypot(ex, ey);
-        const v = S.Vpot(wx, wy, 0);
-        if (isFinite(m) && m < 1e9) {
-          const len = clamp(Math.log10(1 + m) * 9, 12, 64);
-          PA.vector(ctx, g.pointer.x, g.pointer.y,
-                    g.pointer.x + ex / m * len, g.pointer.y - ey / m * len, '#FFD36B',
-                    { width: 2.6 });
-          ctx.fillStyle = g.alpha('#0B1020', .9);
-          ctx.strokeStyle = g.alpha('#FFD36B', .5); ctx.lineWidth = 1;
-          const bw = 128, bh = 34;
-          const bx0 = clamp(g.pointer.x + 14, 4, W - bw - 4);
-          const by0 = clamp(g.pointer.y - bh - 12, y0, y1 - bh);
-          ctx.beginPath(); ctx.roundRect(bx0, by0, bw, bh, 5); ctx.fill(); ctx.stroke();
-          PA.lbl(ctx, bx0 + 7, by0 + 11, '|E| = ' + fmt(m, 3) + ' N/C', '#FFD36B', 'left', 9);
-          PA.lbl(ctx, bx0 + 7, by0 + 24, 'V = ' + fmt(v, 3) + ' V', '#C9D4EA', 'left', 9);
-        }
-      }
+      F.render();
 
-      /* ---------------- the measurement panel ---------------- */
+      /* ---------------- 2D instrument overlays ---------------- */
       {
         const bw = Math.min(W * 0.28, 246), bh = 92;
-        const bx0 = W - bw - 12, by0 = y1 - bh - 2;
+        const bx0 = W - bw - 12, by0 = H - bh - 30;
         ctx.fillStyle = g.alpha('#0B1020', .88);
-        ctx.strokeStyle = g.alpha('#7CE0A8', .45); ctx.lineWidth = 1;
+        ctx.strokeStyle = g.alpha(SURF, .45); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx0, by0, bw, bh, 8); ctx.fill(); ctx.stroke();
-        PA.lbl(ctx, bx0 + 10, by0 + 13, 'FLUX, MEASURED', '#7CE0A8', 'left', 9);
+        PA.lbl(ctx, bx0 + 10, by0 + 13, 'FLUX, MEASURED', SURF, 'left', 9);
         PA.lbl(ctx, bx0 + 10, by0 + 31, '∮E·dA = ' + fmt(S.fluxNum, 4) + ' N·m²/C',
                th.text, 'left', 10.5);
         PA.lbl(ctx, bx0 + 10, by0 + 48, 'q_enc/ε₀ = ' + fmt(S.fluxGauss, 4) + ' N·m²/C',
-               '#7CE0A8', 'left', 10.5);
+               SURF, 'left', 10.5);
         PA.lbl(ctx, bx0 + 10, by0 + 65,
                S.err < 2 ? 'agreement to ' + S.err.toFixed(2) + '% on ' + p.samples + ' points'
                          : 'sampling error ' + S.err.toFixed(1) + '% — add points',
@@ -400,19 +402,51 @@
                th['text-3'], 'left', 8.5);
       }
 
-      /* ---------------- header ---------------- */
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif'; ctx.fillStyle = th.text;
       ctx.fillText(S.cfg.name, 14, 8);
       ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
       ctx.fillText('total charge ' + (S.qTot * 1e9).toFixed(2) + ' nC   ·   enclosed ' +
-        (S.qEnc * 1e9).toFixed(2) + ' nC   ·   separation ' + p.sep.toFixed(2) + ' m', 14, 31);
+        (S.qEnc * 1e9).toFixed(2) + ' nC   ·   drag a charge or the sphere', 14, 31);
       ctx.fillStyle = S.err < 2 ? th.ok : th.warn;
       ctx.fillText(S.err < 2
         ? 'the integral agrees with q_enc/ε₀ — and nothing outside the surface contributes'
         : 'too few integration points for this geometry', 14, 45);
     },
 
+    /* the student positions the apparatus by hand: the charges and the
+       Gaussian surface are both things you take hold of and move */
+    onDrag(S, e) {
+      const cam = S.cam;
+      if (!cam) return;
+      // move in the z = 0 plane, by projecting the cursor ray onto it
+      const ray = (px, py) => {
+        const k = cam._k, w = cam._w, h = cam._h;
+        const cx = (px - w / 2) / k, cy = -(py - h / 2) / k;
+        const d = [cam.f[0] + cam.r[0] * cx + cam.u[0] * cy,
+                   cam.f[1] + cam.r[1] * cx + cam.u[1] * cy,
+                   cam.f[2] + cam.r[2] * cx + cam.u[2] * cy];
+        if (Math.abs(d[2]) < 1e-6) return null;
+        const t = -cam.eye[2] / d[2];
+        if (t < 0) return null;
+        return [cam.eye[0] + d[0] * t, cam.eye[1] + d[1] * t];
+      };
+      const w = ray(e.x, e.y);
+      if (!w) return;
+      if (e.id === 'sphere') {
+        S.p.gx = clamp(w[0], -2.5, 2.5);
+        S.p.gy = clamp(w[1], -2.0, 2.0);
+        this.setup(S);
+      } else if (e.id.charAt(0) === 'q') {
+        const i = +e.id.slice(1);
+        if (S.Q[i]) {
+          S.Q[i].x = clamp(w[0], -3, 3);
+          S.Q[i].y = clamp(w[1], -2.4, 2.4);
+          S.moved = true;
+          if (e.phase === 'end') this.retrace(S);
+        }
+      }
+    },
     plots: [
       { title: 'Along the axis — where E vanishes is NOT where V vanishes',
         legend: [{ c: '#3DD6F5', label: 'E_x (N/C)' }, { c: '#FFAE4C', label: 'V (V)' }],
