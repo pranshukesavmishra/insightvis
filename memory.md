@@ -145,6 +145,26 @@ plate standard and numerically correct — and still scored below the organic ro
 
 **Never present a round as finished because it verified clean.** Clean is the floor.
 
+### 2.12 A 3D bench must still read as the object it is
+Found by the client in a fullscreen screenshot of the rolling lab, 2026-09-14: the incline had become
+a flat sheet with balls hovering on it. The cause was arithmetic, not art — I had enlarged the drawn
+body radius for legibility, spaced four lanes at 2.7R, and the bench grew to **3.04 m wide against a
+2.84 m slope**. An incline wider than it is long stops being an incline.
+
+Rules that follow, for every 3D bench:
+- **Check the aspect ratio of the apparatus numerically, not by eye.** Print the dimensions. A ramp
+  is capped here at 60% of the slope length in width.
+- **A solid must have thickness on every visible side.** The wedge now carries full-depth triangular
+  side walls, a closed back face and a base slab. A skirt that does not scale with the bench reads as
+  paper the moment the bench grows.
+- **Anything that exists to show motion must face the viewer.** The spokes and reference mark that
+  make rolling distinguishable from sliding were drawn on the far end cap only, so they were never
+  once visible. Draw such markers on *both* caps, and mirror the phase on the near one or the mark
+  appears to run backwards.
+- **Check the sign of every vector against a worked case.** ω was drawn along −y; for motion
+  down-slope with the axis across the bench, ω = (n × v)/R points along **+y**. Verify on the flat
+  case: n = ẑ, v = +x̂, ẑ × x̂ = ŷ.
+
 ### 2.9 The agreed look: rich, volumetric, vivid, dense
 Asked directly on 2026-09-13, the client chose **all three** of rich 3D realism, vivid colour and
 more detail per figure, with no reference — my judgement. That is now the target, and `render.js`

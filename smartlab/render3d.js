@@ -209,20 +209,22 @@
         ctx.lineWidth = 1; ctx.stroke();
         // the face markings that make rotation visible — without them a
         // rolling body and a sliding one look identical
-        if (o.spokes && side === 1) {
+        if (o.spokes) {
           ctx.save();
           ctx.strokeStyle = rgba(mix(colour, '#05080F', 0.55), 0.8);
           ctx.lineWidth = Math.max(1, r * F.cam.project(p).s * 0.05);
           for (let k = 0; k < o.spokes; k++) {
-            const ang = k / o.spokes * TAU + (o.phase || 0);
+            const ang = k / o.spokes * TAU + (o.phase || 0) * (side === 1 ? 1 : -1);
             const d = add(scale(u, Math.cos(ang)), scale(v, Math.sin(ang)));
             const q0 = cam.project(add(p, scale(d, Math.max(rIn, r * 0.08))));
             const q1 = cam.project(add(p, scale(d, r * 0.96)));
             if (!q0.ok || !q1.ok) continue;
             ctx.beginPath(); ctx.moveTo(q0.x, q0.y); ctx.lineTo(q1.x, q1.y); ctx.stroke();
           }
-          // one bright reference mark, so a single revolution is countable
-          const ang = (o.phase || 0);
+          // one bright reference mark, so a single revolution is countable.
+          // The two caps are mirror images, so the near one must count the
+          // phase backwards or the mark appears to run the wrong way.
+          const ang = (o.phase || 0) * (side === 1 ? 1 : -1);
           const d = add(scale(u, Math.cos(ang)), scale(v, Math.sin(ang)));
           const qm = cam.project(add(p, scale(d, rIn > 0 ? (rIn + r) / 2 : r * 0.66)));
           if (qm.ok) {

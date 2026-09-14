@@ -76,7 +76,7 @@
       S.len = p.hRelease / Math.max(Math.sin(th), 1e-3);       // slope length, metres
       // R cancels out of a, v and mu_min alike, so the drawn radius is chosen
       // for legibility rather than realism — and the lab says so out loud.
-      S.R = Math.max(0.14, S.len * 0.085);
+      S.R = Math.max(0.10, S.len * 0.060);
       S.M = 1.0;                                               // and 1 kg — so the student
                                                                // can see they cancel
 
@@ -105,12 +105,12 @@
         const span = run + S.runout;
         const tgt = [(-run + S.runout) / 2, 0, rise * 0.34];
         if (!S.cam) {
-          S.cam = Camera({ theta: -2.12, phi: 0.33, dist: span * 1.14, target: tgt });
+          S.cam = Camera({ theta: -2.12, phi: 0.33, dist: span * 1.00, target: tgt });
           S.cam.minDist = 1.0; S.cam.maxDist = 20;
         } else {
           S.cam.target = tgt;
-          S.cam.home.dist = span * 1.14;
-          if (!S.camTouched) S.cam.dist = span * 1.14;
+          S.cam.home.dist = span * 1.00;
+          if (!S.camTouched) S.cam.dist = span * 1.00;
         }
       }
       S.tSim = 0; S.finished = 0; S.hold = 0;
@@ -184,38 +184,73 @@
          The incline is a real wedge: a ramp face, two side walls and a
          base, so it has thickness and casts a shadow like a solid. */
       const th0 = S.th, run = S.len * Math.cos(th0), rise = S.len * Math.sin(th0);
-      // four bodies run abreast, so the bench must be wide enough that they
-      // never intersect: one lane is 2.7 radii wide
-      const laneW = S.R * 2.7;
-      const halfW = Math.max(0.42, laneW * S.runs.length / 2 + S.R * 0.9);
+      // Four bodies run abreast, so the bench must be wide enough that they
+      // never intersect — but NOT so wide that it stops looking like a ramp.
+      // The width is capped at 60% of the slope length: an incline that is
+      // wider than it is long reads as a flat sheet with balls floating on it.
+      const laneRaw = S.R * 2.25;
+      const wantHalf = laneRaw * S.runs.length / 2 + S.R * 0.8;
+      const halfW = Math.min(wantHalf, S.len * 0.30);
+      const laneW = S.runs.length > 1
+        ? Math.min(laneRaw, (halfW - S.R * 0.8) * 2 / S.runs.length) : 0;
       const runout = S.runout * Math.cos(0);
 
       // floor
-      R3.plane(F, [-run - 0.20, -halfW - 0.30, 0], [run + runout + 0.8, 0, 0],
-               [0, 2 * halfW + 0.60, 0], '#1E2740',
-               { grid: 12, gridColour: '#4E6392', gridAlpha: 0.20, edge: false });
+      {
+        const fz = -Math.max(0.06, S.len * 0.045);
+        R3.plane(F, [-run - 0.45, -halfW - 0.55, fz], [run + runout + 1.2, 0, 0],
+                 [0, 2 * halfW + 1.10, 0], '#18202F',
+                 { grid: 12, gridColour: '#44577F', gridAlpha: 0.18, edge: false });
+      }
 
       // the ramp face itself
       const top = [-run, 0, rise], toe = [0, 0, 0];
       R3.plane(F, [-run, -halfW, rise], [run, 0, -rise], [0, 2 * halfW, 0], '#54658C',
                { grid: 10, gridColour: '#CBD9F5', gridAlpha: 0.22 });
-      // the two side walls, which is what gives the wedge its solidity
+      // The two triangular side walls, which is what makes this a solid wedge
+      // rather than a sheet. They run the FULL depth of the ramp — a thin skirt
+      // on a two-metre-wide bench reads as paper.
+      const base = -Math.max(0.06, S.len * 0.045);
       [-1, 1].forEach(sg => {
         const yy = sg * halfW;
-        F.push([-run / 2, yy, rise / 2], () => {
-          const q = [[-run, yy, rise], [0, yy, 0], [0, yy, -0.10], [-run, yy, -0.10]]
+        F.push([-run * 0.5, yy, rise * 0.4], () => {
+          const q = [[-run, yy, rise], [0, yy, 0], [0, yy, base], [-run, yy, base]]
             .map(pt => cam.project(pt));
           if (q.some(x => !x.ok)) return;
           ctx.fillStyle = F.shade('#2A3552', [0, sg, 0], { ambient: 0.34 });
           ctx.beginPath();
           q.forEach((x, k) => k ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
           ctx.closePath(); ctx.fill();
-          ctx.strokeStyle = 'rgba(159,180,222,.35)'; ctx.lineWidth = 1; ctx.stroke();
+          ctx.strokeStyle = 'rgba(159,180,222,.40)'; ctx.lineWidth = 1.2; ctx.stroke();
         });
+      });
+      // the back face under the release gate, so the wedge is closed
+      F.push([-run, 0, rise * 0.5], () => {
+        const q = [[-run, -halfW, rise], [-run, halfW, rise], [-run, halfW, base], [-run, -halfW, base]]
+          .map(pt => cam.project(pt));
+        if (q.some(x => !x.ok)) return;
+        ctx.fillStyle = F.shade('#232E48', [-1, 0, 0], { ambient: 0.30 });
+        ctx.beginPath();
+        q.forEach((x, k) => k ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = 'rgba(159,180,222,.35)'; ctx.lineWidth = 1.2; ctx.stroke();
       });
       // the flat run-out the bodies roll onto
       R3.plane(F, [0, -halfW, 0], [runout + 0.6, 0, 0], [0, 2 * halfW, 0], '#46557A',
                { grid: 7, gridColour: '#CBD9F5', gridAlpha: 0.20 });
+      [-1, 1].forEach(sg => {
+        const yy = sg * halfW;
+        F.push([(runout + 0.6) / 2, yy, base / 2], () => {
+          const q = [[0, yy, 0], [runout + 0.6, yy, 0], [runout + 0.6, yy, base], [0, yy, base]]
+            .map(pt => cam.project(pt));
+          if (q.some(x => !x.ok)) return;
+          ctx.fillStyle = F.shade('#2A3552', [0, sg, 0], { ambient: 0.34 });
+          ctx.beginPath();
+          q.forEach((x, k) => k ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+          ctx.closePath(); ctx.fill();
+          ctx.strokeStyle = 'rgba(159,180,222,.40)'; ctx.lineWidth = 1.2; ctx.stroke();
+        });
+      });
 
       /* ---------------- the release gate and the height ----------------
          Both are HANDLES: the gate sets the release height and the toe sets
@@ -223,7 +258,7 @@
          dial it in from the control deck. */
       R3.box(F, [-run - 0.05, 0, rise + 0.10], [0.06, 2 * halfW * 0.98, 0.20], '#8FA3C0',
              { shadow: false });
-      R3.label(F, [-run - 0.05, 0, rise + 0.28], 'release gate · drag', th['text-3'], { size: 9 });
+      R3.callout(F, [-run - 0.05, 0, rise + 0.14], -18, -16, 'release gate · drag', th['text-3']);
       {
         const qg = cam.project([-run - 0.05, 0, rise + 0.10]);
         if (qg.ok) g.handle(qg.x, qg.y, 18, 'gate');
@@ -246,11 +281,11 @@
         const arcPts = [];
         for (let i = 0; i <= 18; i++) {
           const a = th0 * i / 18;
-          arcPts.push([-0.55 * Math.cos(a), -halfW - 0.14, 0.55 * Math.sin(a)]);
+          arcPts.push([-0.55 * Math.cos(a), -halfW - 0.02, 0.55 * Math.sin(a)]);
         }
         R3.tube(F, arcPts, 0.012, '#3DD6F5', { round: false, shadow: false });
-        R3.callout(F, [-0.62 * Math.cos(th0 / 2), -halfW - 0.14, 0.62 * Math.sin(th0 / 2)],
-                   18, -8, 'θ = ' + p.theta.toFixed(1) + '°', '#3DD6F5');
+        R3.callout(F, [-0.62 * Math.cos(th0 / 2), -halfW - 0.02, 0.62 * Math.sin(th0 / 2)],
+                   -20, -6, 'θ = ' + p.theta.toFixed(1) + '°', '#3DD6F5');
       }
 
       /* ---------------- the bodies ---------------- */
@@ -323,8 +358,10 @@
         }
         // and the angular velocity, about the axis it actually turns on
         if (Math.abs(r.w) > 0.2) {
-          R3.arrow(F, [cen[0], lane - S.R * 1.5, cen[2]], [cen[0], lane - S.R * 2.4, cen[2]],
-                   ar * 0.8, '#B07CC6', { label: 'ω', head: S.R * 0.3 });
+          // omega = (n x v)/R, which for motion down-slope with the axis across
+          // the bench points along +y, not -y.
+          R3.arrow(F, [cen[0], lane + S.R * 1.5, cen[2]], [cen[0], lane + S.R * 2.6, cen[2]],
+                   ar * 0.8, '#B07CC6', { label: 'ω', head: S.R * 0.34 });
         }
       }
 
