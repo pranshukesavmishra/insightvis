@@ -1,0 +1,26 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const p = await b.newPage({viewport:{width:1400,height:1000}});
+p.on('pageerror', e=>console.log('PAGEERROR:', e.message));
+await p.goto('file://'+process.cwd()+'/_preview.html');
+await p.waitForTimeout(1600);
+await p.evaluate(()=>document.querySelector('.navbtn[data-sim="waves"]').click());
+await p.waitForTimeout(1200);
+console.log(await p.evaluate(()=>{
+  const def=window.__REG.find(r=>r.id==='waves'), S=window.__S, out=[];
+  const set=o=>{Object.assign(S.p,o); def.setup(S); for(let k=0;k<40;k++) def.step(S,0.016);};
+  const gain=()=>S.amp/(S.driveA||1);
+  set({setup:'string',L:1,tension:80,mu:0.004,loss:8,drive:70.711,driveOn:true});
+  out.push('string f1 = '+S.f1mode.toFixed(4)+' Hz (expect 70.7107)  gain '+gain().toFixed(1)+'x');
+  set({drive:141.42}); out.push('  n=2 at 141.42 Hz  gain '+gain().toFixed(1)+'x');
+  set({drive:100});    out.push('  off at 100 Hz     gain '+gain().toFixed(2)+'x');
+  set({setup:'pipe',pipeL:0.5,pipeEnd:'closed',endCorr:false,drive:171.5});
+  out.push('closed pipe f1 = '+S.f1mode.toFixed(3)+' (expect 171.500)  gain '+gain().toFixed(1)+'x');
+  set({drive:343});   out.push('  2f1 = 343 Hz MUST NOT resonate  gain '+gain().toFixed(2)+'x');
+  set({drive:514.5}); out.push('  3f1 = 514.5 Hz must resonate    gain '+gain().toFixed(1)+'x');
+  set({setup:'pipe',pipeEnd:'open',endCorr:false,drive:343});
+  out.push('open pipe f1 = '+S.f1mode.toFixed(3)+' (expect 343.000)  gain '+gain().toFixed(1)+'x');
+  set({drive:686});   out.push('  2f1 = 686 Hz must resonate      gain '+gain().toFixed(1)+'x');
+  return out.join('\n');
+}));
+await b.close();

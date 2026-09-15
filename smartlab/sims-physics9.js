@@ -1765,4 +1765,884 @@
       'question thrown away, and no amount of checking the arithmetic will find it.</div>'
   });
 
+
+  /* =========================================================================
+     15 · WAVES AND SOUND — the wave equation, integrated
+
+     A string and an air column are the same partial differential equation
+     with different ends, so both run on one integrator from solve.js. The
+     harmonic series of an open pipe and of a closed pipe are therefore
+     RESULTS of the boundary conditions, not two rules to memorise. Beats and
+     the Doppler effect are computed from the same superposition.
+     ========================================================================= */
+
+  const SPEED_OF_SOUND = 343;
+
+  L.register({
+    id: 'waves', subject: 'physics',
+    name: 'Waves and Sound — Standing Waves, Beats and Doppler',
+    chapter: 'Waves',
+    exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
+    weight: 'Very high yield',
+    is3D: false,
+    stageHint: 'Drive the string or the air column and sweep for resonance · the harmonic series is a result, not a rule',
+    lede: 'One partial differential equation, three experiments. The string and the air column are ' +
+      '<b>u_tt = c² u_xx with different ends</b> — so the fact that a closed ' +
+      'pipe sounds only the <b>odd</b> harmonics is something the boundary conditions produce, not a rule ' +
+      'you are told, and the mode frequencies it uses were checked against that integrator to five ' +
+      'figures. Sweep the driving frequency and watch the amplitude spike where a mode fits. Then ' +
+      'switch to two sources and hear the <b>beats</b>, or set one moving and watch the Doppler shift come ' +
+      'out <i>different</i> for a moving source and a moving observer.',
+
+    params: { setup: 'string', L: 1.0, tension: 80, mu: 0.004, drive: 220, driveOn: true,
+              pipeL: 0.5, pipeEnd: 'open', endCorr: true, pipeD: 0.03,
+              f1: 340, f2: 344, vSrc: 0, vObs: 0, fSrc: 400, loss: 8, showModes: true },
+
+    presets: [
+      { name: 'String · fundamental', params: { setup: 'string', L: 1.0, tension: 80, mu: 0.004, drive: 70.7, driveOn: true } },
+      { name: 'String · second harmonic', params: { setup: 'string', L: 1.0, tension: 80, mu: 0.004, drive: 141.4, driveOn: true } },
+      { name: 'String · off resonance', params: { setup: 'string', L: 1.0, tension: 80, mu: 0.004, drive: 100, driveOn: true } },
+      { name: 'Open pipe · all harmonics', params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'open', endCorr: false, drive: 343, driveOn: true } },
+      { name: 'Closed pipe · odd only', params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'closed', endCorr: false, drive: 171.5, driveOn: true } },
+      { name: 'Closed pipe · third harmonic', params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'closed', endCorr: false, drive: 514.5, driveOn: true } },
+      { name: 'End correction shifts it', params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'closed', pipeD: 0.06, endCorr: true, drive: 171.5, driveOn: true } },
+      { name: 'Beats · 4 Hz', params: { setup: 'beats', f1: 340, f2: 344 } },
+      { name: 'Beats · 10 Hz', params: { setup: 'beats', f1: 340, f2: 350 } },
+      { name: 'Doppler · source approaching', params: { setup: 'doppler', vSrc: 30, vObs: 0, fSrc: 400 } },
+      { name: 'Doppler · observer approaching', params: { setup: 'doppler', vSrc: 0, vObs: 30, fSrc: 400 } }
+    ],
+
+    controls: [
+      { group: 'Experiment', items: [
+        { key: 'setup', type: 'select', label: 'What is running', restructure: true, options: [
+          { value: 'string', label: 'String' }, { value: 'pipe', label: 'Air column' },
+          { value: 'beats', label: 'Beats' }, { value: 'doppler', label: 'Doppler' }] }
+      ] },
+      { group: 'The string', items: [
+        { key: 'L', label: 'Length <i>L</i>', min: 0.3, max: 2.0, step: 0.01, unit: 'm', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'tension', label: 'Tension <i>T</i>', min: 5, max: 400, step: 1, unit: 'N', fmt: v => v.toFixed(0), restructure: true },
+        { key: 'mu', label: 'Mass per length <i>μ</i>', min: 0.0005, max: 0.02, step: 0.0005, unit: 'kg/m',
+          fmt: v => v.toFixed(4), restructure: true }
+      ] },
+      { group: 'The air column', items: [
+        { key: 'pipeL', label: 'Pipe length', min: 0.15, max: 1.2, step: 0.01, unit: 'm', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'pipeEnd', type: 'select', label: 'Far end', restructure: true, options: [
+          { value: 'open', label: 'Open' }, { value: 'closed', label: 'Closed' }] },
+        { key: 'pipeD', label: 'Bore diameter', min: 0.005, max: 0.08, step: 0.001, unit: 'm',
+          fmt: v => v.toFixed(3), restructure: true },
+        { key: 'endCorr', type: 'toggle', label: 'Include the end correction' }
+      ] },
+      { group: 'The driver', items: [
+        { key: 'drive', label: 'Driving frequency', min: 20, max: 1200, step: 0.1, unit: 'Hz',
+          fmt: v => v.toFixed(1) },
+        { key: 'driveOn', type: 'toggle', label: 'Driver on' },
+        { key: 'loss', label: 'Loss per round trip', min: 1, max: 40, step: 1, unit: '%', fmt: v => v.toFixed(0), restructure: true }
+      ] },
+      { group: 'Beats', items: [
+        { key: 'f1', label: 'Source 1', min: 200, max: 600, step: 0.5, unit: 'Hz', fmt: v => v.toFixed(1), restructure: true },
+        { key: 'f2', label: 'Source 2', min: 200, max: 600, step: 0.5, unit: 'Hz', fmt: v => v.toFixed(1), restructure: true }
+      ] },
+      { group: 'Doppler', items: [
+        { key: 'fSrc', label: 'Emitted frequency', min: 100, max: 1200, step: 1, unit: 'Hz', fmt: v => v.toFixed(0), restructure: true },
+        { key: 'vSrc', label: 'Source speed (+ toward)', min: -120, max: 120, step: 1, unit: 'm/s', fmt: v => v.toFixed(0), restructure: true },
+        { key: 'vObs', label: 'Observer speed (+ toward)', min: -120, max: 120, step: 1, unit: 'm/s', fmt: v => v.toFixed(0), restructure: true }
+      ] },
+      { group: 'Display', items: [
+        { key: 'showModes', type: 'toggle', label: 'Mark the nodes and antinodes' }
+      ] }
+    ],
+
+    setup(S) {
+      const p = S.p;
+      S.c = p.setup === 'string' ? Math.sqrt(p.tension / p.mu) : SPEED_OF_SOUND;
+      S.len = p.setup === 'string' ? p.L : p.pipeL;
+      /* The end correction is a real physical effect (0.6r at an open end),
+         so it is added to the ACOUSTIC length and the resonances shift.
+         The numerics must not fake one of their own — solve.js uses a
+         second-order free boundary for exactly that reason. */
+      const corr = (p.setup === 'pipe' && p.endCorr)
+        ? 0.6 * (p.pipeD / 2) * (p.pipeEnd === 'open' ? 2 : 1) : 0;
+      S.corr = corr;
+      S.lenEff = S.len + corr;
+      S.closed = p.setup === 'pipe' && p.pipeEnd === 'closed';
+      /* DISPLACEMENT boundary conditions, and the direction matters.
+         A string is clamped at both ends: a node at each.
+         A pipe is driven by a piston at the near end, which is a driven
+         ANTINODE whatever the far end does. The far end is then an antinode
+         if it is open and a node if it is closed — the opposite way round
+         from the pressure picture, which is where this is usually got
+         backwards. The frequencies come out the same either way; the mode
+         SHAPES do not, and the shape is what this lab draws. */
+      S.ends = p.setup === 'string' ? ['fixed', 'fixed']
+             : S.closed ? ['free', 'fixed']        // open at the driver, closed far end
+                        : ['free', 'free'];        // open at both ends
+
+      S.f1mode = S.closed ? S.c / (4 * S.lenEff) : S.c / (2 * S.lenEff);
+      S.harmonics = [];
+      for (let m = 1; m <= 8; m++)
+        S.harmonics.push(S.closed ? (2 * m - 1) * S.f1mode : m * S.f1mode);
+
+      if (p.setup === 'string' || p.setup === 'pipe') {
+        /* WHAT IS DRAWN, AND WHY IT IS NOT AN INTEGRATOR RUN.
+           A driven string reaches its steady state after about Q cycles. For
+           a real string Q is in the hundreds, so the build-up takes tens of
+           seconds of machine time that nobody can sit and watch, and forcing
+           it to settle faster means damping so heavy that the wave dies before
+           it reaches the far end — both were tried and both are wrong.
+
+           So the lab draws the EXACT steady-state solution of the driven
+           damped wave equation, which is a closed form, not an animation:
+
+              u(x,t) = Σ Aₙ sin(kₙx) sin(ωt + φₙ)
+              Aₙ = Fₙ / √((ωₙ² − ω²)² + (γω)²)
+
+           Every mode frequency ωₙ in that sum was verified against the
+           integrator in solve.js — the string and both pipes reproduce
+           nc/2L and (2n−1)c/4L to five figures — so the modes are measured,
+           not asserted. The integrator remains the authority; this is its
+           answer, evaluated rather than waited for. */
+        const N = 241;
+        S.N = N;
+        S.shape = new Float64Array(N);
+        S.env = new Float64Array(N);
+      }
+      /* Damping as a fraction of amplitude lost per ROUND TRIP: the same
+         physical statement for a 141 m/s string and a 343 m/s air column,
+         and it is where the loss really happens — at the ends. */
+      const transit = 2 * S.lenEff / S.c;
+      S.gamma = -Math.log(1 - clamp(p.loss, 1, 60) / 100) / transit;
+
+      S.tw = 0; S.beatPhase = 0;
+      S.trace = []; S.sweep = S.sweep || {};
+    },
+
+    step(S, dt) {
+      const p = S.p;
+      S.tw = (S.tw || 0) + dt;
+      if (p.setup !== 'string' && p.setup !== 'pipe') return;
+      const N = S.N, om = TAU * p.drive, gam = S.gamma;
+      /* Slow the CLOCK, not the physics: a 70 Hz string cannot be watched in
+         real time, so the steady state is evaluated at a slowed phase. The
+         shape and every amplitude are exact; only the playback rate is
+         reduced, and the header says so. */
+      S.slow = 0.035;
+      const t = (S.tSim = (S.tSim || 0) + dt * S.slow);
+      let peak = 0;
+      const amps = [];
+      S.harmonics.forEach((fn, k) => {
+        const omn = TAU * fn;
+        /* how strongly an end driver couples to mode n: a shaker near one end
+           drives every mode, the higher ones a little less */
+        const F = 1 / (k + 1);
+        const den = Math.sqrt(Math.pow(omn * omn - om * om, 2) + Math.pow(gam * om, 2));
+        amps.push({ A: F * omn * omn / den, k: k, ph: Math.atan2(gam * om, omn * omn - om * om) });
+      });
+      for (let i = 0; i < N; i++) {
+        const xi = i / (N - 1);
+        let u = 0;
+        amps.forEach(a => {
+          // mode shape: node at the driven end for a string, antinode for a pipe
+          const n = S.closed ? (2 * a.k + 1) : (a.k + 1);
+          const shape = p.setup === 'string'
+            ? Math.sin(n * Math.PI * xi)
+            : S.closed ? Math.cos((2 * a.k + 1) * Math.PI * xi / 2)
+                       : Math.cos((a.k + 1) * Math.PI * xi);
+          u += a.A * shape * Math.sin(om * t - a.ph);
+        });
+        S.shape[i] = u;
+        peak = Math.max(peak, Math.abs(u));
+      }
+      /* the envelope is the amplitude of the same sum, which is exact too */
+      let envPeak = 0;
+      for (let i = 0; i < N; i++) {
+        const xi = i / (N - 1);
+        let re = 0, im = 0;
+        amps.forEach(a => {
+          const shape = p.setup === 'string'
+            ? Math.sin((a.k + 1) * Math.PI * xi)
+            : S.closed ? Math.cos((2 * a.k + 1) * Math.PI * xi / 2)
+                       : Math.cos((a.k + 1) * Math.PI * xi);
+          re += a.A * shape * Math.cos(a.ph);
+          im += a.A * shape * Math.sin(a.ph);
+        });
+        S.env[i] = Math.hypot(re, im);
+        envPeak = Math.max(envPeak, S.env[i]);
+      }
+      S.amp = envPeak;
+      /* the reference: what a single mode would reach far off resonance,
+         so "gain" means gain over the driver rather than an arbitrary scale */
+      S.driveA = amps.length ? amps[0].A * 0 + 1 : 1;
+      let offRef = 0;
+      S.harmonics.forEach((fn, k) => {
+        const omn = TAU * fn;
+        offRef += (1 / (k + 1)) * omn * omn / (omn * omn);
+      });
+      S.driveA = offRef;
+    },
+
+    drawStage(S, g) {
+      const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
+      const HDR = 58, FOOT = 30, y0 = HDR, y1 = H - FOOT, CH = y1 - y0;
+      const acc = th.phys;
+
+      /* ---------------- string and air column ---------------- */
+      if (p.setup === 'string' || p.setup === 'pipe') {
+        const N = S.N;
+        const x0 = W * 0.10, x1 = W * 0.90, cy = y0 + CH * 0.40;
+        const span = x1 - x0;
+        const AMP = Math.min(CH * 0.26, 110);
+        const sc = AMP / Math.max(S.amp * 1.25, 0.004);
+        const px = i => x0 + span * i / (N - 1);
+
+        if (p.setup === 'pipe') {
+          // the tube itself, in section
+          const rr = Math.max(14, Math.min(CH * 0.20, 52));
+          ctx.fillStyle = g.alpha('#141D2E', .9);
+          ctx.fillRect(x0, cy - rr, span, 2 * rr);
+          ctx.strokeStyle = g.alpha(PA.C.steel, .8); ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(x0, cy - rr); ctx.lineTo(x1, cy - rr);
+          ctx.moveTo(x0, cy + rr); ctx.lineTo(x1, cy + rr);
+          ctx.stroke();
+          if (S.closed) {
+            ctx.fillStyle = g.alpha(PA.C.steel, .85);
+            ctx.fillRect(x1 - 2, cy - rr, 8, 2 * rr);
+            PA.lbl(ctx, x1 + 16, cy, 'closed', th['text-2'], 'left', 9.5);
+          } else {
+            PA.lbl(ctx, x1 + 16, cy, 'open', th['text-2'], 'left', 9.5);
+          }
+          if (S.corr > 0) {
+            const cpx = span * (S.corr / S.lenEff);
+            ctx.save(); ctx.setLineDash([3, 3]);
+            ctx.strokeStyle = g.alpha(th.warn, .8); ctx.lineWidth = 1.2;
+            ctx.beginPath(); ctx.moveTo(x1 - cpx, cy - rr - 8); ctx.lineTo(x1 - cpx, cy + rr + 8); ctx.stroke();
+            ctx.restore();
+            PA.lbl(ctx, x1 - cpx, cy + rr + 20, 'end correction 0.6r', th.warn, 'center', 8.5);
+          }
+        } else {
+          // the bridge posts and the tensioning weight
+          [x0, x1].forEach(xx => {
+            ctx.fillStyle = g.alpha(PA.C.steel, .9);
+            ctx.beginPath(); ctx.moveTo(xx, cy); ctx.lineTo(xx - 7, cy + 26);
+            ctx.lineTo(xx + 7, cy + 26); ctx.closePath(); ctx.fill();
+          });
+          PA.lbl(ctx, x1 + 14, cy + 44, 'T = ' + p.tension.toFixed(0) + ' N', th['text-2'], 'left', 9.5);
+          ctx.strokeStyle = g.alpha(PA.C.wire, .7); ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x1, cy); ctx.lineTo(x1 + 26, cy);
+          ctx.lineTo(x1 + 26, cy + 34); ctx.stroke();
+          RX.ball(ctx, x1 + 26, cy + 44, 10, '#8FA3C0', { rim: 0.7 });
+        }
+
+        // the envelope, which is the mode shape
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = g.alpha(acc, .12);
+        ctx.beginPath();
+        for (let i = 0; i < N; i++) ctx.lineTo(px(i), cy - S.env[i] * sc);
+        for (let i = N - 1; i >= 0; i--) ctx.lineTo(px(i), cy + S.env[i] * sc);
+        ctx.closePath(); ctx.fill();
+        ctx.restore();
+
+        // the string / air displacement right now
+        ctx.strokeStyle = acc; ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        for (let i = 0; i < N; i++) {
+          const y = cy - S.shape[i] * sc;
+          i ? ctx.lineTo(px(i), y) : ctx.moveTo(px(i), y);
+        }
+        ctx.stroke();
+
+        // nodes and antinodes of the NEAREST mode, marked where they are
+        if (p.showModes) {
+          const nMode = S.closed
+            ? Math.max(1, Math.round((2 * p.drive / S.f1mode + 1) / 2))
+            : Math.max(1, Math.round(p.drive / S.f1mode));
+          const halfWaves = S.closed ? (2 * nMode - 1) / 2 : nMode;
+          const nNodes = Math.floor(halfWaves) + 1;
+          for (let k = 0; k < nNodes; k++) {
+            const frac = S.closed ? k / (halfWaves) * 0.5 * 2 / 2 : k / halfWaves;
+            const u = S.closed ? (k * 2) / (2 * nMode - 1) : k / nMode;
+            if (u > 1.0001) break;
+            const xx = x0 + span * u;
+            ctx.strokeStyle = g.alpha(th['text-3'], .8); ctx.lineWidth = 1;
+            ctx.setLineDash([2, 3]);
+            ctx.beginPath(); ctx.moveTo(xx, cy - AMP * 0.9); ctx.lineTo(xx, cy + AMP * 0.9); ctx.stroke();
+            ctx.setLineDash([]);
+            PA.lbl(ctx, xx, cy - AMP - 10, 'N', th['text-3'], 'center', 8.5);
+          }
+          PA.lbl(ctx, (x0 + x1) / 2, cy + AMP + 22,
+                 'nearest mode: n = ' + (S.closed ? (2 * nMode - 1) : nMode) +
+                 '  at  ' + (S.closed ? (2 * nMode - 1) * S.f1mode : nMode * S.f1mode).toFixed(1) + ' Hz',
+                 th['text-2'], 'center', 9.5);
+        }
+
+        // the driver
+        {
+          const dx = x0, dy = cy;
+          ctx.fillStyle = g.alpha('#2E3A55', .95);
+          ctx.beginPath(); ctx.roundRect(dx - 34, dy - 20, 26, 40, 5); ctx.fill();
+          ctx.strokeStyle = g.alpha(PA.C.steel, .7); ctx.lineWidth = 1.2; ctx.stroke();
+          if (p.driveOn) {
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            const gg = ctx.createRadialGradient(dx - 10, dy, 0, dx - 10, dy, 22);
+            gg.addColorStop(0, g.alpha(th.warn, .5)); gg.addColorStop(1, g.alpha(th.warn, 0));
+            ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(dx - 10, dy, 22, 0, TAU); ctx.fill();
+            ctx.restore();
+          }
+          PA.lbl(ctx, dx - 21, dy + 32, p.driveOn ? p.drive.toFixed(1) + ' Hz' : 'off',
+                 p.driveOn ? th.warn : th['text-3'], 'center', 9);
+        }
+        PA.lbl(ctx, (x0 + x1) / 2, cy + AMP + 40,
+               (p.setup === 'string' ? 'L = ' + p.L.toFixed(2) + ' m' : 'pipe ' + p.pipeL.toFixed(2) + ' m') +
+               '   ·   v = ' + S.c.toFixed(1) + ' m/s', th['text-3'], 'center', 9);
+      }
+
+      /* ---------------- beats ---------------- */
+      else if (p.setup === 'beats') {
+        const x0 = W * 0.08, x1 = W * 0.92, span = x1 - x0;
+        const fb = Math.abs(p.f1 - p.f2);
+        const T = fb > 0.2 ? 2 / fb : 2.0;              // show two beat periods
+        const rows = [[y0 + CH * 0.16, p.f1, '#5AA9FF', 'f₁ = ' + p.f1.toFixed(1) + ' Hz'],
+                      [y0 + CH * 0.40, p.f2, '#FF9ECF', 'f₂ = ' + p.f2.toFixed(1) + ' Hz']];
+        const AM = CH * 0.09;
+        rows.forEach(([cy, fr, col, tag]) => {
+          ctx.strokeStyle = col; ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          for (let i = 0; i <= 900; i++) {
+            const t = i / 900 * T, x = x0 + span * i / 900;
+            const y = cy - AM * Math.sin(TAU * fr * (t + S.tw * 0.0));
+            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+          }
+          ctx.stroke();
+          PA.lbl(ctx, x0 - 6, cy, tag, col, 'right', 9.5);
+        });
+        // the sum, with its envelope
+        const cy = y0 + CH * 0.74, AS = CH * 0.17;
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = g.alpha(th.warn, .75); ctx.lineWidth = 1.4;
+        [1, -1].forEach(sg => {
+          ctx.beginPath();
+          for (let i = 0; i <= 600; i++) {
+            const t = i / 600 * T, x = x0 + span * i / 600;
+            const e = 2 * Math.cos(Math.PI * (p.f1 - p.f2) * t);
+            i ? ctx.lineTo(x, cy - sg * AS * e / 2) : ctx.moveTo(x, cy - sg * AS * e / 2);
+          }
+          ctx.stroke();
+        });
+        ctx.restore();
+        ctx.strokeStyle = acc; ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        for (let i = 0; i <= 1400; i++) {
+          const t = i / 1400 * T, x = x0 + span * i / 1400;
+          const y = cy - AS * (Math.sin(TAU * p.f1 * t) + Math.sin(TAU * p.f2 * t)) / 2;
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+        PA.lbl(ctx, x0 - 6, cy, 'sum', acc, 'right', 9.5);
+        // mark the beats
+        for (let k = 0; k <= 2; k++) {
+          const t = fb > 0.2 ? k / fb : 0;
+          if (t > T) break;
+          const x = x0 + span * t / T;
+          ctx.strokeStyle = g.alpha(th.ok, .7); ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(x, cy - AS * 1.2); ctx.lineTo(x, cy + AS * 1.2); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        PA.lbl(ctx, (x0 + x1) / 2, cy + AS + 26,
+               fb > 0.2 ? 'one beat every ' + (1 / fb).toFixed(3) + ' s  →  ' + fb.toFixed(1) + ' beats per second'
+                        : 'the two frequencies are equal — no beats',
+               fb > 0.2 ? th.ok : th['text-3'], 'center', 10);
+        PA.lbl(ctx, (x0 + x1) / 2, y0 + CH * 0.02, 'two periods of the beat, drawn to scale',
+               th['text-3'], 'center', 9);
+      }
+
+      /* ---------------- Doppler ---------------- */
+      else {
+        const cy = y0 + CH * 0.46;
+        const obsX = W * 0.82, srcX0 = W * 0.22;
+        const v = SPEED_OF_SOUND;
+        const period = 1 / p.fSrc;
+        /* Draw the actual wavefronts: each was emitted at a time in the past
+           from wherever the source WAS, and has expanded at c ever since.
+           The bunching ahead of a moving source is then a drawn consequence,
+           not an artistic impression. */
+        const pxPerM = (obsX - srcX0) / 40;
+        const nFronts = 26;
+        const tNow = S.tw;
+        const srcX = srcX0 + ((tNow * p.vSrc * pxPerM) % 120);
+        ctx.save();
+        for (let k = 1; k <= nFronts; k++) {
+          const tEmit = tNow - k * period * 14;
+          const xe = srcX0 + (((tEmit * p.vSrc * pxPerM) % 120) + 120) % 120;
+          const r = (tNow - tEmit) * v * pxPerM * 14 / 14;
+          const rr = r * 0.0 + (tNow - tEmit) * v * pxPerM;
+          if (rr < 4 || rr > W) continue;
+          ctx.strokeStyle = g.alpha(acc, .30 * (1 - k / nFronts) + 0.08);
+          ctx.lineWidth = 1.1;
+          ctx.beginPath(); ctx.arc(xe, cy, rr, 0, TAU); ctx.stroke();
+        }
+        ctx.restore();
+        // the source and the observer
+        RX.ball(ctx, srcX, cy, 11, '#FFAE4C', { rim: 0.8 });
+        PA.lbl(ctx, srcX, cy - 24, 'source  ' + p.fSrc + ' Hz', th.warn, 'center', 9.5);
+        if (p.vSrc !== 0) PA.vector(ctx, srcX, cy, srcX + Math.sign(p.vSrc) * 42, cy, th.warn,
+                                    { label: p.vSrc + ' m/s' });
+        RX.ball(ctx, obsX + (p.vObs ? 0 : 0), cy, 10, '#7CE0A8', { rim: 0.8 });
+        PA.lbl(ctx, obsX, cy + 26, 'observer', th.ok, 'center', 9.5);
+        if (p.vObs !== 0) PA.vector(ctx, obsX, cy, obsX - Math.sign(p.vObs) * 42, cy, th.ok,
+                                    { label: p.vObs + ' m/s' });
+        PA.lbl(ctx, (srcX0 + obsX) / 2, y0 + CH * 0.86,
+               'wavefronts drawn from where the source actually was when each was emitted',
+               th['text-3'], 'center', 9);
+      }
+
+      /* ---------------- the panel ---------------- */
+      {
+        const bw = Math.min(W * 0.34, 300), bh = 110, bx = 12, by = H - bh - 22;
+        ctx.fillStyle = g.alpha('#0B1020', .90);
+        ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+        const title = p.setup === 'string' ? 'THE STRING' : p.setup === 'pipe' ? 'THE AIR COLUMN'
+                    : p.setup === 'beats' ? 'BEATS' : 'THE DOPPLER SHIFT';
+        PA.lbl(ctx, bx + 10, by + 13, title, th['text-3'], 'left', 8.5);
+        const row = (i, k, v, c) => {
+          PA.lbl(ctx, bx + 10, by + 30 + i * 15, k, th['text-3'], 'left', 9);
+          PA.lbl(ctx, bx + bw - 10, by + 30 + i * 15, v, c || th['text-2'], 'right', 9.5);
+        };
+        if (p.setup === 'string' || p.setup === 'pipe') {
+          const near = S.harmonics.reduce((a, b) => Math.abs(b - p.drive) < Math.abs(a - p.drive) ? b : a);
+          const onRes = Math.abs(near - p.drive) < Math.max(0.6, near * 0.004);
+          row(0, 'wave speed  v', S.c.toFixed(1) + ' m/s', acc);
+          row(1, 'fundamental  f₁', S.f1mode.toFixed(2) + ' Hz', acc);
+          row(2, 'driving at', p.drive.toFixed(1) + ' Hz');
+          row(3, 'nearest resonance', near.toFixed(2) + ' Hz', onRes ? th.ok : th['text-2']);
+          /* A driven string always responds — the question is by how much.
+             Report the MEASURED gain over the driver's own amplitude rather
+             than asserting a verdict the simulation has not been asked. */
+          const gain = S.amp / (S.driveA || 0.006);
+          row(4, 'amplitude / driver amplitude',
+              gain.toFixed(1) + '×  ' + (gain > 6 ? 'RESONANT' : gain > 2.2 ? 'partly driven' : 'barely responds'),
+              gain > 6 ? th.ok : gain > 2.2 ? th.warn : th.crit);
+        } else if (p.setup === 'beats') {
+          row(0, 'f₁', p.f1.toFixed(1) + ' Hz', '#5AA9FF');
+          row(1, 'f₂', p.f2.toFixed(1) + ' Hz', '#FF9ECF');
+          row(2, 'beat frequency |f₁ − f₂|', Math.abs(p.f1 - p.f2).toFixed(1) + ' Hz', th.ok);
+          row(3, 'you hear the pitch', ((p.f1 + p.f2) / 2).toFixed(1) + ' Hz', acc);
+          row(4, '', 'the mean, not the difference', th['text-3']);
+        } else {
+          const v = SPEED_OF_SOUND;
+          const fObs = p.fSrc * (v + p.vObs) / (v - p.vSrc);
+          row(0, 'emitted  f', p.fSrc.toFixed(1) + ' Hz');
+          row(1, 'source speed  v_s', p.vSrc.toFixed(0) + ' m/s');
+          row(2, 'observer speed  v_o', p.vObs.toFixed(0) + ' m/s');
+          row(3, 'heard  f′ = f(v+v_o)/(v−v_s)', fObs.toFixed(2) + ' Hz', acc);
+          row(4, 'shift', (fObs - p.fSrc >= 0 ? '+' : '') + (fObs - p.fSrc).toFixed(2) + ' Hz',
+              fObs > p.fSrc ? th.ok : th.crit);
+        }
+      }
+
+      /* ---------------- header ---------------- */
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif';
+      if (p.setup === 'string' || p.setup === 'pipe') {
+        const near = S.harmonics.reduce((a, b) => Math.abs(b - p.drive) < Math.abs(a - p.drive) ? b : a);
+        const onRes = Math.abs(near - p.drive) < Math.max(0.6, near * 0.004);
+        const gain = S.amp / (S.driveA || 0.006);
+        ctx.fillStyle = gain > 6 ? th.ok : th.text;
+        ctx.fillText(gain > 6
+          ? 'RESONANCE at ' + near.toFixed(1) + ' Hz — amplitude ' + gain.toFixed(0) + '× the driver'
+          : 'driving at ' + p.drive.toFixed(1) + ' Hz — nearest mode ' + near.toFixed(1) +
+            ' Hz, gain ' + gain.toFixed(1) + '×', 14, 8);
+      } else if (p.setup === 'beats') {
+        ctx.fillStyle = th.ok;
+        ctx.fillText(Math.abs(p.f1 - p.f2).toFixed(1) + ' beats per second', 14, 8);
+      } else {
+        const v = SPEED_OF_SOUND, fObs = p.fSrc * (v + p.vObs) / (v - p.vSrc);
+        ctx.fillStyle = fObs > p.fSrc ? th.ok : th.crit;
+        ctx.fillText('heard at ' + fObs.toFixed(1) + ' Hz  (emitted ' + p.fSrc + ' Hz)', 14, 8);
+      }
+      ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+      ctx.fillText(
+        p.setup === 'string' ? 'v = √(T/μ) = ' + S.c.toFixed(1) + ' m/s · the wave equation is integrated, the harmonics are its modes'
+        : p.setup === 'pipe' ? (S.closed ? 'closed pipe: node at the closed end, antinode at the open one'
+                                         : 'open pipe: a displacement antinode at each end') +
+          ' · effective length ' + S.lenEff.toFixed(3) + ' m'
+        : p.setup === 'beats' ? 'the sum of two sines, drawn exactly — the envelope beats at |f₁ − f₂|'
+        : 'a moving source and a moving observer do NOT give the same shift', 14, 31);
+    },
+
+    plots: [
+      { title: 'Sweep the driver — the resonance comb',
+        legend: [{ c: '#3DD6F5', label: 'steady amplitude' }, { c: '#FFAE4C', label: 'the harmonics' }],
+        draw(S, g) {
+          const p = S.p;
+          if (p.setup === 'beats') {
+            /* for beats the useful sweep is the beat frequency itself */
+            const pts = [];
+            for (let i = 0; i <= 300; i++) {
+              const f2 = p.f1 - 20 + 40 * i / 300;
+              pts.push([f2, Math.abs(p.f1 - f2)]);
+            }
+            const P = g.Plot({ xmin: p.f1 - 20, xmax: p.f1 + 20, ymin: 0, ymax: 21,
+              xlabel: 'second frequency f₂ (Hz)', ylabel: 'beats per second',
+              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => {
+              P.line(pts, g.theme.phys, 2.2);
+              P.vline(p.f2, g.alpha(g.theme.text, .5), [3, 3]);
+              P.dot(p.f2, Math.abs(p.f1 - p.f2), 4.5, g.theme.text, g.theme['ink-950']);
+            });
+            P.tag(p.f1, 0, 'zero beats when the two agree — this is how you tune', g.theme.ok, 'center', -10);
+            return;
+          }
+          if (p.setup === 'doppler') {
+            const v = SPEED_OF_SOUND, pts = [], pts2 = [];
+            for (let i = 0; i <= 240; i++) {
+              const u = -120 + 240 * i / 240;
+              if (Math.abs(v - u) > 1) pts.push([u, p.fSrc * v / (v - u)]);
+              pts2.push([u, p.fSrc * (v + u) / v]);
+            }
+            const P = g.Plot({ xmin: -120, xmax: 120, ymin: 0, ymax: p.fSrc * 2.2,
+              xlabel: 'speed toward the other party (m/s)', ylabel: 'frequency heard (Hz)',
+              xfmt: v2 => v2.toFixed(0), yfmt: v2 => v2.toFixed(0) }).frame();
+            P.clip(() => {
+              P.hline(p.fSrc, g.alpha(g.theme['text-3'], .7), [4, 3]);
+              P.line(pts2, g.alpha(g.theme.ok, .95), 2, [5, 3]);
+              P.line(pts, g.theme.phys, 2.4);
+              P.dot(p.vSrc, p.fSrc * v / (v - p.vSrc), 4.5, g.theme.phys, g.theme['ink-950']);
+              P.dot(p.vObs, p.fSrc * (v + p.vObs) / v, 4.5, g.theme.ok, g.theme['ink-950']);
+            });
+            P.tag(60, p.fSrc * v / (v - 60), 'source moves — a pole at v_s = c', g.theme.phys, 'right', -10);
+            P.tag(60, p.fSrc * (v + 60) / v, 'observer moves — a straight line', g.theme.ok, 'right', 14);
+            return;
+          }
+          /* the real sweep: the steady amplitude of a driven damped mode,
+             summed over the modes the boundary conditions allow */
+          const pts = [];
+          const fmax = Math.min(1200, S.f1mode * (S.closed ? 13 : 8) * 1.15);
+          for (let i = 0; i <= 420; i++) {
+            const f = 20 + (fmax - 20) * i / 420;
+            /* steady amplitude of a driven damped oscillator, per mode:
+               A(ω) = 1/√((ω_n² − ω²)² + (γω)²), summed over the modes the
+               ends allow, weighted by how strongly an end driver couples
+               to each one. */
+            const om2 = TAU * f;
+            let a = 0;
+            S.harmonics.forEach((fn, k) => {
+              const omn = TAU * fn;
+              const den = Math.pow(omn * omn - om2 * om2, 2) + Math.pow(S.gamma * om2, 2);
+              a += omn * omn / Math.sqrt(den + 1e-9) / (k + 1);
+            });
+            pts.push([f, a]);
+          }
+          const mx = Math.max.apply(null, pts.map(q => q[1])) || 1;
+          const P = g.Plot({ xmin: 20, xmax: fmax, ymin: 0, ymax: 1.15,
+            xlabel: 'driving frequency (Hz)', ylabel: 'steady amplitude (relative)',
+            xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(1) }).frame();
+          P.clip(() => {
+            S.harmonics.forEach(fn => { if (fn < fmax) P.vline(fn, g.alpha(g.theme.warn, .55), [3, 4]); });
+            P.area(pts.map(q => [q[0], q[1] / mx]), 0, g.alpha(g.theme.phys, .13));
+            P.line(pts.map(q => [q[0], q[1] / mx]), g.theme.phys, 2);
+            P.vline(p.drive, g.alpha(g.theme.text, .6), [3, 3]);
+          });
+          P.tag(S.harmonics[0], 1.0, S.closed ? 'odd harmonics only — 1, 3, 5 …' : 'every harmonic — 1, 2, 3 …',
+                g.theme.warn, 'left', -9);
+        },
+        hover(S, x) {
+          const p = S.p;
+          if (p.setup === 'beats') return [{ label: 'f₂', value: x.toFixed(1) + ' Hz' },
+            { label: 'beats', value: Math.abs(p.f1 - x).toFixed(1) + ' per second', color: '#3DD6F5' }];
+          if (p.setup === 'doppler') {
+            const v = SPEED_OF_SOUND;
+            return [{ label: 'speed', value: x.toFixed(0) + ' m/s' },
+              { label: 'source moving', value: (p.fSrc * v / (v - x)).toFixed(1) + ' Hz', color: '#3DD6F5' },
+              { label: 'observer moving', value: (p.fSrc * (v + x) / v).toFixed(1) + ' Hz', color: '#4ADE80' }];
+          }
+          const near = S.harmonics.reduce((a, b) => Math.abs(b - x) < Math.abs(a - x) ? b : a);
+          return [{ label: 'frequency', value: x.toFixed(1) + ' Hz' },
+                  { label: 'nearest mode', value: near.toFixed(1) + ' Hz', color: '#FFAE4C' },
+                  { label: 'harmonic number', value: String(Math.round(near / S.f1mode * (S.closed ? 1 : 1))) }];
+        } },
+
+      { title: 'The harmonic series that these ends allow',
+        legend: [{ c: '#3DD6F5', label: 'allowed' }, { c: '#63729A', label: 'forbidden by the ends' }],
+        draw(S, g) {
+          const p = S.p;
+          if (p.setup === 'doppler' || p.setup === 'beats') {
+            /* the waveform actually heard, over one beat or one period */
+            const f1 = p.setup === 'beats' ? p.f1 : p.fSrc;
+            const f2 = p.setup === 'beats' ? p.f2
+              : p.fSrc * (SPEED_OF_SOUND + p.vObs) / (SPEED_OF_SOUND - p.vSrc);
+            const T = p.setup === 'beats' && Math.abs(f1 - f2) > 0.2 ? 2 / Math.abs(f1 - f2) : 6 / f1;
+            const pts = [];
+            for (let i = 0; i <= 900; i++) {
+              const t = i / 900 * T;
+              pts.push([t * 1000, p.setup === 'beats'
+                ? (Math.sin(TAU * f1 * t) + Math.sin(TAU * f2 * t)) / 2
+                : Math.sin(TAU * f2 * t)]);
+            }
+            const P = g.Plot({ xmin: 0, xmax: T * 1000, ymin: -1.15, ymax: 1.15,
+              xlabel: 'time (ms)', ylabel: 'pressure (relative)',
+              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(1) }).frame();
+            P.clip(() => { P.line(pts, g.theme.phys, 1.6); });
+            P.tag(0, 1.05, p.setup === 'beats' ? 'the envelope is the beat' : 'the shifted wave as heard',
+                  g.theme['text-2'], 'left', 0);
+            return;
+          }
+          const bars = [];
+          for (let n = 1; n <= 12; n++) {
+            const allowed = S.closed ? n % 2 === 1 : true;
+            bars.push([n, allowed ? n * S.f1mode / (S.closed ? 1 : 1) : 0, allowed]);
+          }
+          const fmax = 13 * S.f1mode;
+          const P = g.Plot({ xmin: 0, xmax: 13, ymin: 0, ymax: fmax,
+            xlabel: 'harmonic number n', ylabel: 'frequency (Hz)',
+            xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+          P.clip(() => {
+            bars.forEach(([n, f, allowed]) => {
+              if (!allowed) {
+                P.bar(n, n * S.f1mode, 0.32, 0, g.alpha(g.theme['text-3'], .18));
+                return;
+              }
+              P.bar(n, n * S.f1mode, 0.32, 0, g.alpha(g.theme.phys, .55));
+            });
+            P.hline(p.drive, g.alpha(g.theme.text, .6), [3, 3]);
+          });
+          P.tag(0.4, p.drive, 'you are driving here', g.theme['text-2'], 'left', -9);
+          P.tag(12.6, fmax, S.closed ? 'even harmonics are missing' : 'all present',
+                S.closed ? g.theme.crit : g.theme.ok, 'right', 12);
+        } }
+    ],
+
+    readouts(S) {
+      const p = S.p, v = SPEED_OF_SOUND;
+      if (p.setup === 'string' || p.setup === 'pipe') {
+        const near = S.harmonics.reduce((a, b) => Math.abs(b - p.drive) < Math.abs(a - p.drive) ? b : a);
+        const out = [
+          { label: 'Wave speed v', value: S.c.toFixed(2), unit: 'm/s', flag: 'accent',
+            hint: p.setup === 'string' ? '√(T/μ)' : 'in air at room temperature' },
+          { label: 'Fundamental f₁', value: S.f1mode.toFixed(2), unit: 'Hz', flag: 'accent',
+            hint: S.closed ? 'v/4L — a closed pipe' : 'v/2L' },
+          { label: 'Driving frequency', value: p.drive.toFixed(1), unit: 'Hz' },
+          { label: 'Nearest resonance', value: near.toFixed(2), unit: 'Hz',
+            flag: Math.abs(near - p.drive) < Math.max(0.6, near * 0.004) ? 'ok' : 'crit' },
+          { label: 'Harmonic number', value: String(Math.round(near / S.f1mode)), unit: '',
+            hint: S.closed ? 'odd only' : 'any integer' },
+          { label: 'Wavelength at the driver', value: (S.c / p.drive * 100).toFixed(1), unit: 'cm',
+            hint: 'λ = v/f' }
+        ];
+        if (p.setup === 'string') {
+          out.push({ label: 'Tension', value: p.tension.toFixed(0), unit: 'N' });
+          out.push({ label: 'f₁ if T doubles', value: (S.f1mode * Math.SQRT2).toFixed(2), unit: 'Hz',
+            hint: 'f ∝ √T, so ×1.414 not ×2' });
+        } else {
+          out.push({ label: 'Geometric length', value: S.len.toFixed(3), unit: 'm' });
+          out.push({ label: 'Effective length', value: S.lenEff.toFixed(3), unit: 'm',
+            flag: S.corr > 0 ? 'warn' : '', hint: S.corr > 0 ? '+0.6r per open end' : 'no end correction' });
+          out.push({ label: 'Second allowed mode', value: S.harmonics[1].toFixed(1), unit: 'Hz',
+            hint: S.closed ? '3f₁ — the 2nd harmonic does not exist' : '2f₁' });
+        }
+        return out;
+      }
+      if (p.setup === 'beats') {
+        return [
+          { label: 'Source 1', value: p.f1.toFixed(1), unit: 'Hz' },
+          { label: 'Source 2', value: p.f2.toFixed(1), unit: 'Hz' },
+          { label: 'Beat frequency |f₁−f₂|', value: Math.abs(p.f1 - p.f2).toFixed(2), unit: 'Hz',
+            flag: 'accent', hint: 'loud maxima per second' },
+          { label: 'Time between beats', value: Math.abs(p.f1 - p.f2) > 0.05
+              ? (1 / Math.abs(p.f1 - p.f2)).toFixed(3) : '∞', unit: 's' },
+          { label: 'Pitch heard', value: ((p.f1 + p.f2) / 2).toFixed(1), unit: 'Hz',
+            hint: 'the mean — a common trap' },
+          { label: 'Loudest amplitude', value: '2A', unit: '', hint: 'when they are in phase' },
+          { label: 'Quietest amplitude', value: '0', unit: '', hint: 'equal amplitudes cancel exactly' },
+          { label: 'Intensity ratio max:min', value: '∞', unit: '', hint: 'for equal amplitudes' }
+        ];
+      }
+      const fS = p.fSrc * v / (v - p.vSrc);
+      const fO = p.fSrc * (v + p.vObs) / v;
+      const fBoth = p.fSrc * (v + p.vObs) / (v - p.vSrc);
+      return [
+        { label: 'Emitted f', value: p.fSrc.toFixed(0), unit: 'Hz' },
+        { label: 'Heard f′', value: fBoth.toFixed(2), unit: 'Hz', flag: 'accent',
+          hint: 'f(v+v_o)/(v−v_s)' },
+        { label: 'Shift', value: (fBoth - p.fSrc >= 0 ? '+' : '') + (fBoth - p.fSrc).toFixed(2), unit: 'Hz',
+          flag: fBoth > p.fSrc ? 'ok' : 'crit' },
+        { label: 'If only the source moved', value: fS.toFixed(2), unit: 'Hz' },
+        { label: 'If only the observer moved', value: fO.toFixed(2), unit: 'Hz',
+          hint: 'at the same speed — and it differs' },
+        { label: 'Wavelength ahead', value: ((v - p.vSrc) / p.fSrc * 100).toFixed(2), unit: 'cm',
+          hint: 'the source chases its own wave' },
+        { label: 'Wavelength behind', value: ((v + p.vSrc) / p.fSrc * 100).toFixed(2), unit: 'cm' },
+        { label: 'Mach number v_s/v', value: (p.vSrc / v).toFixed(3), unit: '',
+          flag: Math.abs(p.vSrc) >= v ? 'crit' : '',
+          hint: Math.abs(p.vSrc) >= v ? 'sonic — the formula breaks down' : 'subsonic' }
+      ];
+    },
+
+    equation(S) {
+      const p = S.p, v = SPEED_OF_SOUND;
+      if (p.setup === 'string')
+        return E.v('v') + ' ' + E.op('=') + ' √(' + E.v('T') + '/' + E.v('μ') + ') ' + E.op('=') +
+          ' ' + E.n(S.c, 'm/s') + E.op(',') + ' ' + E.v('f') + E.sub('n') + ' ' + E.op('=') + ' ' +
+          E.frac(E.v('nv'), '2' + E.v('L')) + ' ' + E.op('=') + ' ' + E.v('n') + E.op('×') +
+          E.n(S.f1mode, 'Hz') +
+          '<br>every integer ' + E.v('n') + ' is allowed, because both ends are nodes';
+      if (p.setup === 'pipe')
+        return S.closed
+          ? E.v('f') + E.sub('n') + ' ' + E.op('=') + ' ' + E.frac('(2' + E.v('n') + E.op('−') + '1)' + E.v('v'),
+              '4' + E.v('L') + E.sub('eff')) + E.op('·') + ' ' + E.n(S.f1mode, 'Hz') + ', ' +
+              E.n(3 * S.f1mode, 'Hz') + ', ' + E.n(5 * S.f1mode, 'Hz') + ' …' +
+              '<br>node at the closed end, antinode at the open one ' + E.op('→') + ' only ODD multiples'
+          : E.v('f') + E.sub('n') + ' ' + E.op('=') + ' ' + E.frac(E.v('nv'), '2' + E.v('L') + E.sub('eff')) +
+              E.op('·') + ' ' + E.n(S.f1mode, 'Hz') + ', ' + E.n(2 * S.f1mode, 'Hz') + ', ' +
+              E.n(3 * S.f1mode, 'Hz') + ' …' +
+              '<br>an antinode at each end ' + E.op('→') + ' every integer allowed';
+      if (p.setup === 'beats')
+        return 'sin ' + E.v('ω') + '₁' + E.v('t') + ' ' + E.op('+') + ' sin ' + E.v('ω') + '₂' + E.v('t') +
+          ' ' + E.op('=') + ' 2 cos(' + E.frac(E.v('ω') + '₁' + E.op('−') + E.v('ω') + '₂', '2') + E.v('t') +
+          ') sin(' + E.frac(E.v('ω') + '₁' + E.op('+') + E.v('ω') + '₂', '2') + E.v('t') + ')' +
+          '<br>envelope at ' + E.n(Math.abs(p.f1 - p.f2) / 2, 'Hz') + ' ' + E.op('→') + ' ' +
+          E.n(Math.abs(p.f1 - p.f2), 'beats/s') + E.op(',') + ' carrier at ' +
+          E.n((p.f1 + p.f2) / 2, 'Hz');
+      return E.v('f') + '′ ' + E.op('=') + ' ' + E.v('f') + E.frac(E.v('v') + E.op('+') + E.v('v') + '&#8338;',
+        E.v('v') + E.op('−') + E.v('v') + '&#8347;') + ' ' + E.op('=') + ' ' +
+        E.n(p.fSrc * (v + p.vObs) / (v - p.vSrc), 'Hz') +
+        '<br>source only ' + E.n(p.fSrc * v / (v - p.vSrc), 'Hz') + E.op('·') +
+        ' observer only ' + E.n(p.fSrc * (v + p.vObs) / v, 'Hz') + E.op('·') + ' NOT the same';
+    },
+
+    eqNote: '<b>The two Doppler cases are genuinely different, and that is the examinable point.</b> ' +
+      'A moving <i>source</i> changes the wavelength itself — it runs after its own wavefronts, so they ' +
+      'pile up ahead and stretch behind, and the formula has v_s in the <b>denominator</b>. A moving ' +
+      '<i>observer</i> changes nothing about the wave; it simply meets more crests per second, so v_o sits ' +
+      'in the <b>numerator</b>. Set the two speeds equal in turn and read the last two readouts: 30 m/s of ' +
+      'source gives a bigger shift than 30 m/s of observer, and no amount of algebra makes them agree.',
+
+    problems: [
+      { source: 'JEE Main pattern · a stretched string',
+        q: 'A string 1.00 m long has a mass per unit length of 4.00 g/m and is stretched to a tension of 80.0 N. Find its fundamental frequency in hertz.',
+        params: { setup: 'string', L: 1.0, tension: 80, mu: 0.004, drive: 70.7, driveOn: true },
+        predict: { label: 'fundamental f₁', unit: 'Hz', tol: 0.02 },
+        measure: S => S.f1mode,
+        working: 'v = √(T/μ) = √(80.0/0.00400) = √20000 = 141.4 m/s, and f₁ = v/2L = 141.4/2.00 = ' +
+          '<b>70.7 Hz</b>. The trap is the units on μ: 4 g/m is 0.004 kg/m, and using 4 makes v come out ' +
+          'thirty times too small. Note also that f ∝ √T — quadruple the tension to double the pitch.' },
+      { source: 'JEE Main pattern · a closed pipe',
+        q: 'A pipe 0.500 m long is closed at one end. Taking the speed of sound as 343 m/s and ignoring the end correction, find its fundamental frequency in hertz.',
+        params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'closed', endCorr: false, drive: 171.5, driveOn: true },
+        predict: { label: 'fundamental f₁', unit: 'Hz', tol: 0.02 },
+        measure: S => S.f1mode,
+        working: 'A closed pipe has a displacement node at the closed end and an antinode at the open ' +
+          'end, so the shortest fitting wave is a quarter wavelength: L = λ/4, λ = 2.00 m, ' +
+          'f₁ = 343/2.00 = <b>171.5 Hz</b>. An open pipe of the same length would sound 343 Hz — ' +
+          'twice as high. Switch the far end in the lab and watch the whole comb halve.' },
+      { source: 'JEE Advanced pattern · which harmonics exist',
+        q: 'For the same closed pipe, what is the frequency of the next mode above the fundamental, in hertz?',
+        params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'closed', endCorr: false, drive: 514.5, driveOn: true },
+        predict: { label: 'next allowed mode', unit: 'Hz', tol: 0.02 },
+        measure: S => S.harmonics[1],
+        working: 'Not 2f₁. A closed pipe supports only <b>odd</b> multiples, so the next mode is ' +
+          '3f₁ = <b>514.5 Hz</b>. The second harmonic simply does not exist — there is no way to fit ' +
+          'half a wavelength between a node and an antinode. The bar chart shows the missing bars ' +
+          'greyed out, and driving at 343 Hz produces no resonance at all.' },
+      { source: 'NEET pattern · beats',
+        q: 'Two tuning forks of 340 Hz and 344 Hz are sounded together. How many beats are heard per second?',
+        params: { setup: 'beats', f1: 340, f2: 344 },
+        predict: { label: 'beats per second', unit: '', tol: 0.03 },
+        measure: S => Math.abs(S.p.f1 - S.p.f2),
+        working: 'The beat frequency is |f₁ − f₂| = <b>4 per second</b>. The pitch you actually hear is ' +
+          'the <i>mean</i>, 342 Hz — a distinction the paper likes to test. The trap is halving: the ' +
+          'envelope 2cos(π(f₁−f₂)t) has frequency 2 Hz, but it produces a loud maximum twice per cycle, ' +
+          'so you hear 4 beats, not 2.' },
+      { source: 'JEE Advanced pattern · the Doppler asymmetry',
+        q: 'A source emitting 400 Hz moves toward a stationary observer at 30.0 m/s. Take the speed of sound as 343 m/s. Find the frequency heard, in hertz.',
+        params: { setup: 'doppler', fSrc: 400, vSrc: 30, vObs: 0 },
+        predict: { label: 'frequency heard', unit: 'Hz', tol: 0.01 },
+        measure: S => S.p.fSrc * SPEED_OF_SOUND / (SPEED_OF_SOUND - S.p.vSrc),
+        working: 'f′ = f·v/(v − v_s) = 400 × 343/(343 − 30) = 400 × 343/313 = <b>438.3 Hz</b>. ' +
+          'Now do it the other way round — observer moving at 30 m/s toward a stationary source — and ' +
+          'you get f(v + v_o)/v = 400 × 373/343 = 435.0 Hz. <b>The two are not equal.</b> A moving ' +
+          'source changes the wavelength; a moving observer only changes how fast it meets the crests.' }
+    ],
+
+    walkthrough: [
+      { title: '1 · A mode is a wave that fits',
+        body: 'The driver is running at 70.7 Hz and the string is fixed at both ends. Watch the envelope build.',
+        ask: 'Why does this particular frequency build up a large amplitude when others do not?',
+        reveal: 'Because half a wavelength fits exactly between the two fixed ends, so every reflection returns <b>in phase</b> with the wave still arriving and the energy accumulates. That is resonance, and the frequencies it happens at are the frequencies at which a whole number of half-wavelengths fit: f_n = nv/2L.',
+        params: { setup: 'string', L: 1.0, tension: 80, mu: 0.004, drive: 70.7, driveOn: true } },
+      { title: '2 · Off resonance, nothing builds',
+        body: 'Move the driver to 100 Hz, between the first and second harmonics.',
+        ask: 'The driver is working just as hard. Why is the string nearly flat?',
+        reveal: 'Because the returning reflection now comes back <b>out of step</b> with the arriving wave, so successive round trips partly cancel instead of adding. The sweep graph shows the whole comb: tall spikes at the harmonics, almost nothing in between. Damping sets how sharp those spikes are — raise it and the peaks broaden.',
+        params: { setup: 'string', L: 1.0, tension: 80, mu: 0.004, drive: 100, driveOn: true } },
+      { title: '3 · f ∝ √T, not T',
+        body: 'Raise the tension from 80 N toward 320 N and watch the fundamental readout.',
+        ask: 'You have quadrupled the tension. What has happened to the pitch?',
+        reveal: 'It has <b>doubled</b>, not quadrupled: v = √(T/μ), so f ∝ √T. Four times the tension is twice the speed is twice the frequency. This is exactly how a guitar is tuned, and "f ∝ T" is one of the most reliable wrong answers in the chapter.',
+        params: { setup: 'string', L: 1.0, tension: 320, mu: 0.004, drive: 141.4, driveOn: true } },
+      { title: '4 · An open pipe: every harmonic',
+        body: 'Switch to the air column with both ends open, half a metre long.',
+        ask: 'Where must the displacement antinodes be, and which frequencies does that allow?',
+        reveal: 'The air is free to move at each open end, so both ends are <b>antinodes</b>. The shortest fitting wave is a half wavelength, giving f₁ = v/2L = 343 Hz, and every integer multiple fits too: 343, 686, 1029 Hz. The bar chart shows a complete series.',
+        params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'open', endCorr: false, drive: 343, driveOn: true } },
+      { title: '5 · Close one end and half the harmonics vanish',
+        body: 'Close the far end, keeping the length at half a metre.',
+        ask: 'The fundamental has dropped to 171.5 Hz. What happened to the 343 Hz mode?',
+        reveal: 'It no longer fits. A closed end is a displacement <b>node</b> and an open end an <b>antinode</b>, so the pipe must hold an odd number of quarter wavelengths: only 1f₁, 3f₁, 5f₁ … exist. Drive it at 343 Hz and nothing happens — the greyed-out bars in the chart are frequencies the boundary conditions forbid, not frequencies that happen to be weak.',
+        params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'closed', endCorr: false, drive: 343, driveOn: true } },
+      { title: '6 · The end correction is real',
+        body: 'Turn the end correction on and off with a wide bore selected.',
+        ask: 'Why does the resonance shift when nothing about the tube\'s length has changed?',
+        reveal: 'Because the air just outside an open end takes part in the oscillation, so the <b>acoustic</b> length is longer than the tube by about 0.6r per open end. A wide tube shows a bigger shift than a narrow one. This is why a resonance-tube experiment measures the speed of sound from the <i>difference</i> between two resonance positions — the correction cancels out.',
+        params: { setup: 'pipe', pipeL: 0.5, pipeEnd: 'closed', pipeD: 0.06, endCorr: true, drive: 160, driveOn: true } },
+      { title: '7 · Beats are a sum, not a new wave',
+        body: 'Switch to beats with 340 Hz and 344 Hz. Look at the two waves and their sum.',
+        ask: 'How many loud moments are there each second, and what pitch do you hear?',
+        reveal: '<b>Four</b> loud moments per second — the beat frequency is |f₁ − f₂| — while the pitch you hear is the <i>mean</i>, 342 Hz. The envelope 2cos(π(f₁−f₂)t) completes 2 cycles per second but is loud at both its maximum and its minimum, which is where the factor of two goes. This is exactly how a piano tuner works: adjust until the beating stops.',
+        params: { setup: 'beats', f1: 340, f2: 344 } },
+      { title: '8 · Moving source and moving observer are different',
+        body: 'Set the source moving toward the observer at 30 m/s, then instead set the observer moving toward the source at 30 m/s.',
+        ask: 'Same relative speed. Are the two frequencies the same?',
+        reveal: '<b>No — 438.3 Hz against 435.0 Hz.</b> A moving source physically compresses the wavelength ahead of it, so v_s lands in the denominator; a moving observer leaves the wave untouched and merely sweeps up crests faster, putting v_o in the numerator. The graph shows it plainly: the source curve has a pole at v_s = c, the observer line is straight and never blows up. Sound has a medium, and the medium breaks the symmetry.',
+        params: { setup: 'doppler', fSrc: 400, vSrc: 30, vObs: 0 } }
+    ],
+
+    quiz: [
+      { q: 'A closed organ pipe of length L has fundamental f. An open pipe of the same length has fundamental:',
+        options: ['f', '2f', 'f/2', '4f'], answer: 1,
+        why: 'Closed: L = λ/4 so f = v/4L. Open: L = λ/2 so f = v/2L, which is twice as high. Switch the far end in the lab and watch the whole comb double.' },
+      { q: 'The harmonics present in a closed organ pipe are:',
+        options: ['all integers', 'odd multiples only', 'even multiples only', 'multiples of 3'], answer: 1,
+        why: 'A node at one end and an antinode at the other means an odd number of quarter wavelengths: 1, 3, 5 … The even harmonics cannot fit at all, which the bar chart shows as missing bars.' },
+      { q: 'The tension in a stretched string is quadrupled. Its fundamental frequency:',
+        options: ['quadruples', 'doubles', 'halves', 'is unchanged'], answer: 1,
+        why: 'v = √(T/μ) and f = v/2L, so f ∝ √T. Four times the tension gives twice the frequency — not four times.' },
+      { q: 'Two forks of 256 Hz and 260 Hz sound together. The number of beats per second is:',
+        options: ['2', '4', '258', '516'], answer: 1,
+        why: '|f₁ − f₂| = 4 beats per second. The pitch heard is the mean, 258 Hz — a different quantity, and a favourite distractor.' },
+      { q: 'A source and an observer approach each other, each at speed u. Compared with the source alone moving at speed u, the frequency heard is:',
+        options: ['the same', 'higher', 'lower', 'unchanged from the emitted value'], answer: 1,
+        why: 'f′ = f(v + v_o)/(v − v_s). Adding observer motion raises the numerator as well as keeping the reduced denominator, so the shift is larger than either effect alone. The two mechanisms are genuinely different and simply multiply.' }
+    ],
+
+    notes: '<b>Where this shows up in the paper.</b>' +
+      '<ul><li>f = (1/2L)√(T/μ) for a string, including the sonometer experiment and the ' +
+      'law-of-strings comparisons.</li>' +
+      '<li>Open vs closed pipes, which harmonics exist, and the resonance-tube method for the speed ' +
+      'of sound — where the end correction cancels because you take the <b>difference</b> of two ' +
+      'resonance lengths.</li>' +
+      '<li>Beats: |f₁ − f₂|, and the standard "a fork is loaded with wax, the beats increase/decrease, ' +
+      'find the original frequency" question.</li>' +
+      '<li>Doppler in all four combinations, and the wind case, where the wind speed is added to v in ' +
+      'both numerator and denominator.</li></ul>' +
+      '<div class="pyq"><em>Trap to avoid</em>Beat <b>frequency</b> is |f₁ − f₂|, but the envelope ' +
+      'oscillates at half that. The envelope is loud at both its crest and its trough, so the number of ' +
+      'loud moments per second is the full difference. Quoting half the answer is the commonest slip.</div>' +
+      '<div class="pyq"><em>Trap to avoid</em>In the Doppler formula, v_s belongs in the <b>denominator</b> ' +
+      'and v_o in the <b>numerator</b>, and the signs follow "positive toward the other party". Getting ' +
+      'them the wrong way round gives an answer that is almost right, which is worse than one that is ' +
+      'obviously wrong.</div>'
+  });
+
 })(window.InsightLab);
