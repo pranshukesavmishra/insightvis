@@ -57,6 +57,8 @@ a bilayer with heads and tails. `art-bio.js` is the single library for these; a 
 hand-draws anatomy again.
 
 ### 2.11 THE BUILD METHOD — how every experiment in this project is made
+*This is the procedure — what to decide, in what order. **§14 is the format** — the exact shape of
+every field you then write. Read this one first, build from that one.*
 Written down at the client's explicit request (2026-09-14): *"whatever methods using put that into
 memory file so in future can be designed in same ways."* **Follow this procedure for every new
 experiment, in this order.** It is not a description of what was done; it is the instruction.
@@ -940,3 +942,408 @@ Append only. Never rewrite history.
   graphs (1/B scaling, signed R(r), rate-vs-[Nu], gating variables, Frank–Starling) and a
   four-question quiz each. Caught the same method-on-state bug class again (`S.psf`) — the rule
   is now in §8. Verified all twelve run clean in a headless browser.
+
+---
+
+## 14. THE LAB SPECIFICATION — every structure, every field, copy this
+
+Written at the client's request (2026-09-15): *"put all you building formats and structures in
+memory md file, so when we have to build other experiments so it will be remembered."*
+
+§2.11 is the **procedure** — what to decide, in what order. This section is the **format** — the
+exact shape of the thing you produce. Read §2.11 first to know what to build; read this to know
+how to write it down. Every field listed is one `lab-core.js` actually reads; the ones marked
+*optional* in 14.2 are the only ones a lab may leave out. Everything else absent is a blank panel
+in the console, not a smaller lab.
+
+**The legacy singular plot API still exists** — `plotTitle`, `legend`, `drawPlot`, `hoverPlot` —
+and a few early labs use it. **Do not write new labs against it.** Use `plots: [ … ]`; §2.11 step 6
+wants two plots and the array is the only form that takes them.
+
+### 14.1 Where the code goes
+
+One IIFE per file, several labs per file, registered on load:
+
+```js
+(function (L) {
+  'use strict';
+  const { clamp, TAU, fmt, E, Camera } = L;          // engine utilities
+  const PA = window.PHYSART, R3 = window.R3, RX = window.RX;   // figure + render layers
+
+  const QE = 1.602176634e-19;                         // module-level constants
+  function helperUsedByThisLab(x) { ... }             // module-level maths
+
+  L.register({ /* lab 1 */ });
+  L.register({ /* lab 2 */ });
+})(window.InsightLab);
+```
+
+- New labs go in the **next numbered file for that subject** (`sims-physics9.js`), never appended
+  to a full one. Two labs per file is the working size; four is the limit.
+- Add the `<script>` tag to `index.html` **in the existing order**: `lab-core.js` first, then data,
+  then the render layers (`render.js`, `render3d.js`), then the art libraries, then `mech.js`,
+  then every `sims-*.js`, and `sims-extend.js` last. Order matters — `window.R3` must exist before
+  a sim file's IIFE runs.
+- Module-level helpers (a Bessel function, an intensity integral, a species table) live **above**
+  `L.register` in the same file and are shared by the labs in it. Never hang them off `S` or `this`
+  — see §8 for the method-on-state bug that has bitten this project three times.
+
+### 14.2 The registration object — every field in order
+
+```js
+L.register({
+  /* ---- identity: drives the nav rail, the chapter grouping, the exam tags ---- */
+  id: 'ydse',                      // unique, lowercase, no spaces — also the drag/preset key
+  subject: 'physics',              // 'physics' | 'chemistry' | 'biology' — sets the accent colour
+  name: "Young's Double Slit — Path Difference to Fringe",
+  chapter: 'Wave Optics',          // groups it in the rail; match an existing string exactly
+  exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
+  weight: 'Very high yield',       // shown as a tag; be honest, not promotional
+
+  /* ---- stage behaviour ---- */
+  is3D: true,                      // enables orbit-drag on the canvas and the ⌖ View button
+                                   // (which calls cam.reset() back to the theta/phi/dist you
+                                   // passed to Camera(), captured as cam.home at construction);
+                                   // requires S.cam to exist by the end of setup()
+  autoplay: true,                  // optional — starts the transport on mount
+  ground: false,                   // optional — suppress the instrument-ground wash
+  stageHint: 'Drag to walk round the bench · drag the screen along the rail · drag P',
+                                   // one line under the stage; name EVERY gesture that exists
+
+  /* ---- the opening paragraph ---- */
+  lede: 'Two coherent slits, one screen, and a single controlling quantity: ...',
+                                   // 3–5 sentences, <b> on the load-bearing phrases.
+                                   // Say what is REAL about it: what is integrated, what is
+                                   // computed, what the student can break.
+
+  /* ---- state ---- */
+  params: { lam: 589, d: 0.25, mode: 'double', sweep: true },   // every control's key, with defaults
+  presets: [ { name: 'Sodium lamp 589 nm', params: { ... } }, ... ],  // 5–8; see 14.3
+
+  controls: [ { group: 'Source', items: [ ... ] }, ... ],       // see 14.3
+
+  setup(S) { ... },                // see 14.4
+  step(S, dt) { ... },             // see 14.4
+
+  /* ---- the picture ---- */
+  drawStage(S, g) { ... },         // see 14.5 / 14.6
+  onDrag(S, e) { ... },            // see 14.7
+
+  /* ---- the numbers ---- */
+  plots: [ { title, legend, draw(S,g), hover(S,x) }, ... ],     // 2, see 14.8
+  readouts(S) { return [ ... ]; },                              // 6–11, see 14.9
+  equation(S) { return '...html...'; },                         // live-substituted, see 14.10
+  eqNote: '<b>...</b> ...',                                     // what the equation does NOT say
+
+  /* ---- the teaching ---- */
+  problems: [ ... ],               // 4–5, predict-then-check, see 14.11
+  walkthrough: [ ... ],            // 5–9 steps, ask-then-reveal, see 14.11
+  quiz: [ ... ],                   // 4–5 questions, see 14.11
+  notes: '<b>Where this shows up in the paper.</b> <ul>...</ul> <div class="pyq">...</div>'
+});
+```
+
+`L.extend(id, {...})` patches a registered lab. The full patch surface is `params`,
+`addControlGroups`, `addPresets`, `addPlots`, `addReadouts`, `wrapSetup`, `wrapStep`, `hover`
+and `quiz`. **Prefer building the material natively.** The extend layer
+was written when labs were thin; on 2026-09-15 the YDSE patch had to be deleted because it had come
+to collide over the key `mu`. Use `extend` only to add to a lab you are not otherwise touching.
+
+### 14.3 Controls and presets
+
+```js
+controls: [
+  { group: 'Apparatus', items: [
+    { key: 'mode', type: 'select', label: 'Aperture', restructure: true, options: [
+      { value: 'double', label: 'Double slit' }, { value: 'single', label: 'Single slit' }] },
+    { key: 'd', label: 'Slit separation <i>d</i>', min: 0.06, max: 0.8, step: 0.005,
+      unit: 'mm', fmt: v => v.toFixed(3), restructure: true },
+    { key: 'trail', type: 'toggle', label: 'Show the spiral trail' }
+  ] }
+]
+```
+
+- No `type` ⇒ a slider. `type: 'select'` ⇒ a segmented button row. `type: 'toggle'` ⇒ a switch.
+- **`restructure: true` means "call `setup()` again on change".** Anything that changes a derived
+  quantity, a geometry or an array length needs it. Anything that only changes how a frame is
+  drawn must NOT have it, or the run restarts on every tick of the slider.
+- `label` takes HTML; wrap symbols in `<i>` so they render in the maths face.
+- **`unit` is always real SI or the exam's own unit** (§6 rule 3). No 0–100 sliders, ever.
+- `fmt` controls the readback only. For a quantity spanning decades, make the **slider key the
+  log** and let `fmt` show the real value — that is how the resolving lab puts a 0.5 mm pinhole and
+  Hubble's 2.4 m mirror on one control:
+  `{ key: 'logD', min: -0.30, max: 3.40, fmt: v => Math.pow(10, v).toFixed(2) }`.
+- Group names are headings in the deck. Give every group a purpose a student would recognise:
+  *Source*, *Apparatus*, *Thin plate over slit 1*, *Medium*, *Display*.
+- **Presets are experiments, not bookmarks.** Each one must show something the defaults do not:
+  the missing-order case, the detuned case, the immersed case, the unequal case, the instrument
+  case. Name them in the student's words (`'Missing orders (d = 3a)'`, `'Your own eye'`).
+- **A preset must set every parameter it depends on.** A preset that leaves `plate: true` from the
+  previous preset is a bug the audit will not catch. Spell out the whole state.
+
+### 14.4 `setup(S)` and `step(S, dt)` — the contract
+
+```js
+setup(S) {
+  const p = S.p;                       // p is the live parameter object; S.p.key === params.key
+  if (p.a >= p.d) p.a = Math.max(0.02, p.d * 0.4);   // clamp impossible combinations HERE
+  S.lam = p.lam * 1e-9;                // derived SI quantities, computed once
+  S.beta = S.lamM * p.D / S.d;
+  if (!S.cam) {                        // 3D: create ONCE, never on every setup, or orbit resets
+    S.cam = Camera({ theta: -2.08, phi: 0.32, dist: 3.95, target: [0.30, 0, -0.10] });
+    S.cam.minDist = 2.0; S.cam.maxDist = 14;
+  }
+  S.trail = []; S.t = 0;               // reset the run
+}
+```
+
+- `setup` runs on mount, on every preset, on every `restructure` control, and from `onDrag`.
+  **It must be idempotent and cheap.** Anything expensive belongs in a cache keyed on the inputs
+  (see `airyImage(S)` in `sims-physics2.js`, which rebuilds its ImageData only when the key changes).
+- **Guard the physically impossible.** A velocity selector with `E = 0` is not a selector; a slit
+  wider than the separation is not two slits. Fix it in `setup` and say so in a comment.
+- `step(S, dt)` advances the integrator. `dt` is already scaled by the speed control and clamped.
+  Sub-step internally when the integrator needs it (`n = clamp(Math.ceil(want / hMax), 1, 900)`).
+  Trim history arrays every step (`while (S.trail.length > 14000) S.trail.shift();`).
+- State lives on `S`. **Never store a function on `S`** — §8.
+
+### 14.5 `drawStage(S, g)` — the 2D plate
+
+Lay the plate out to §2.7 **before drawing anything**:
+
+```js
+drawStage(S, g) {
+  const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
+  const HDR = 62, FOOT = 34;                  // reserved bands — nothing may cross them
+  const y0 = HDR, y1 = H - FOOT, CH = y1 - y0;
+  ...
+}
+```
+
+`g` carries: `ctx, w, h, theme, alpha(col, a), mix(a, b, t), now, dt, ramp, tween, label,
+sphere, shadow, layout(cols, rows, pad), scaleBar, hit, handle, dragging, pointer, quality`.
+
+- `th` keys: `text text-2 text-3 accent line line-soft ink-950…ink-700 phys chem bio ok warn crit`.
+- Draw through the subject's art library (`PA.*`, `BIOART.*`, `ORGART.*`), never ad-hoc shapes.
+- **`g.mix()` returns `rgb(...)` and cannot be re-parsed; `RX.mix()` returns hex.** §6 rule 10.
+- The header is three lines at most: a state line in 19 px bold, then two 10 px mono lines of live
+  values. It must **never state a rule the stage is not currently obeying** — check the mode first.
+
+### 14.6 The 3D bench — construction order and depth policy
+
+Build in this order, every time:
+
+```js
+const cam = S.cam, F = R3.Frame(ctx, cam, { ambient: 0.26, floorZ: null });
+// 1. screen-space helpers, so labels can ask the projection which way is "away"
+const O = cam.project([0.4, 0, 0]);
+const away = (pt) => { const q = cam.project(pt); return (q.ok && O.ok && q.x < O.x) ? -1 : 1; };
+// 2. the rail / bench / ground            -> bias F.GROUND
+// 3. each component, source to detector   -> bias 0
+// 4. the beam, the trail, the particle    -> bias 0
+// 5. markers and handles                  -> small negative bias
+F.render();                                // <- everything above is queued, this paints it
+// 6. 2D overlay: instrument panels, screen-space handles, header
+```
+
+**`R3` primitives:** `Frame, sphere, cylinder, tube, box(centre, FULLsize, colour), plane, texPlane,
+arrow, coil, polyline, wireSphere, label, callout`, plus `norm sub add scale dot cross perp LIGHT`.
+`F.push(at, drawFn, bias)`, `F.shade(colour, normal, opts)`, `F.shadow`, `F.GROUND`, `F.SKY`.
+Z is **up**, matching `Camera`.
+
+**THE DEPTH POLICY — four bands and nothing else** (this cost two client-reported bugs):
+
+| Band | Use for | Value |
+|---|---|---|
+| `F.GROUND` | **only** a surface other things physically stand on — the rail, the floor, the bench | `F.GROUND` |
+| true depth | every component: lamp, stop, lens, plate, screen, magnet, dee | `0` (omit) |
+| a few hundredths | decoration belonging to one component: a glow, a ruler, a marker on a face | `-0.02 … -0.06` |
+| `-1e5` | **text only** — `R3.label` and `R3.callout` already apply it | (automatic) |
+
+- **A fraction of `F.GROUND` is not a depth, it is a hard-coded answer to a question the camera
+  asks every frame.** `F.GROUND * 0.35` beating `F.GROUND * 0.7` painted a screen over the stop
+  standing in front of it. Large negatives (`-2`, `-20`, `-50`) are the same bug with the sign
+  flipped: rays drawn through solid plates.
+- **A large flat face and the small marks on it are ONE `F.push`.** A slit plate and its slits, a
+  stop and its aperture: fill the face `evenodd` so the marks are genuinely holes, then paint the
+  light into them. No bias solves this — measure and see: the slit plate's own depth spread was
+  0.67 units and the next component was only 0.81 further along.
+- **Occlusion is a question about the camera.** Any solid that can come between the camera and the
+  subject decides its own opacity every frame: `Math.sin(cam.phi) >= 0 ? …` picks which magnet pole
+  becomes an outline ring and which stays solid.
+- **A label placed by a fixed screen offset is right from one angle and wrong from the rest.** Ask
+  the projection: pick the extreme point of the object's own silhouette (`highest`/`lowest` over
+  its rim) and choose the leader direction from `away()`. Where an object is always on one side of
+  the picture, hard-code the direction instead of computing it.
+- A component drawn at a **compressed or not-to-scale** distance must say so in a callout
+  (`'two sources at infinity'`, `'D = 1.20 m · not to scale'`).
+
+### 14.7 `onDrag(S, e)` — letting the student build the input
+
+Register in `drawStage` **after** `F.render()`, in screen space:
+
+```js
+const q = cam.project([XS, 0, -0.80]);
+if (q.ok) { /* draw the grip */ g.handle(q.x, q.y, 16, 'scrn'); }
+```
+
+```js
+onDrag(S, e) {                     // e = { id, x, y, dx, dy, phase: 'start'|'move'|'end' }
+  if (e.id !== 'scrn' || !S._axX) return;
+  const along = e.dx * S._axX.ux + e.dy * S._axX.uy;     // project the drag onto the axis
+  S.p.D = clamp(S.p.D + along * S._axX.perPx * GAIN, 0.4, 3.0);
+  this.setup(S);                   // `this` is the definition — setup() is yours to call
+}
+```
+
+- Stash the screen-space axis in `drawStage` (`S._axX = axis(a, b, perUnit)`), because only
+  `drawStage` has the camera and the viewport.
+- `e.dx` is **incremental**, not cumulative. `g.dragging` holds the held id, for highlighting.
+- The engine syncs the owning slider automatically (`R.ctlSync`) — do not touch the DOM.
+- **A drag on a compressed axis needs an explicit gain — see §2.13.** Invert the drawn map first,
+  then scale so the full range takes about a third of the stage, and say in a comment why.
+- Verify with `node drag.mjs <id> <dx> <dy> <handleId>` at several magnitudes **in both
+  directions**. A handle that saturates in one flick is worse than no handle.
+
+### 14.8 `plots` — two, answering different questions
+
+```js
+plots: [
+  { title: 'Intensity along the screen',
+    legend: [{ c: '#3DD6F5', label: 'I / I₀ (observed)' }, { c: '#63729A', label: 'envelope' }],
+    draw(S, g) {
+      const P = g.Plot({ xmin, xmax, ymin, ymax, xlabel, ylabel,
+                         xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1),
+                         xticks, yticks, pad }).frame();   // ticks and pad optional
+      P.clip(() => { P.area(pts, 0, g.alpha(g.theme.phys, .16)); P.line(pts, g.theme.phys, 2);
+                     P.vline(x, col, [3, 3]); P.hline(y, col, [4, 3]); P.dot(x, y, 4, c, ring); });
+      P.tag(x, y, 'β = 2.83 mm', g.theme['text-2'], 'left', 0);
+    },
+    hover(S, x) { return [{ label: 'y', value: '…' }, { label: 'I/I₀', value: '…', color: '#3DD6F5' }]; } }
+]
+```
+
+- **Plot 1 is this system as it is set. Plot 2 places it on the landscape of all comparable
+  systems** — every metal's V₀–ν line, every body's k, the dip curve against every separation.
+  The second plot is where the generalisation lives; a second view of the same trace is a wasted
+  panel.
+- `P.clip(fn)` is mandatory around anything that can leave the axes.
+- Always draw the **current state as a dot** on plot 2, so the student sees where they are.
+- `hover` returns rows for the crosshair tooltip. Give it the quantity the student is chasing.
+- If a curve costs a scan per point, **cache it on `S` keyed on the parameters it depends on** —
+  plots redraw every frame.
+
+### 14.9 `readouts(S)` — the strip
+
+```js
+{ label: 'Fringe width β = λD/d', value: (S.beta * 1000).toFixed(3), unit: 'mm',
+  flag: 'accent', hint: 'λ is λ_vac/n here' }
+```
+
+- `flag`: `'accent'` for the headline quantity, `'ok'` / `'warn'` / `'crit'` for a verdict. Flags
+  are a traffic light on the physics, not decoration.
+- **Put the formula in the label** (`'Period T = 2πm/qB'`, `'Max energy q²B²R²/2m'`). The strip is
+  where a student checks their own substitution.
+- `hint` carries the thing the number does not say: `'independent of V'`, `'same at every radius'`,
+  `'the profile has one maximum'`.
+- **Gate readouts on the mode.** A single-slit run must not show fringe width, missing orders and
+  visibility. Build the array conditionally.
+- Scale the unit with the value (`µm / mm / m / km`), never print `85982 m`.
+
+### 14.10 `equation(S)` and `eqNote`
+
+Built from `E.v(sym) E.n(value, unit) E.op(sym) E.frac(a, b) E.sub E.sup` — hand-rolled HTML,
+because **KaTeX cannot load: the artifact CSP blocks it** (§6 rule 8).
+
+- Substitute the live values, so the pane reads `1.22 λ/D = 1.22 · 550 nm / 3.00 mm = 0.2237 mrad`.
+- End with the **verdict line** where there is one (`→ yes` / `→ no`).
+- `eqNote` says what the equation does **not**: which symbol is missing and why that matters
+  (*"Notice what is missing from KE_max: the voltage"*), and any honest discrepancy between what
+  the lab integrates and what the exam formula assumes. State those; do not hide them.
+
+### 14.11 The teaching blocks
+
+```js
+problems: [                      // 4–5. The student commits a number BEFORE the lab answers.
+  { source: 'JEE Advanced pattern · a thin plate over one slit',
+    q: 'A plate of μ = 1.50 and thickness 3.60 µm is placed over one slit …',
+    params: { … },               // the apparatus state this question describes — complete
+    predict: { label: 'shift', unit: 'fringes', tol: 0.03 },
+    measure: S => S.nShift,      // read the answer OUT of the running apparatus
+    working: 'The plate adds (μ − 1)t = … = <b>3.00 fringes</b>. The pattern moves toward …' }
+],
+walkthrough: [                   // 5–9. ask BEFORE reveal, every time.
+  { title: '5 · Put a plate over one slit',
+    body: 'Insert the mica plate. Watch the pattern march sideways …',
+    ask: 'Which way does the pattern move — toward the covered slit or away?',
+    reveal: '<b>Toward the covered slit.</b> … and crucially <b>β is unchanged</b>.',
+    params: { … } }              // puts the apparatus into the state being discussed
+],
+quiz: [                          // 4–5, single answer, and `why` teaches rather than confirms.
+  { q: '…', options: ['…', '…', '…', '…'], answer: 1,
+    why: 'Amplitudes add, not intensities. … Set d = 4a in the lab and look at the fourth fringe.' }
+],
+notes: '<b>Where this shows up in the paper.</b><ul><li>…</li></ul>' +
+       '<div class="pyq"><em>Trap to avoid</em>…</div>'
+```
+
+- **`measure` must read the running apparatus, not restate the formula.** That is the whole point
+  of the mode: the simulation is the marking scheme. Verify every one with
+  `node probchk.mjs <id>` and check the printed value against the `working` text **digit for
+  digit**. Fifteen of these were checked on 2026-09-15; all fifteen matched.
+- `tol` is fractional (0.02 = 2%).
+- `why` and `reveal` should point back at the apparatus (*"run it and count the loops"*,
+  *"watch the dip fill in without the separation changing"*).
+- `notes` closes with one or two `pyq` blocks: the single trap most likely to cost a mark.
+
+### 14.12 The verification harness — run these, do not guess
+
+All in `smartlab/`, all `node <file>.mjs`, all Playwright + the preinstalled Chromium.
+
+| Harness | What it does |
+|---|---|
+| `audit.mjs` | Clicks **every control and preset on every sim**; catches declared-but-unread controls. **Must print CLEAN before any release.** |
+| `probchk.mjs <id>` | Applies each problem's `params` and prints what `measure` returns — check against the `working`. |
+| `preset.mjs <id> '[0,3,5]'` | Screenshots the named presets. |
+| `mid.mjs <id> <ms> <tag>` | Screenshots one lab after it has been running for `ms`. |
+| `sweep.mjs <id> <ms> '[[θ,φ],…]'` | One lab from a list of camera angles. |
+| `sweepall.mjs a,b,c` | Several labs at their home view **plus two extremes derived from it**. |
+| `narrow.mjs a,b,c` | Renders at 430 px and reports horizontal overflow. |
+| `drag.mjs <id> <dx> <dy> <handleId>` | Drives one handle and prints which params changed. |
+| `resz.mjs` | Resizes the viewport and checks the stage settles. |
+| `geo.mjs` | Prints apparatus dimensions numerically (written after a bench came out wider than it was long). |
+| `userview.mjs <id> <preset> <θ> <φ> [json]` | Reproduces an exact client screenshot. |
+| `steps.mjs` | Screenshots every scene of a `mech.js` mechanism. |
+
+**Reading the screenshot is part of the build.** Every layout fault in this project's history was
+visible in one and found only because someone looked. And for a 3D bench, **the default camera is
+not verification** — both client-reported layering bugs were invisible from the view the lab opens
+on (§2.12, §14.6).
+
+### 14.13 Numerical verification — what "correct" means here
+
+A lab is not correct because it runs. Before shipping, prove the core against something
+independent, and **write the check into the commit message**:
+
+- Reproduce a known analytical limit (Carnot efficiency to 0.05%; net ΔS ≈ 10⁻¹⁷ J/K).
+- Show a conserved quantity is conserved (|v| flat to six figures under a pure magnetic field).
+- Recover a textbook number from the simulation (orbit radius 104.4 mm against the problem's 104 mm;
+  wall-impulse pressure within 1.5–4.4% of nkT).
+- Check a special case the formula assumes (equal sources at exactly θ_min give a 0.734 dip; the
+  unequal pair at the same separation gives 0.997 and is **not** resolved).
+- **When the lab and the exam formula disagree, find out why before "fixing" either.** The measured
+  fringe peaks sit a few percent inside nβ because the falling envelope drags each maximum inward,
+  and β = λD/d is the flat-envelope limit. That is the lab being more honest than the formula — so
+  it is stated in `eqNote`, not silently corrected away.
+
+### 14.14 The ship checklist
+
+1. `node audit.mjs` → **CLEAN**.
+2. `node probchk.mjs <id>` for every changed lab → every value matches its `working`.
+3. `node sweepall.mjs <changed ids>` → look at all three views of each.
+4. `node narrow.mjs <changed ids>` → no overflow, panels stacked.
+5. `node drag.mjs` on every handle, both directions.
+6. Publish the artifact (`url:` the existing one — never create a second).
+7. Sync the changed files to `smartlab/`, update `README.md` §4 and this file's §13.
+8. Commit with a message that explains the physics and names the bugs, then
+   `git push origin main`.
