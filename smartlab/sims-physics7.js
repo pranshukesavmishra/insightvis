@@ -288,9 +288,9 @@
         });
         ctx.stroke();
         PA.lbl(ctx, px0, by0 + 26, '+' + emax.toFixed(3) + ' V', th['text-3'], 'left', 8);
-        PA.lbl(ctx, px0, by0 + bh - 12, '−' + emax.toFixed(3) + ' V', th['text-3'], 'left', 8);
-        PA.lbl(ctx, (px0 + px1) / 2, by0 + bh - 12,
-               'two opposite pulses — entering, then leaving', th['text-2'], 'center', 8.5);
+        PA.lbl(ctx, px0, by0 + bh - 22, '−' + emax.toFixed(3) + ' V', th['text-3'], 'left', 8);
+        PA.lbl(ctx, px1, by0 + bh - 9,
+               'two opposite pulses — entering, then leaving', th['text-2'], 'right', 8.5);
       }
 
       /* ---------------- header ---------------- */

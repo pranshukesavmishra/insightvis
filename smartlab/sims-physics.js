@@ -325,15 +325,27 @@
         // and the beam, so in the flat experiments the poles are drawn as
         // outlines — the information without the occlusion.
         const flatView = p.mode === 'selector' || p.mode === 'spectro' || p.mode === 'cycloid';
+        /* Whichever pole is on the camera's side of the mid-plane is the one
+           that would hide the beam, and that is a question about where the
+           camera is, not about which mode is running. Outline that one and
+           leave the far pole solid, and the chamber stays readable from every
+           angle the orbit can reach. */
+        const nearSign = Math.sin(S.cam.phi) >= 0 ? 1 : -1;
         [[1, NORTH, 'N'], [-1, SOUTH, 'S']].forEach(([sg, col, tag]) => {
           const zz = sg * CH * 0.95, rr = CH * 0.50;
-          if (flatView) {
+          if (flatView || sg === nearSign) {
             const ring = [];
             for (let i = 0; i <= 48; i++) {
               const a = i / 48 * TAU;
               ring.push([Math.cos(a) * rr, Math.sin(a) * rr, zz]);
             }
             R3.polyline(F, ring, col, { alpha: 0.45, width: 1.6, bias: F.GROUND });
+            for (let i = 0; i < 10; i++) {
+              const a = i / 10 * TAU;
+              R3.polyline(F, [[Math.cos(a) * rr, Math.sin(a) * rr, zz],
+                              [Math.cos(a) * rr * 0.82, Math.sin(a) * rr * 0.82, zz]],
+                          col, { alpha: 0.25, width: 1, bias: F.GROUND });
+            }
           } else {
             R3.cylinder(F, [0, 0, sg * CH * 0.90], [0, 0, sg * CH * 1.00], rr, col,
                         { segments: 26, shadow: false, ambient: 0.38, bias: F.GROUND });
@@ -1182,8 +1194,11 @@
       const nNet = nGeo - nPlate;
       const res = ydseAt(S, p.yP);
       {
-        const bw = Math.min(W * 0.34, 288), bh = p.mode === 'double' ? 116 : 74;
+        const narrow = W < 660;
+        const bw = narrow ? Math.min(W - 24, 288) : Math.min(W * 0.34, 288);
+        const bh = p.mode === 'double' ? 116 : 74;
         const bx = 12, by = H - bh - 26;
+        S._panelTop = by;
         ctx.fillStyle = g.alpha('#0B1020', .90);
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
@@ -1214,7 +1229,10 @@
          resultant of 2A and therefore 4I₀, which is the single most-missed
          mark in the chapter. */
       if (p.mode === 'double') {
-        const bw = 174, bh = 136, bx = W - bw - 14, by = H - bh - 26;
+        const narrow = W < 660;
+        const bw = narrow ? Math.min(W - 24, 200) : 174, bh = 136;
+        const bx = narrow ? 12 : W - bw - 14;
+        const by = narrow ? Math.max(58, (S._panelTop || (H - 142)) - bh - 8) : H - bh - 26;
         ctx.fillStyle = g.alpha('#0B1020', .90);
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();

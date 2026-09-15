@@ -194,10 +194,14 @@
           }
           R3.polyline(F, pts, c, { alpha: al, width: w, bias: F.GROUND });
         };
-        if (sg < 0) {
-          // the lower pole is the bench the machine stands on: a dark steel
+        /* The solid pole is always the FAR one. Orbit under the machine and
+           the roles swap, otherwise the plate you are looking through hides
+           the beam it exists to bend. */
+        const farSide = Math.sin(cam.phi) >= 0 ? -1 : 1;
+        if (sg === farSide) {
+          // the far pole is the bench the machine stands on: a dark steel
           // plate, not a slab of colour that would swamp the dees
-          R3.cylinder(F, [0, 0, zz], [0, 0, zz - 0.08], rr, '#26334C',
+          R3.cylinder(F, [0, 0, zz], [0, 0, zz - sg * 0.08], rr, '#26334C',
                       { segments: 48, shadow: false, ambient: 0.16, bias: F.GROUND });
           ring(zz, col, 0.55, 1.6);
         } else {
@@ -1088,7 +1092,12 @@
       // profile actually shows two peaks with a deep enough valley
       const resolved = T.two && dip <= 0.735;
       {
-        const bw = Math.min(W * 0.34, 292), bh = 118, bx = 12, by = H - bh - 26;
+        /* At phone width the two panels cannot sit side by side, so the
+           second one stacks above the first instead of over it. */
+        const narrow = W < 660;
+        const bw = narrow ? Math.min(W - 24, 292) : Math.min(W * 0.34, 292);
+        const bh = 118, bx = 12, by = H - bh - 26;
+        S._panelTop = by;
         ctx.fillStyle = g.alpha('#0B1020', .90);
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
@@ -1115,7 +1124,10 @@
 
       /* ---------------- instrument panel 2 · what this means in the world ---------------- */
       {
-        const bw = 214, bh = 100, bx = W - bw - 14, by = H - bh - 26;
+        const narrow = W < 660;
+        const bw = narrow ? Math.min(W - 24, 232) : 214, bh = 100;
+        const bx = narrow ? 12 : W - bw - 14;
+        const by = narrow ? Math.max(58, (S._panelTop || (H - 144)) - bh - 8) : H - bh - 26;
         ctx.fillStyle = g.alpha('#0B1020', .90);
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
