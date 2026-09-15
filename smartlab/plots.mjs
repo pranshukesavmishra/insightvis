@@ -1,0 +1,20 @@
+import { chromium } from 'playwright';
+import fs from 'fs';
+const body = fs.readFileSync('index.html','utf8');
+fs.writeFileSync('_preview.html','<!doctype html><html><head><meta charset="utf-8"></head><body>'+body+'</body></html>');
+const b = await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const p = await b.newPage({viewport:{width:1500,height:1400}});
+p.on('pageerror', e=>console.log('PAGEERROR:', e.message));
+await p.goto('file://'+process.cwd()+'/_preview.html');
+await p.waitForTimeout(1800);
+const [id, preset] = [process.argv[2], process.argv[3]];
+await p.evaluate(i=>document.querySelector('.navbtn[data-sim="'+i+'"]').click(), id);
+await p.waitForTimeout(1200);
+if (preset && preset!=='-') { await p.evaluate(([i,k])=>{const d=window.__REG.find(r=>r.id===i);
+  Object.assign(window.__S.p, d.presets[+k].params); if(d.setup)d.setup(window.__S);},[id,preset]);
+  await p.waitForTimeout(1400); }
+await p.evaluate(()=>{const e=document.querySelector('.plot'); if(e) e.scrollIntoView({block:'start'});});
+await p.waitForTimeout(600);
+await p.screenshot({path:'pl-'+id+'.png'});
+console.log('ok');
+await b.close();

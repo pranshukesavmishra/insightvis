@@ -1,0 +1,28 @@
+import { chromium } from 'playwright';
+import fs from 'fs';
+const body = fs.readFileSync('index.html','utf8');
+fs.writeFileSync('_preview.html','<!doctype html><html><head><meta charset="utf-8"></head><body>'+body+'</body></html>');
+const b = await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const p = await b.newPage({viewport:{width:1500,height:1050}});
+p.on('pageerror', e=>console.log('PAGEERROR:', e.message));
+await p.goto('file://'+process.cwd()+'/_preview.html');
+await p.waitForTimeout(1800);
+const [id, preset, dx, dy, want] = [process.argv[2], process.argv[3], +process.argv[4]||0, +process.argv[5]||0, process.argv[6]];
+await p.evaluate(i=>document.querySelector('.navbtn[data-sim="'+i+'"]').click(), id);
+await p.waitForTimeout(1200);
+await p.evaluate(([i,k])=>{ const d=window.__REG.find(r=>r.id===i);
+  Object.assign(window.__S.p, d.presets[+k].params); if(d.setup) d.setup(window.__S); },[id,preset]);
+await p.waitForTimeout(900);
+const before = await p.evaluate(()=>JSON.parse(JSON.stringify(window.__S.p)));
+const h = await p.evaluate(()=>(window.__R.handles||[]).map(x=>({x:x.x,y:x.y,r:x.r,id:x.id})));
+console.log('handles:', JSON.stringify(h.map(x=>x.id)));
+if (!h.length) { console.log('NO HANDLES'); await b.close(); process.exit(0); }
+const t = want ? (h.find(x=>x.id===want)||h[0]) : h[0];
+const box = await p.evaluate(()=>{const e=document.querySelector('.stage canvas');const r=e.getBoundingClientRect();return {x:r.x,y:r.y};});
+await p.mouse.move(box.x+t.x, box.y+t.y); await p.mouse.down();
+await p.mouse.move(box.x+t.x+dx, box.y+t.y+dy, {steps:12}); await p.mouse.up();
+await p.waitForTimeout(700);
+const after = await p.evaluate(()=>JSON.parse(JSON.stringify(window.__S.p)));
+const ch = Object.keys(after).filter(k=>after[k]!==before[k]).map(k=>k+': '+before[k]+' -> '+after[k]);
+console.log('changed:', ch.length?ch.join(', '):'NOTHING');
+await b.close();

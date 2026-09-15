@@ -301,6 +301,87 @@
     return [[x - w / 2, y], [x + w / 2, y]];
   }
 
+  /* A DC cell, drawn as an object rather than the two-bar symbol: a
+     moulded body with the long (+) and short (−) plates standing out of
+     it. Returns the two terminal points so a circuit can wire to them.
+     `n` draws a battery of n cells in series.                        */
+  function cell(ctx, x, y, w, h, o) {
+    o = o || {};
+    const n = o.n || 1, cw = w / n;
+    for (let k = 0; k < n; k++) {
+      const cx = x - w / 2 + cw * (k + 0.5);
+      const bw = cw * 0.52, bh = h;
+      const path = c => {
+        c.beginPath();
+        if (c.roundRect) c.roundRect(cx - bw / 2, y - bh / 2, bw, bh, bh * 0.16);
+        else c.rect(cx - bw / 2, y - bh / 2, bw, bh);
+      };
+      RX.volume(ctx, path, { fill: o.fill || '#2E3A55', r: bh * 0.8, cx: cx, cy: y,
+                             gloss: 0.34, contour: Math.max(1, bh * 0.05) });
+      // the plates: long = +, short = −
+      const px = cx + bw * 0.42;
+      ctx.fillStyle = C.brass;
+      ctx.fillRect(px - 1.4, y - bh * 0.60, 2.8, bh * 1.20);        // long, +
+      ctx.fillStyle = rgba(C.steel, .95);
+      ctx.fillRect(cx - bw * 0.42 - 1.4, y - bh * 0.28, 2.8, bh * 0.56);  // short, −
+    }
+    if (o.label !== false) {
+      lbl(ctx, x - w / 2 - 7, y - h * 0.55, '−', rgba(C.steel, .95), 'center', 12);
+      lbl(ctx, x + w / 2 + 7, y - h * 0.55, '+', C.brass, 'center', 12);
+    }
+    return [[x - w / 2 - cw * 0.06, y], [x + w / 2 + cw * 0.06, y]];
+  }
+
+  /* A moving-coil galvanometer. `frac` is the deflection as a fraction of
+     full scale, signed — a centre-zero instrument, which is what a bridge
+     null detector actually is. The needle is drawn from the real value, so
+     a balanced bridge shows a needle that genuinely does not move.     */
+  function galvo(ctx, cx, cy, R, frac, o) {
+    o = o || {};
+    const fg = ctx.createRadialGradient(cx, cy - R * 0.3, R * 0.05, cx, cy, R);
+    fg.addColorStop(0, '#1C2740'); fg.addColorStop(1, '#0C1220');
+    ctx.fillStyle = fg;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
+    ctx.strokeStyle = rgba(C.steel, .55); ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+
+    // the scale: centre zero, ticks either side
+    const span = 1.05;                                   // radians either side of up
+    ctx.strokeStyle = rgba('#8FA4CE', .55);
+    for (let i = -5; i <= 5; i++) {
+      const a = -Math.PI / 2 + (i / 5) * span, big = i === 0 || Math.abs(i) === 5;
+      const r0 = R * (big ? 0.62 : 0.70), r1 = R * 0.80;
+      ctx.lineWidth = big ? 1.5 : 1;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      ctx.stroke();
+    }
+    lbl(ctx, cx, cy + R * 0.46, o.tag || 'G', rgba('#8FA4CE', .9), 'center', R * 0.30);
+
+    // the needle
+    const f = Math.max(-1, Math.min(1, frac || 0));
+    const a = -Math.PI / 2 + f * span;
+    const nulled = Math.abs(f) < 0.004;
+    ctx.strokeStyle = nulled ? '#4ADE80' : '#FF6B6B';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.cos(a) * R * 0.14, cy - Math.sin(a) * R * 0.14);
+    ctx.lineTo(cx + Math.cos(a) * R * 0.74, cy + Math.sin(a) * R * 0.74);
+    ctx.stroke();
+    ctx.fillStyle = rgba(C.brass, .95);
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.09, 0, TAU); ctx.fill();
+    if (nulled) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.25);
+      gg.addColorStop(0, rgba('#4ADE80', .32)); gg.addColorStop(1, rgba('#4ADE80', 0));
+      ctx.fillStyle = gg;
+      ctx.beginPath(); ctx.arc(cx, cy, R * 1.25, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+    return nulled;
+  }
+
   function inductor(ctx, x, y, w, h, o) {
     o = o || {};
     // a coil wound on a core, seen from the side
@@ -522,7 +603,7 @@
 
   window.PHYSART = {
     lbl, leader, vector, body, BODIES, spring, surface, charge,
-    wire, resistor, inductor, capacitor, acSource, phasorDial,
+    wire, resistor, cell, galvo, inductor, capacitor, acSource, phasorDial,
     photocell, plate, beam, nmColour, C, mix, rgba
   };
 })();
