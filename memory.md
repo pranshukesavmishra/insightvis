@@ -674,10 +674,11 @@ Next, in rough priority order:
 
 ## 11. Environment and access notes
 
-- `pranshukesavmishra/insightvis` is **public and readable**, but this session has **no push
-  access**. Work is committed locally and must be pushed by the repo owner, or write access
-  must be granted (reconnect GitHub under claude.ai Settings → Connectors with the owning
-  account, or add the working account as a collaborator).
+- `pranshukesavmishra/insightvis` is **public, readable and now pushable** — `git push origin main`
+  succeeded on 2026-09-15. (Earlier sessions had read-only access and committed locally only; that
+  note is kept here because if push ever fails again, the remedy is to reconnect GitHub under
+  claude.ai Settings → Connectors with the owning account, or add the working account as a
+  collaborator.)
 - Local working clone: `/home/user/pranshukesavmishra/insightvis`
 - A separate repository, `pranshukesavmishra/sih-2026`, is also attached to this workspace.
   It is unrelated to InsightVis. Do not mix work between them.
