@@ -225,6 +225,32 @@ camera angles; `sweepall.mjs a,b,c` walks several labs at the home view plus two
 from it; `narrow.mjs a,b,c` renders at 430 px and reports horizontal overflow. **Reading the default
 view is not verification.** Both bugs above were invisible from the camera each lab opens on.
 
+**And the rule that governs every bias, found when the client caught both optics benches layering
+wrongly on 2026-09-15.** A depth bias is a licence to lie about where something is, and every lie
+has to be small enough to stay true from a camera you have not looked from yet. Three bands, and
+nothing else:
+
+1. **`F.GROUND` — only for a surface other things physically stand on.** The rail and its posts.
+   Nothing else. I had been handing out fractions of it (`F.GROUND * 0.35`, `* 0.5`, `* 0.7`) to
+   put components "roughly in order", which freezes that order: the screen was painted over the
+   stop that stood in front of it, because 0.35 beat 0.7 regardless of where the camera was.
+   **A fraction of GROUND is not a depth, it is a hard-coded answer to a question the camera asks
+   every frame.** Components sort on their own depth, bias 0.
+2. **A few hundredths — for decoration attached to one component.** A glow on a lamp, a ruler on a
+   screen, a marker on a face: enough to sit on its parent, never enough to jump a component that
+   is genuinely nearer. Large negatives (`-2`, `-20`, `-50`) are the same bug with the sign flipped
+   and were doing the same damage: rays drawn through solid plates, a lamp glowing through the
+   apparatus in front of it.
+3. **`-1e5` — text only**, which `R3.label` and `R3.callout` already apply. A label that is
+   occluded is a label that failed.
+
+**When a large flat face carries small marks of its own — a slit plate and its slits, a stop and
+its aperture — the two are ONE item, drawn in a single `F.push`:** the face filled `evenodd` so the
+marks are genuinely holes, then the light painted into them. Anything else recreates the §2.12
+problem one level down, and the fix is not a bias, because no bias exists that beats the face's own
+depth spread without also beating the next component along the bench. Measure it if tempted: the
+slit plate's own spread was 0.67 depth units and the screen was only 0.81 further on.
+
 ### 2.13 A drag handle on a compressed axis needs a gain, and the gain is not a fudge
 Several benches draw a quantity on a deliberately compressed or non-linear scale, because the true
 one is unviewable: the double slit's screen distance spans 2.6 m inside 0.90 display units, its slit

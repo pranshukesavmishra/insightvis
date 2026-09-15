@@ -920,6 +920,15 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const cam = S.cam, F = R3.Frame(ctx, cam, { ambient: 0.26, floorZ: null });
+      /* DEPTH POLICY for this bench. Only the rail and its posts carry
+         F.GROUND, because they are the one surface other things stand on.
+         Every component — lamp, collimator, slit plate, screen — sorts on its
+         OWN depth, so orbiting the bench past the screen does not leave the
+         slit plate painted on top of it. Anything that decorates a component
+         (a glow, a slit's light, the screen's own ruler) gets an offset of a
+         few hundredths at most: enough to sit on its parent, never enough to
+         jump in front of a component that is genuinely nearer. Only text
+         keeps the large negative bias R3.label applies for it. */
       const rgb = S.rgb;
       const col = (i, a) => 'rgba(' + Math.round(255 * clamp(rgb[0] * i, 0, 1)) + ',' +
         Math.round(255 * clamp(rgb[1] * i, 0, 1)) + ',' + Math.round(255 * clamp(rgb[2] * i, 0, 1)) +
@@ -968,7 +977,7 @@
           gg.addColorStop(0, col(1, .48)); gg.addColorStop(1, col(1, 0));
           ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(q.x, q.y, 22, 0, TAU); ctx.fill();
           ctx.restore();
-        }, -2);
+        }, -0.03);
         R3.callout(F, [XSRC - 0.13, 0, 0.21], away([XSRC, 0, 0]) * 30, -22,
                    p.white ? 'white-light source' : 'source  λ = ' + p.lam + ' nm',
                    p.white ? '#E8EEF9' : pure);
@@ -988,43 +997,64 @@
                    'collimating slit · makes S₁ and S₂ coherent', th['text-3']);
       }
 
-      /* ---------------- the slit plate ---------------- */
+      /* ---------------- the slit plate ----------------
+         The plate and the light coming through it are ONE item. They have to
+         be: the plate is a large flat face and the slits are small marks on
+         it, which is exactly the case a single depth key cannot sort (memory
+         §2.12). Drawing them together — the face filled even-odd so the slits
+         are genuinely holes, then the light painted into those holes — makes
+         the pair atomic, so the plate still sorts correctly against the
+         screen and the collimator while never painting over its own slits. */
       {
-        const ambient = 0.36, cP = '#4E5E88';
-        const panel = (y0, y1) => {
-          if (Math.abs(y1 - y0) < 1e-4) return;
-          R3.box(F, [XSLIT, (y0 + y1) / 2, 0], [0.026, Math.abs(y1 - y0), 2 * PLZ], cP,
-                 { shadow: false, ambient: ambient });
-        };
-        if (p.mode === 'single') {
-          panel(aD / 2, 0.58); panel(-0.58, -aD / 2);
-        } else {
-          panel(dD / 2 + aD / 2, 0.58);
-          panel(-(dD / 2 - aD / 2), dD / 2 - aD / 2);
-          panel(-0.58, -(dD / 2 + aD / 2));
-        }
-        // the frame, so the plate reads as a mounted component
-        R3.box(F, [XSLIT, 0.605, 0], [0.034, 0.05, 2 * PLZ + 0.06], '#364263',
-               { shadow: false, ambient: 0.28 });
-        R3.box(F, [XSLIT, -0.605, 0], [0.034, 0.05, 2 * PLZ + 0.06], '#364263',
-               { shadow: false, ambient: 0.28 });
-        R3.box(F, [XSLIT, 0, PLZ + 0.025], [0.034, 1.27, 0.05], '#364263', { shadow: false, ambient: 0.28 });
-        R3.box(F, [XSLIT, 0, -PLZ - 0.025], [0.034, 1.27, 0.05], '#364263', { shadow: false, ambient: 0.28 });
+        const cP = '#4E5E88', HALF = 0.58;
+        const slitY = p.mode === 'single' ? [[0, 1]]
+                                          : [[s1y, 1], [s2y, S.ratio]];
+        F.push([XSLIT, 0, 0], () => {
+          const face = [[XSLIT, -HALF, PLZ], [XSLIT, HALF, PLZ],
+                        [XSLIT, HALF, -PLZ], [XSLIT, -HALF, -PLZ]].map(v => cam.project(v));
+          if (face.some(q => !q.ok)) return;
+          // each slit as a rectangular hole
+          const holes = slitY.map(([yy]) =>
+            [[XSLIT, yy - aD / 2, PLZ], [XSLIT, yy + aD / 2, PLZ],
+             [XSLIT, yy + aD / 2, -PLZ], [XSLIT, yy - aD / 2, -PLZ]].map(v => cam.project(v)));
+          if (holes.some(h => h.some(q => !q.ok))) return;
+          ctx.save();
+          ctx.beginPath();
+          face.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
+          ctx.closePath();
+          holes.forEach(h => {
+            ctx.moveTo(h[0].x, h[0].y);
+            for (let i = 1; i < h.length; i++) ctx.lineTo(h[i].x, h[i].y);
+            ctx.closePath();
+          });
+          ctx.fillStyle = F.shade(cP, [-1, 0, 0], { ambient: 0.36 });
+          ctx.fill('evenodd');
+          ctx.strokeStyle = g.alpha('#9FB4DE', .40); ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          face.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
+          ctx.closePath(); ctx.stroke();
+          // the light the slits pass, painted into the holes
+          ctx.globalCompositeOperation = 'lighter';
+          holes.forEach((h, i) => {
+            ctx.fillStyle = col(0.85 * slitY[i][1], .88);
+            ctx.beginPath();
+            h.forEach((q, k) => k ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
+            ctx.closePath(); ctx.fill();
+          });
+          ctx.restore();
+        }, 0);
 
-        // the slits themselves, glowing with the light they pass
-        const slits = p.mode === 'single' ? [0] : [s1y, s2y];
-        slits.forEach((yy, i) => {
-          const strength = p.mode === 'single' ? 1 : (i === 0 ? 1 : S.ratio);
-          const q0 = cam.project([XSLIT + 0.015, yy, PLZ]);
-          const q1 = cam.project([XSLIT + 0.015, yy, -PLZ]);
-          if (!q0.ok || !q1.ok) return;
-          F.push([XSLIT + 0.015, yy, 0], () => {
-            ctx.save(); ctx.globalCompositeOperation = 'lighter';
-            ctx.strokeStyle = col(0.9 * strength, .85);
-            ctx.lineWidth = Math.max(2, aD * 210 / Math.max(cam.dist, 1));
-            ctx.beginPath(); ctx.moveTo(q0.x, q0.y); ctx.lineTo(q1.x, q1.y); ctx.stroke();
-            ctx.restore();
-          }, -3);
+        // the frame, so the plate reads as a mounted component
+        R3.box(F, [XSLIT, HALF + 0.025, 0], [0.034, 0.05, 2 * PLZ + 0.06], '#364263',
+               { shadow: false, ambient: 0.28 });
+        R3.box(F, [XSLIT, -HALF - 0.025, 0], [0.034, 0.05, 2 * PLZ + 0.06], '#364263',
+               { shadow: false, ambient: 0.28 });
+        R3.box(F, [XSLIT, 0, PLZ + 0.025], [0.034, 2 * HALF + 0.10, 0.05], '#364263',
+               { shadow: false, ambient: 0.28 });
+        R3.box(F, [XSLIT, 0, -PLZ - 0.025], [0.034, 2 * HALF + 0.10, 0.05], '#364263',
+               { shadow: false, ambient: 0.28 });
+
+        slitY.forEach(([yy, strength], i) => {
           R3.label(F, [XSLIT, yy, PLZ + 0.10],
                    p.mode === 'single' ? 'S' : (i === 0 ? 'S₁' : 'S₂'),
                    col(0.55 + 0.45 * strength),
@@ -1083,17 +1113,17 @@
             c4.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
             ctx.closePath(); ctx.stroke();
           }
-        }, F.GROUND * 0.4);
+        }, 0);
         // the screen's own mount
         R3.box(F, [XS + 0.045, 0, 0], [0.05, 2 * SY + 0.10, 2 * SZ + 0.10], '#2E3A57',
-               { shadow: false, ambient: 0.20, bias: F.GROUND * 0.6 });
+               { shadow: false, ambient: 0.20 });
 
         // a millimetre scale along the bottom edge
         const step = S.yRange * 1000 > 24 ? 5 : S.yRange * 1000 > 10 ? 2 : 1;
         for (let t = -Math.floor(S.yRange * 1000 / step) * step; t <= S.yRange * 1000 + 1e-6; t += step) {
           const yw = yOf(t / 1000);
           R3.polyline(F, [[XS, yw, SZ], [XS, yw, SZ + 0.055]], '#8FA4CE',
-                      { alpha: .7, width: 1, bias: -50 });
+                      { alpha: .7, width: 1, bias: -0.02 });
           if (Math.abs(t / step) % 4 < 0.01)
             R3.label(F, [XS, yw, SZ + 0.115], t.toFixed(0), th['text-3'], { size: 8.5 });
         }
@@ -1106,7 +1136,7 @@
         const slits = p.mode === 'single' ? [[0, 1]] : [[s1y, 1], [s2y, S.ratio]];
         slits.forEach(([yy, strength]) => {
           R3.polyline(F, [[XSLIT + 0.02, yy, 0], P3], pure,
-                      { alpha: 0.30 + 0.45 * strength, width: 1.8, bias: -20 });
+                      { alpha: 0.30 + 0.45 * strength, width: 1.8, bias: -0.05 });
         });
         // the little right-angled triangle at the slits whose short side is Δ
         if (p.mode === 'double') {
@@ -1115,9 +1145,9 @@
           // foot of the perpendicular dropped from S2 onto the S1 ray
           const fx = XSLIT + 0.02 + (dD * sth) * ux, fy = s2y + (dD * sth) * sth;
           R3.polyline(F, [[XSLIT + 0.02, s1y, 0], [XSLIT + 0.02, s2y, 0]], th.warn,
-                      { alpha: .85, width: 2, bias: -30 });
+                      { alpha: .85, width: 2, bias: -0.06 });
           R3.polyline(F, [[XSLIT + 0.02, s1y, 0], [fx, fy, 0]], th.warn,
-                      { alpha: .9, width: 2.4, bias: -30 });
+                      { alpha: .9, width: 2.4, bias: -0.06 });
         }
         // the marker itself
         const q = cam.project(P3);

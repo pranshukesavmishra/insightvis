@@ -1,0 +1,24 @@
+import { chromium } from 'playwright';
+import fs from 'fs';
+const body = fs.readFileSync('index.html','utf8');
+fs.writeFileSync('_preview.html','<!doctype html><html><head><meta charset="utf-8"></head><body>'+body+'</body></html>');
+const b = await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const p = await b.newPage({viewport:{width:1500,height:1050}});
+p.on('pageerror', e=>console.log('PAGEERROR:', e.message));
+await p.goto('file://'+process.cwd()+'/_preview.html');
+await p.waitForTimeout(1800);
+const [id, preset, th, ph, extra] = [process.argv[2], process.argv[3], +process.argv[4], +process.argv[5], process.argv[6]];
+await p.evaluate(i=>document.querySelector('.navbtn[data-sim="'+i+'"]').click(), id);
+await p.waitForTimeout(1500);
+await p.evaluate(([i,k,e])=>{
+  const def=window.__REG.find(r=>r.id===i);
+  if (k!=='-') Object.assign(window.__S.p, def.presets[+k].params);
+  if (e) Object.assign(window.__S.p, JSON.parse(e));
+  if (def.setup) def.setup(window.__S);
+},[id,preset,extra||null]);
+await p.evaluate(v=>{window.__S.cam.theta=v[0]; window.__S.cam.phi=v[1];}, [th,ph]);
+await p.waitForTimeout(1600);
+const box = await p.evaluate(()=>{const e=document.querySelector('.stagepanel');const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});
+await p.screenshot({path:'uv-'+id+'.png', clip:box});
+await b.close();
+console.log('done');

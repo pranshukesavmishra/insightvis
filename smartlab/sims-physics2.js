@@ -292,7 +292,7 @@
           ctx.beginPath();
           q.forEach((x, i) => i ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
           ctx.closePath(); ctx.fill(); ctx.restore();
-        }, F.GROUND * 0.5);
+        }, 0);
         // the field direction in the gap, reversing with the RF
         for (let i = -2; i <= 2; i++) {
           if (gl < 0.12) break;
@@ -844,13 +844,20 @@
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
       const cam = S.cam, F = R3.Frame(ctx, cam, { ambient: 0.26, floorZ: null });
+      /* DEPTH POLICY. Only the rail, its posts and the optical axis carry
+         F.GROUND — they are what the components stand on. The stop, the lens
+         and the screen sort on their OWN depth, so the stop occludes the
+         screen when it is genuinely in front of it and not otherwise.
+         Decoration attached to a component (a source's glow, the markers
+         drawn on the screen face) gets an offset of a few hundredths: enough
+         to sit on its parent, never enough to jump a nearer component. */
       const rgb = wl2rgbLocal(p.lam);
       const pure = 'rgb(' + Math.round(255 * rgb[0]) + ',' + Math.round(255 * rgb[1]) + ',' +
         Math.round(255 * rgb[2]) + ')';
 
       const XSRC = -2.05, XAP = -0.62, XLENS = 0.30, XSCR = 1.66;
       const SW = 1.06, SH = SW * 140 / 200;                  // focal-plane half sizes
-      const apR = clamp(0.10 + 0.34 * (p.logD + 0.30) / 3.70, 0.10, 0.46);
+      const apR = clamp(0.09 + 0.29 * (p.logD + 0.30) / 3.70, 0.09, 0.38);
       // the sources are drawn at an exaggerated separation, because the real
       // one is microradians; the ratio to the limit is what matters and it is
       // what the drawn gap is proportional to
@@ -894,7 +901,7 @@
             gg.addColorStop(0, g.alpha(pure, .45 * br)); gg.addColorStop(1, g.alpha(pure, 0));
             ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(q.x, q.y, 12, 0, TAU); ctx.fill();
             ctx.restore();
-          }, -2);
+          }, -0.03);
         }
         R3.label(F, [XSRC, yy, 0.13], i === 0 ? 'S₁' : 'S₂', th['text-2'], { size: 10 });
       });
@@ -908,7 +915,7 @@
          Drawn as a real stop: an opaque plate with a hole in it, filled with
          the even-odd rule so the hole is genuinely a hole. */
       {
-        const halfP = 0.52;
+        const halfP = 0.58;
         F.push([XAP, 0, 0], () => {
           const outer = [[XAP, -halfP, halfP], [XAP, halfP, halfP],
                          [XAP, halfP, -halfP], [XAP, -halfP, -halfP]].map(v => cam.project(v));
@@ -941,7 +948,7 @@
           outer.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
           ctx.closePath(); ctx.stroke();
           ctx.restore();
-        }, F.GROUND * 0.7);
+        }, 0);
         R3.callout(F, [XAP, 0, halfP], away([XAP, 0, 0]) * 22, -26,
                    (p.ap === 'circ' ? 'circular stop  D = ' : 'slit  a = ') +
                    (S.Dmm < 10 ? S.Dmm.toFixed(2) + ' mm' : S.Dmm < 1000 ? S.Dmm.toFixed(1) + ' mm'
@@ -966,7 +973,7 @@
           ctx.fillStyle = g.alpha('#7FB8E8', .13); ctx.fill();
           ctx.strokeStyle = g.alpha('#9FD0F5', .55); ctx.lineWidth = 1.6; ctx.stroke();
           ctx.restore();
-        }, F.GROUND * 0.5);
+        }, 0);
         R3.callout(F, [XLENS, 0, lr], away([XLENS, 0, 0]) * 24, -22, 'objective lens', th['text-3']);
       }
 
@@ -987,9 +994,9 @@
       /* ---------------- the focal plane, carrying the real Airy image ---------------- */
       {
         const img = airyImage(S);
-        R3.texPlane(F, [XSCR, 0, 0], [0, -SW, 0], [0, 0, -SH], img, { grid: 7, bias: F.GROUND * 0.35 });
+        R3.texPlane(F, [XSCR, 0, 0], [0, -SW, 0], [0, 0, -SH], img, { grid: 7, bias: 0 });
         R3.box(F, [XSCR + 0.045, 0, 0], [0.05, 2 * SW + 0.10, 2 * SH + 0.10], '#2E3A57',
-               { shadow: false, ambient: 0.20, bias: F.GROUND * 0.5 });
+               { shadow: false, ambient: 0.20 });
         // the frame, the image centres and the Rayleigh ring
         F.push([XSCR, 0, 0], () => {
           const c4 = [[XSCR, -SW, SH], [XSCR, SW, SH], [XSCR, SW, -SH], [XSCR, -SW, -SH]]
@@ -1036,7 +1043,7 @@
             ctx.beginPath(); ctx.moveTo(q.x - 5, q.y); ctx.lineTo(q.x + 5, q.y);
             ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x, q.y + 5); ctx.stroke();
           });
-        }, -1e4);
+        }, -0.02);
         R3.label(F, [XSCR, 0, SH + 0.20], 'focal plane · the image as it really looks',
                  th['text-2'], { size: 9.5 });
         if (p.rings)
