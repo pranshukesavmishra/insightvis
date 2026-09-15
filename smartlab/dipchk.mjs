@@ -1,0 +1,23 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const p = await b.newPage({viewport:{width:1400,height:1000}});
+p.on('pageerror', e=>console.log('PAGEERROR:', e.message));
+await p.goto('file://'+process.cwd()+'/_preview.html');
+await p.waitForTimeout(1600);
+await p.evaluate(()=>document.querySelector('.navbtn[data-sim="resolving"]').click());
+await p.waitForTimeout(1200);
+console.log(await p.evaluate(()=>{
+  const def=window.__REG.find(r=>r.id==='resolving'), S=window.__S;
+  const set=o=>{Object.assign(S.p,o); def.setup(S);};
+  const read=()=>{const r=def.readouts(S); const f=l=>r.find(x=>x.label.indexOf(l)===0);
+    return {ratio:f('Δθ / θ_min').value, dip:f('Valley').value, flag:f('Valley').flag};};
+  const out={};
+  set({instr:'custom',lam:550,ap:'circ',logD:Math.log10(3),contrast:1,sep:0.2237});
+  out.equal_at_rayleigh = read();
+  set({sep:0.2237*1.4}); out.equal_wide = read();
+  set({sep:0.2237*0.8}); out.equal_close = read();
+  set({sep:0.2237, contrast:0.25}); out.unequal_at_rayleigh = read();
+  set({sep:0.2237*2.0, contrast:0.25}); out.unequal_wide = read();
+  return JSON.stringify(out,null,1);
+}));
+await b.close();

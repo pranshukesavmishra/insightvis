@@ -540,8 +540,73 @@
     }, (o.bias || 0) - 1e5);
   }
 
+  /* ---------------- textured plane ----------------
+     Paints an offscreen canvas onto a planar quad in the scene. A single
+     affine transform cannot represent a perspective projection, so the quad
+     is cut into an N x N grid and each cell drawn as two affine triangles;
+     by N = 6 the residual is well under a pixel. Cells are expanded a hair
+     about their own centroid so the clip edges overlap and no seam shows.
+
+     centre is the middle of the plane, e1 and e2 its half-axis vectors: the
+     image's +u runs along e1 and +v along e2 (v downward, like a canvas).  */
+  function triTex(ctx, img, s, d) {
+    const [sx0, sy0, sx1, sy1, sx2, sy2] = s;
+    let [x0, y0, x1, y1, x2, y2] = d;
+    // expand by half a pixel about the centroid so neighbours overlap
+    const gx = (x0 + x1 + x2) / 3, gy = (y0 + y1 + y2) / 3, k = 1.012;
+    x0 = gx + (x0 - gx) * k; y0 = gy + (y0 - gy) * k;
+    x1 = gx + (x1 - gx) * k; y1 = gy + (y1 - gy) * k;
+    x2 = gx + (x2 - gx) * k; y2 = gy + (y2 - gy) * k;
+    const den = sx0 * (sy2 - sy1) - sx1 * sy2 + sx2 * sy1 + (sx1 - sx2) * sy0;
+    if (!den) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.lineTo(x2, y2); ctx.closePath();
+    ctx.clip();
+    ctx.transform(
+      -(sy0 * (x2 - x1) - sy1 * x2 + sy2 * x1 + (sy1 - sy2) * x0) / den,
+       (sy1 * y2 + sy0 * (y1 - y2) - sy2 * y1 + (sy2 - sy1) * y0) / den,
+       (sx0 * (x2 - x1) - sx1 * x2 + sx2 * x1 + (sx1 - sx2) * x0) / den,
+      -(sx1 * y2 + sx0 * (y1 - y2) - sx2 * y1 + (sx2 - sx1) * y0) / den,
+       (sx0 * (sy2 * x1 - sy1 * x2) + sy0 * (sx1 * x2 - sx2 * x1) + (sx2 * sy1 - sx1 * sy2) * x0) / den,
+       (sx0 * (sy2 * y1 - sy1 * y2) + sy0 * (sx1 * y2 - sx2 * y1) + (sx2 * sy1 - sx1 * sy2) * y0) / den);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  }
+
+  function texPlane(F, centre, e1, e2, img, o) {
+    o = o || {};
+    const ctx = F.ctx, cam = F.cam, N = o.grid || 6;
+    const iw = img.width, ih = img.height;
+    F.push(centre, () => {
+      const P = [];
+      for (let j = 0; j <= N; j++) {
+        P.push([]);
+        for (let i = 0; i <= N; i++) {
+          const u = i / N * 2 - 1, v = j / N * 2 - 1;
+          P[j].push(cam.project([
+            centre[0] + e1[0] * u + e2[0] * v,
+            centre[1] + e1[1] * u + e2[1] * v,
+            centre[2] + e1[2] * u + e2[2] * v]));
+        }
+      }
+      if (o.alpha != null) { ctx.save(); ctx.globalAlpha = o.alpha; }
+      for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+          const a = P[j][i], b = P[j][i + 1], c = P[j + 1][i + 1], d = P[j + 1][i];
+          if (!a.ok || !b.ok || !c.ok || !d.ok) continue;
+          const u0 = i / N * iw, u1 = (i + 1) / N * iw;
+          const v0 = j / N * ih, v1 = (j + 1) / N * ih;
+          triTex(ctx, img, [u0, v0, u1, v0, u1, v1], [a.x, a.y, b.x, b.y, c.x, c.y]);
+          triTex(ctx, img, [u0, v0, u1, v1, u0, v1], [a.x, a.y, c.x, c.y, d.x, d.y]);
+        }
+      }
+      if (o.alpha != null) ctx.restore();
+    }, o.bias);
+  }
+
   window.R3 = {
-    Frame, sphere, cylinder, tube, box, plane, arrow, coil, label, callout,
+    Frame, sphere, cylinder, tube, box, plane, texPlane, arrow, coil, label, callout,
     polyline, wireSphere,
     norm, sub, add, scale, dot, cross, perp, LIGHT
   };
