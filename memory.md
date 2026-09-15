@@ -151,6 +151,18 @@ a flat sheet with balls hovering on it. The cause was arithmetic, not art — I 
 body radius for legibility, spaced four lanes at 2.7R, and the bench grew to **3.04 m wide against a
 2.84 m slope**. An incline wider than it is long stops being an incline.
 
+**And the deeper one, found the same day when the first fix made it worse:** the bodies then sank
+INTO the bench. `render3d.js` sorts by the painter's algorithm, and every bench piece was submitted
+with **one depth key at its own centre** — so a large flat quad is drawn either wholly in front of or
+wholly behind each small object resting on it. The near side wall's centre is closer to the camera
+than the bodies, so the wall painted straight over them.
+
+**A single depth key cannot sort a large flat surface against small objects standing on it.** That is
+a property of the algorithm, not a bug in the scene. Ground geometry therefore declares itself with
+`F.GROUND` (a bias far larger than any scene depth, which preserves ordering *within* the bench) and
+is pushed behind everything that is not ground. Apply this to every floor, wall, table and slab in
+any 3D lab. The alternative — subdividing every quad — costs far more and is still not exact.
+
 Rules that follow, for every 3D bench:
 - **Check the aspect ratio of the apparatus numerically, not by eye.** Print the dimensions. A ramp
   is capped here at 60% of the slope length in width.

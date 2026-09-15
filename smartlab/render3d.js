@@ -61,6 +61,16 @@
       items.push({ z: depth(at) + (bias || 0), draw: draw });
     };
 
+    /* A large flat quad cannot be depth-sorted against small objects resting
+       ON it from a single key: the painter's algorithm draws the whole quad
+       either wholly in front of or wholly behind each object, so a near wall
+       paints straight over the bodies standing on the far side of it.
+       Ground geometry therefore declares itself, and is pushed behind
+       everything that is not ground. GROUND is much larger than any scene
+       depth, so the ordering WITHIN the bench is preserved. */
+    F.GROUND = 1e4;
+    F.SKY = -1e4;
+
     /* the lit colour of a surface whose outward normal is n */
     F.shade = (colour, n, o2) => {
       o2 = o2 || {};

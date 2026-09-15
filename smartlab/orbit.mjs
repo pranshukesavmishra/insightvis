@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+import fs from 'fs';
+const body = fs.readFileSync('index.html','utf8');
+fs.writeFileSync('_preview.html','<!doctype html><html><head><meta charset="utf-8"></head><body>'+body+'</body></html>');
+const b = await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const p = await b.newPage({viewport:{width:1320,height:900}});
+p.on('pageerror', e=>console.log('PAGEERROR:', e.message));
+await p.goto('file://'+process.cwd()+'/_preview.html');
+await p.waitForTimeout(1800);
+await p.evaluate(()=>document.querySelector('.navbtn[data-sim="rolling"]').click());
+await p.waitForTimeout(+(process.argv[3]||1800));
+const th = +process.argv[2];
+if (!isNaN(th)) await p.evaluate(t=>{ window.__S.cam.theta = t; }, th);
+await p.waitForTimeout(400);
+const box = await p.evaluate(()=>{const e=document.querySelector('.stagepanel');const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});
+await p.screenshot({path:'bio-'+(process.argv[4]||'orb')+'.png', clip:box});
+await b.close();
