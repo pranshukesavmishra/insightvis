@@ -6,114 +6,11 @@
   'use strict';
   const { clamp, fmt, E } = L;
 
-  /* ---------------------------------------------------------------
-     1 · LORENTZ FORCE — how r and T scale with B, plus a quiz
-     --------------------------------------------------------------- */
-  L.extend('lorentz', {
-    addPlots: [{
-      title: 'Scaling law — both r and T fall as 1/B, so the frequency rises',
-      legend: [{ c: '#3DD6F5', label: 'r / r(at 0.12 T)' }, { c: '#4ADE80', label: 'T / T(at 0.12 T)' }],
-      draw(S, g) {
-        const Bref = 0.12;
-        const rRef = S.vperp0 * S.m / (Math.abs(S.q) * Bref);
-        const tRef = L.TAU * S.m / (Math.abs(S.q) * Bref);
-        const rs = [], ts = [];
-        for (let i = 0; i <= 120; i++) {
-          const B = 0.02 + i / 120 * 0.48;
-          rs.push([B, (S.vperp0 * S.m / (Math.abs(S.q) * B)) / rRef]);
-          ts.push([B, (L.TAU * S.m / (Math.abs(S.q) * B)) / tRef]);
-        }
-        const P = g.Plot({
-          xmin: 0.02, xmax: 0.5, ymin: 0, ymax: 6.5,
-          xlabel: 'magnetic field B (T)', ylabel: 'ratio to value at 0.12 T',
-          xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(0)
-        }).frame();
-        P.clip(() => {
-          P.line(ts, g.theme.ok, 2.4);
-          P.line(rs, g.theme.phys, 2, [5, 3]);
-          P.vline(S.p.B, g.alpha(g.theme.text, .6), [3, 3]);
-          P.dot(S.p.B, (S.rc / rRef), 4.5, g.theme.text, g.theme['ink-950']);
-          P.hline(1, g.alpha(g.theme['text-3'], .5), [2, 5]);
-        });
-        P.tag(S.p.B, S.rc / rRef, 'your setting', g.theme.text, 'left', -10);
-      },
-      hover(S, x) {
-        const B = clamp(x, 0.02, 0.5);
-        const r = S.vperp0 * S.m / (Math.abs(S.q) * B);
-        const T = L.TAU * S.m / (Math.abs(S.q) * B);
-        return [{ label: 'B', value: B.toFixed(3) + ' T' },
-                { label: 'radius', value: (r * 1000).toFixed(2) + ' mm', color: '#3DD6F5' },
-                { label: 'period', value: fmt(T, 3) + ' s', color: '#4ADE80' },
-                { label: 'frequency', value: fmt(1 / T, 3) + ' Hz' }];
-      }
-    }],
-    quiz: [
-      { q: 'A proton moving perpendicular to a uniform magnetic field follows a circular path. If its speed is doubled, the time period of revolution:',
-        options: ['doubles', 'halves', 'stays the same', 'quadruples'], answer: 2,
-        why: 'T = 2πm/qB contains no v. Doubling the speed doubles the radius so the particle covers twice the distance at twice the speed — same time.' },
-      { q: 'A charged particle enters a uniform magnetic field at 30° to the field direction. Its path is:',
-        options: ['a straight line', 'a circle', 'a helix', 'a parabola'], answer: 2,
-        why: 'The perpendicular component circles while the parallel component drifts along the field untouched — the sum of the two is a helix.' },
-      { q: 'In a velocity selector with E ⊥ B, particles passing undeflected have speed:',
-        options: ['E·B', 'E/B', 'B/E', '√(E/B)'], answer: 1,
-        why: 'Setting the electric force qE equal to the magnetic force qvB gives v = E/B, independent of both charge and mass.' },
-      { q: 'The work done by a magnetic force on a moving charge over one full circle is:',
-        options: ['zero', 'positive', 'negative', 'depends on the field strength'], answer: 0,
-        why: 'The force is always perpendicular to the velocity, so F⃗·d⃗s = 0 at every instant. Kinetic energy never changes.' }
-    ]
-  });
-
-  /* ---------------------------------------------------------------
-     2 · YDSE — immerse the apparatus in a medium
-     --------------------------------------------------------------- */
-  L.extend('ydse', {
-    params: { mu: 1.0 },
-    addControlGroups: [{
-      group: 'Medium', items: [
-        { key: 'mu', label: 'Refractive index <i>μ</i>', min: 1.0, max: 1.7, step: 0.01, unit: '',
-          fmt: v => v.toFixed(2), restructure: true }
-      ]
-    }],
-    addPresets: [
-      { name: 'Immersed in water (μ = 1.33)', params: { mu: 1.33, lam: 589, d: 0.25, a: 0.08, D: 1.2, mode: 'double' } }
-    ],
-    wrapSetup(S) {
-      const p = S.p;
-      const mu = p.mu || 1;
-      S.mu = mu;
-      S.lamVac = p.lam * 1e-9;
-      S.lam = S.lamVac / mu;                       // wavelength inside the medium
-      S.beta = S.lam * p.D / S.d;
-      S.env1 = S.lam * p.D / S.a;
-      S.yRange = p.mode === 'single'
-        ? Math.max(2.6 * S.env1, 4e-3)
-        : Math.max(5 * S.beta, 1.5 * S.env1);
-    },
-    addReadouts(S) {
-      const mu = S.mu || 1;
-      return [
-        { label: 'λ inside medium', value: (S.lam * 1e9).toFixed(1), unit: 'nm',
-          flag: mu > 1.001 ? 'warn' : '', hint: mu > 1.001 ? 'λ_vac / μ' : 'in vacuum' },
-        { label: 'Fringe shrink factor', value: (1 / mu).toFixed(3), unit: '×',
-          hint: mu > 1.001 ? 'every fringe narrows by μ' : 'no medium' }
-      ];
-    },
-    quiz: [
-      { q: 'A Young\'s double slit apparatus is completely immersed in water (μ = 1.33). The fringe width:',
-        options: ['increases 1.33 times', 'decreases to 1/1.33 of its value',
-                  'stays the same', 'becomes zero'], answer: 1,
-        why: 'The wavelength inside the medium is λ/μ, and β = λD/d, so every fringe narrows by exactly the refractive index.' },
-      { q: 'In a double-slit experiment d = 3a. Which interference maxima are missing?',
-        options: ['1st, 2nd, 3rd', '3rd, 6th, 9th', '2nd, 4th, 6th', 'none are missing'], answer: 1,
-        why: 'A maximum vanishes when it coincides with a diffraction minimum. With d/a = 3 that happens at orders n = 3, 6, 9 …' },
-      { q: 'Two coherent sources each of intensity I₀ interfere. The intensity at a bright fringe is:',
-        options: ['2I₀', '4I₀', 'I₀', '√2 I₀'], answer: 1,
-        why: 'Amplitudes add, and intensity goes as amplitude squared: (A + A)² = 4A², so 4I₀.' },
-      { q: 'White light is used in a double-slit experiment. The central fringe is:',
-        options: ['violet', 'red', 'white', 'invisible'], answer: 2,
-        why: 'At the centre the path difference is zero for every wavelength, so all colours are in phase and recombine into white.' }
-    ]
-  });
+  /* The old depth patches for LORENTZ and YDSE have been removed: both labs
+     were rebuilt as 3D benches with the medium, the thin plate, the unequal
+     slits, the scaling plots and the quizzes native to the lab itself. The
+     patches were not merely redundant — the YDSE one reused the key `mu`,
+     which now belongs to the plate over slit 1. */
 
   /* ---------------------------------------------------------------
      3 · ORBITALS — show the signed radial function itself

@@ -17,7 +17,8 @@ const h = await p.evaluate(()=>window.__R && window.__R.handles ? window.__R.han
 console.log('handles:', JSON.stringify(h));
 if (h && h.length) {
   const box = await p.evaluate(()=>{const e=document.querySelector('.stage canvas');const r=e.getBoundingClientRect();return {x:r.x,y:r.y};});
-  const t = h[0];
+  const want = process.argv[5];
+  const t = want ? (h.find(x=>x.id===want)||h[0]) : h[0];
   await p.mouse.move(box.x+t.x, box.y+t.y);
   await p.mouse.down();
   await p.mouse.move(box.x+t.x+(+process.argv[3]||0), box.y+t.y+(+process.argv[4]||-60), {steps:12});

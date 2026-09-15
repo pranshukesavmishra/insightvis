@@ -5,6 +5,8 @@
 (function (L) {
   'use strict';
   const { clamp, TAU, fmt, E } = L;
+  const Camera = L.Camera;
+  const PA = window.PHYSART, R3 = window.R3, RX = window.RX;
 
   const QE = 1.602176634e-19, MP = 1.67262192e-27, ME = 9.1093837e-31;
   const SPEC = {
@@ -24,9 +26,9 @@
     name: 'The Cyclotron — Resonance and Maximum Energy',
     chapter: 'Moving Charges & Magnetism',
     exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
-    weight: 'High yield',
-    is3D: false,
-    stageHint: 'The electric field exists only in the gap · detune the RF and watch acceleration collapse',
+    weight: 'Very high yield',
+    is3D: true,
+    stageHint: 'Drag to orbit the machine · E exists only in the gap · detune the RF and watch the gain die',
     lede: 'A cyclotron is two hollow D-shaped electrodes in a magnetic field, with an alternating voltage ' +
       'across the gap between them. The trick that makes it work is that the <b>time for one semicircle does not ' +
       'depend on speed</b> — so a fixed RF frequency stays in step with the particle forever. ' +
@@ -77,6 +79,10 @@
       S.KEmax = Math.pow(sp.q * p.B * p.R, 2) / (2 * sp.m) / QE / 1e6;   // MeV, ideal
       S.turnsIdeal = S.KEmax * 1e6 / (2 * (p.V * 1e3));
 
+      if (!S.cam) {
+        S.cam = Camera({ theta: -1.15, phi: 0.62, dist: 3.5, target: [0, 0, 0] });
+        S.cam.minDist = 1.2; S.cam.maxDist = 14;
+      }
       S.pos = [0, 0.004];
       S.vel = [0, 0];
       S.tp = 0; S.turns = 0; S.crossings = 0; S.KE = 0; S.r = 0;
@@ -137,103 +143,292 @@
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
-      const acc = th.phys;
-      const rfH = 78;
-      const cx = W * 0.42, cy = (H - rfH) / 2 + 6;
-      const sc = Math.min(W * 0.40, (H - rfH) * 0.46) / p.R;
-      const dpx = Math.max(4, S.d * sc);
+      const cam = S.cam;
+      const F = R3.Frame(ctx, cam, { ambient: 0.30, floorZ: null });
+      const ACC = th.phys, NORTH = '#FF5E6C', SOUTH = '#4D8CF5';
+      const k = 1 / p.R;                              // display units per metre
+      const dz = 0.09;                                // dee half-thickness
+      const half = Math.max(S.d * k / 2, 0.012);      // half the gap, display units
+      const polarity = Math.cos(S.wrf * S.tp);
 
-      /* ---- dees ---- */
-      const Rp = p.R * sc;
-      ctx.save();
-      [[-1], [1]].forEach(([sgn]) => {
-        ctx.beginPath();
-        const x0 = cx + sgn * dpx / 2;
-        ctx.moveTo(x0, cy - Rp);
-        ctx.arc(cx, cy, Rp, sgn > 0 ? -Math.PI / 2 : Math.PI / 2, sgn > 0 ? Math.PI / 2 : 3 * Math.PI / 2, false);
-        ctx.lineTo(x0, cy + Rp);
-        ctx.closePath();
-        const polarity = Math.cos(S.wrf * S.tp) * sgn;
-        ctx.fillStyle = g.alpha(polarity > 0 ? '#3A6FA8' : '#A8553A', .17 + .13 * Math.abs(polarity));
-        ctx.fill();
-        ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1.5; ctx.stroke();
-        ctx.font = '600 13px "IBM Plex Mono",monospace';
-        ctx.fillStyle = g.alpha(th['text-2'], .9);
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(polarity > 0 ? '+' : '−', cx + sgn * Rp * 0.62, cy);
+      /* ---------------- the magnet ----------------
+         The pole faces are what make the field; the upper one is drawn as an
+         outline because a solid disc would sit between the camera and the
+         beam it is there to bend. */
+      /* Screen-space helpers. A 3D callout with a fixed offset reads well
+         from one camera and collides from another, so anything that carries
+         words asks the projection which way is "away" before it draws. */
+      const O = cam.project([0, 0, 0]);
+      const away = (pt) => {
+        const q = cam.project(pt);
+        return (q.ok && O.ok && q.x < O.x) ? -1 : 1;
+      };
+      const lowest = (rr, zz) => {
+        let best = null;
+        for (let i = 0; i < 48; i++) {
+          const a = i / 48 * TAU;
+          const q = cam.project([Math.cos(a) * rr, Math.sin(a) * rr, zz]);
+          if (q.ok && (!best || q.y > best.y)) best = q;
+        }
+        return best;
+      };
+      const highest = (rr, zz) => {
+        let best = null;
+        for (let i = 0; i < 48; i++) {
+          const a = i / 48 * TAU;
+          const q = cam.project([Math.cos(a) * rr, Math.sin(a) * rr, zz]);
+          if (q.ok && (!best || q.y < best.y)) best = q;
+        }
+        return best;
+      };
+      const POLE_Z = 0.30, POLE_R = 1.18;
+      S._poleTags = [];
+
+      [[1, NORTH, 'N'], [-1, SOUTH, 'S']].forEach(([sg, col, tag]) => {
+        const zz = sg * POLE_Z, rr = POLE_R;
+        const ring = (z, c, al, w) => {
+          const pts = [];
+          for (let i = 0; i <= 64; i++) {
+            const a = i / 64 * TAU;
+            pts.push([Math.cos(a) * rr, Math.sin(a) * rr, z]);
+          }
+          R3.polyline(F, pts, c, { alpha: al, width: w, bias: F.GROUND });
+        };
+        if (sg < 0) {
+          // the lower pole is the bench the machine stands on: a dark steel
+          // plate, not a slab of colour that would swamp the dees
+          R3.cylinder(F, [0, 0, zz], [0, 0, zz - 0.08], rr, '#26334C',
+                      { segments: 48, shadow: false, ambient: 0.16, bias: F.GROUND });
+          ring(zz, col, 0.55, 1.6);
+        } else {
+          ring(zz, col, 0.5, 1.8);
+        }
+        // the yoke: short posts joining the two poles round the outside
+        for (let i = 0; i < 12; i++) {
+          const a = i / 12 * TAU;
+          R3.polyline(F, [[Math.cos(a) * rr, Math.sin(a) * rr, zz],
+                          [Math.cos(a) * rr, Math.sin(a) * rr, zz - sg * 0.11]],
+                      col, { alpha: 0.28, width: 1.2, bias: F.GROUND });
+        }
+        // B runs pole to pole, straight down through the dees
+        if (sg > 0) {
+          for (let i = 0; i < 6; i++) {
+            const a = (i / 6 + 0.08) * TAU, rad = 1.06;
+            R3.arrow(F, [Math.cos(a) * rad, Math.sin(a) * rad, POLE_Z - 0.02],
+                        [Math.cos(a) * rad, Math.sin(a) * rad, -POLE_Z + 0.02],
+                     0.005, RX.mix(SOUTH, '#8FB6FF', 0.45),
+                     { head: 0.030, shadow: false, ambient: 0.9, bias: F.GROUND });
+          }
+        }
+        // the label goes to whichever edge of this pole's ring is furthest
+        // from the other one on screen, so N never lands under S
+        S._poleTags.push({ sg: sg, col: col,
+          text: tag + ' pole  ·  B = ' + p.B.toFixed(2) + ' T' });
       });
-      ctx.restore();
 
-      // gap
-      ctx.fillStyle = g.alpha(th.warn, .10);
-      ctx.fillRect(cx - dpx / 2, cy - Rp, dpx, Rp * 2);
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.fillText('gap ' + p.gap.toFixed(1) + ' cm', cx, cy + Rp + 6);
-      ctx.fillText('R = ' + p.R.toFixed(2) + ' m', cx + Rp * 0.55, cy + Rp + 6);
+      /* ---------------- the two dees ----------------
+         Each is a D-shaped box: a flat face top and bottom and a wall round
+         the arc. They carry F.GROUND so the beam inside them stays visible —
+         a single depth key cannot sort a big flat lid against a small
+         particle underneath it. */
+      [-1, 1].forEach(sgn => {
+        const live = polarity * sgn;
+        const col = live > 0 ? '#3A6FA8' : '#A8553A';
+        const shade = 0.30 + 0.30 * Math.abs(live);
+        const outline = [];
+        const a0 = sgn > 0 ? -Math.PI / 2 : Math.PI / 2;
+        for (let i = 0; i <= 44; i++) {
+          const a = a0 + (i / 44) * Math.PI;
+          outline.push([Math.cos(a) * 1.0 + sgn * half, Math.sin(a) * 1.0, 0]);
+        }
+        // close the D along the gap edge
+        outline.push([sgn * half, -Math.sin(a0) * 1.0, 0]);
 
-      /* ---- spiral trail ---- */
-      if (p.trail && S.trail.length > 1) {
-        ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        ctx.lineWidth = 1.4; ctx.strokeStyle = g.alpha(acc, .55);
-        ctx.beginPath();
-        S.trail.forEach((t, i) => {
-          const x = cx + t[0] * sc, y = cy - t[1] * sc;
-          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        [-1, 1].forEach(zs => {
+          F.push([sgn * 0.5, 0, zs * dz], () => {
+            const q = outline.map(o => cam.project([o[0], o[1], zs * dz]));
+            if (q.some(x => !x.ok)) return;
+            ctx.fillStyle = F.shade(col, [0, 0, zs], { ambient: shade });
+            ctx.beginPath();
+            q.forEach((x, i2) => i2 ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = g.alpha('#9FB4DE', .45); ctx.lineWidth = 1.2; ctx.stroke();
+          }, F.GROUND);
         });
-        ctx.stroke(); ctx.restore();
+        // the curved outer wall
+        F.push([sgn * 0.9, 0, 0], () => {
+          for (let i = 0; i < outline.length - 1; i++) {
+            const a = outline[i], b = outline[i + 1];
+            const q = [cam.project([a[0], a[1], dz]), cam.project([b[0], b[1], dz]),
+                       cam.project([b[0], b[1], -dz]), cam.project([a[0], a[1], -dz])];
+            if (q.some(x => !x.ok)) continue;
+            const nx = a[0] - sgn * half, ny = a[1];
+            const nl = Math.hypot(nx, ny) || 1;
+            ctx.fillStyle = F.shade(col, [nx / nl, ny / nl, 0], { ambient: shade * 0.9 });
+            ctx.beginPath();
+            q.forEach((x, i2) => i2 ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+            ctx.closePath(); ctx.fill();
+          }
+        }, F.GROUND);
+        R3.label(F, [sgn * 0.62, 0, dz * 1.4], live > 0 ? '+' : '−',
+                 live > 0 ? '#9FC8F0' : '#F0B49F', { size: 17, bias: F.GROUND });
+      });
+
+      /* ---------------- the accelerating gap ----------------
+         E exists ONLY here, and only while the RF is on the right half of its
+         cycle — which is the whole trick of the machine. */
+      {
+        const gl = Math.abs(polarity);
+        F.push([0, 0, 0], () => {
+          const q = [cam.project([-half, -1, dz]), cam.project([half, -1, dz]),
+                     cam.project([half, 1, dz]), cam.project([-half, 1, dz])];
+          if (q.some(x => !x.ok)) return;
+          ctx.save(); ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = g.alpha(th.warn, .06 + .20 * gl);
+          ctx.beginPath();
+          q.forEach((x, i) => i ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+          ctx.closePath(); ctx.fill(); ctx.restore();
+        }, F.GROUND * 0.5);
+        // the field direction in the gap, reversing with the RF
+        for (let i = -2; i <= 2; i++) {
+          if (gl < 0.12) break;
+          const yy = i * 0.34;
+          R3.arrow(F, [-half * Math.sign(polarity || 1) * 3, yy, 0],
+                      [half * Math.sign(polarity || 1) * 3, yy, 0],
+                   0.010, th.warn, { head: 0.045, shadow: false, ambient: 0.7,
+                                     bias: F.GROUND * 0.5 });
+        }
+        const ge = [[0, -1.04, 0], [0, 1.04, 0]].map(v => ({ v: v, q: cam.project(v) }))
+                     .filter(o => o.q.ok).sort((a, b) => b.q.y - a.q.y)[0];
+        if (ge) R3.callout(F, ge.v, away(ge.v) * 34, 26,
+                           'gap ' + p.gap.toFixed(1) + ' cm · E only here', th.warn);
       }
 
-      /* ---- particle ---- */
-      const px = cx + S.pos[0] * sc, py = cy - S.pos[1] * sc;
-      ctx.save(); ctx.globalCompositeOperation = 'lighter';
-      const rg = ctx.createRadialGradient(px, py, 0, px, py, 16);
-      rg.addColorStop(0, g.alpha(acc, .95)); rg.addColorStop(1, g.alpha(acc, 0));
-      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(px, py, 16, 0, TAU); ctx.fill();
-      ctx.restore();
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(px, py, 3.4, 0, TAU); ctx.fill();
+      /* ---------------- the source, the spiral and the beam ---------------- */
+      R3.sphere(F, [0, 0, 0], 0.024, '#C9D4EA', { shadow: false, rim: 0.6, bias: F.GROUND });
+      R3.callout(F, [0, 0, -0.02], away([-0.6, 0, 0]) * 104, 34, 'ion source', th['text-3']);
 
-      if (S.exited) {
-        ctx.font = '700 15px "IBM Plex Sans Condensed",sans-serif';
-        ctx.fillStyle = th.ok; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('EXTRACTED at ' + S.finalKE.toFixed(2) + ' MeV', cx, cy - Rp - 16);
+      if (p.trail && S.trail.length > 1) {
+        R3.polyline(F, S.trail.map(t => [t[0] * k, t[1] * k, 0]), ACC,
+                    { alpha: 0.75, width: 1.6 });
+      }
+      const at = [S.pos[0] * k, S.pos[1] * k, 0];
+      const pr = cam.project(at);
+      if (pr.ok) {
+        F.push(at, () => {
+          ctx.save(); ctx.globalCompositeOperation = 'lighter';
+          const gg = ctx.createRadialGradient(pr.x, pr.y, 0, pr.x, pr.y, 16);
+          gg.addColorStop(0, g.alpha(ACC, .95)); gg.addColorStop(1, g.alpha(ACC, 0));
+          ctx.fillStyle = gg;
+          ctx.beginPath(); ctx.arc(pr.x, pr.y, 16, 0, TAU); ctx.fill();
+          ctx.restore();
+        }, -1);
+      }
+      R3.sphere(F, at, 0.028, '#FFFFFF', { shadow: false, rim: 0.9 });
+
+      /* ---------------- the extraction line ---------------- */
+      {
+        const ex = 1.0, ey = 0;
+        R3.box(F, [1.14, -0.30, 0], [0.05, 0.30, 0.16], '#8FA3C0',
+               { shadow: false, ambient: 0.45, bias: F.GROUND });
+        R3.callout(F, [1.14, -0.30, 0], away([1.14, -0.30, 0]) * 26, 14, 'deflector', th['text-3']);
+        R3.polyline(F, [[1.0, -0.08, 0], [1.60, -0.30, 0]], th.ok,
+                    { alpha: S.exited ? 0.95 : 0.22, width: S.exited ? 2.6 : 1.4,
+                      bias: F.GROUND });
+        R3.callout(F, [1.60, -0.30, 0], away([1.60, -0.30, 0]) * 18, -22,
+                   S.exited ? 'extracted at ' + S.finalKE.toFixed(2) + ' MeV'
+                            : 'extraction at r = R',
+                   S.exited ? th.ok : th['text-3']);
       }
 
-      /* ---- headline numbers ---- */
+      F.render();
+
+      /* the pole labels, placed by screen position so N is always the one
+         at the top of the picture whichever way the machine is turned */
+      (S._poleTags || []).forEach(t => {
+        const q = t.sg > 0 ? highest(POLE_R, POLE_Z) : lowest(POLE_R, -POLE_Z);
+        if (!q) return;
+        const dy = t.sg > 0 ? -16 : 18;
+        ctx.save();
+        ctx.strokeStyle = g.alpha(t.col, .45); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(q.x, q.y + dy); ctx.stroke();
+        ctx.restore();
+        PA.lbl(ctx, q.x, q.y + dy + (t.sg > 0 ? -4 : 9), t.text, t.col, 'center', 9);
+      });
+
+      /* the dee radius is the machine's defining dimension — offer its rim
+         as a grab point so the student sizes the machine by hand */
+      {
+        const rp = cam.project([1.0 + half, 0, 0]);
+        if (rp.ok) {
+          const on = g.dragging === 'rim';
+          ctx.save();
+          ctx.strokeStyle = g.alpha(on ? th.text : ACC, on ? .95 : .6);
+          ctx.lineWidth = on ? 2.2 : 1.6;
+          ctx.beginPath(); ctx.arc(rp.x, rp.y, 7, 0, TAU); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(rp.x - 11, rp.y); ctx.lineTo(rp.x - 16, rp.y);
+          ctx.moveTo(rp.x + 11, rp.y); ctx.lineTo(rp.x + 16, rp.y); ctx.stroke();
+          ctx.restore();
+          const sd = (O.ok && rp.x < O.x) ? -1 : 1;
+          PA.lbl(ctx, rp.x + sd * 22, rp.y + 18,
+                 'dee radius R = ' + (p.R * 100).toFixed(0) + ' cm · drag',
+                 on ? th.text : g.alpha(th['text-3'], .9), sd > 0 ? 'left' : 'right', 9);
+          g.handle(rp.x, rp.y, 16, 'rim');
+        }
+      }
+
+      /* ---------------- the RF supply, drawn as an instrument ---------------- */
+      {
+        const bw = Math.min(W * 0.30, 262), bh = 74;
+        const bx0 = W - bw - 14, by0 = H - bh - 30;
+        ctx.fillStyle = g.alpha('#0B1020', .88);
+        ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(bx0, by0, bw, bh, 8); ctx.fill(); ctx.stroke();
+        PA.lbl(ctx, bx0 + 10, by0 + 13, 'RADIO-FREQUENCY SUPPLY', th['text-3'], 'left', 8.5);
+        const px0 = bx0 + 12, px1 = bx0 + bw - 12, pym = by0 + 44;
+        ctx.strokeStyle = g.alpha(th['text-3'], .45); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(px0, pym); ctx.lineTo(px1, pym); ctx.stroke();
+        ctx.strokeStyle = th.warn; ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        for (let i = 0; i <= 90; i++) {
+          const t = i / 90;
+          const x = px0 + (px1 - px0) * t;
+          const y = pym - Math.cos(S.wrf * S.tp - (1 - t) * 5.2) * 17;
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+        ctx.fillStyle = th.warn;
+        ctx.beginPath(); ctx.arc(px1, pym - polarity * 17, 3.4, 0, TAU); ctx.fill();
+        PA.lbl(ctx, bx0 + 10, by0 + bh - 8,
+               'f = ' + fmt(S.wrf / TAU, 4) + ' Hz   ·   ' +
+               (Math.abs(p.detune - 1) < 0.004 ? 'locked to f_c' : 'detuned ' +
+                ((p.detune - 1) * 100).toFixed(1) + '%'),
+               Math.abs(p.detune - 1) < 0.004 ? th.ok : th.crit, 'left', 9);
+      }
+
+      /* ---------------- header ---------------- */
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.font = '700 20px "IBM Plex Sans Condensed",sans-serif';
-      ctx.fillStyle = th.text;
-      ctx.fillText(S.KE.toFixed(2) + ' MeV', 14, 12);
+      ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif';
+      ctx.fillStyle = S.exited ? th.ok : th.text;
+      ctx.fillText(S.exited ? 'EXTRACTED at ' + S.finalKE.toFixed(2) + ' MeV'
+                            : 'ACCELERATING — turn ' + S.turns.toFixed(1), 14, 8);
       ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('turn ' + S.turns.toFixed(1) + ' of ~' + S.turnsIdeal.toFixed(0) +
-        '   ·   r = ' + (S.r * 100).toFixed(1) + ' cm', 14, 38);
-      ctx.fillStyle = Math.abs(p.detune - 1) < 0.004 ? th.ok : th.crit;
-      ctx.fillText(Math.abs(p.detune - 1) < 0.004
-        ? 'RESONANT — f_RF = f_c'
-        : 'OFF RESONANCE by ' + ((p.detune - 1) * 100).toFixed(1) + '% — gain is collapsing', 14, 54);
-
-      /* ---- RF waveform strip ---- */
-      const ry = H - rfH + 10, rh = rfH - 46;
-      const x0 = 14, x1 = W - 14;
-      ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x0, ry + rh / 2); ctx.lineTo(x1, ry + rh / 2); ctx.stroke();
-      ctx.strokeStyle = g.alpha(th.warn, .9); ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      const cycles = 3.2;
-      for (let i = 0; i <= 240; i++) {
-        const u = i / 240;
-        const ph = S.wrf * S.tp + (u - 1) * cycles * TAU;
-        const x = x0 + u * (x1 - x0), y = ry + rh / 2 - Math.cos(ph) * rh * 0.42;
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      }
-      ctx.stroke();
-      ctx.fillStyle = th.warn;
-      ctx.beginPath(); ctx.arc(x1, ry + rh / 2 - Math.cos(S.wrf * S.tp) * rh * 0.42, 3.2, 0, TAU); ctx.fill();
-      ctx.font = '9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-      ctx.fillText('RF gap voltage  ±' + p.V.toFixed(0) + ' kV  at ' + fmt(S.wrf / TAU, 3) + ' Hz', x0, ry - 2);
+      ctx.fillText('KE = ' + S.KE.toFixed(3) + ' MeV   ·   r = ' + (S.r * 100).toFixed(1) +
+        ' cm of ' + (p.R * 100).toFixed(0) + ' cm   ·   f_c = ' + fmt(S.fc, 4) + ' Hz', 14, 31);
+      const res = Math.abs(p.detune - 1) < 0.004;
+      ctx.fillStyle = res ? th.ok : th.crit;
+      ctx.fillText(res
+        ? 'RF locked to qB/2πm — every gap crossing adds energy'
+        : 'RF detuned: the phase error accumulates and the gain will die', 14, 45);
     },
 
+    /* the dee radius is the machine's defining dimension — drag its rim */
+    onDrag(S, e) {
+      if (e.id !== 'rim' || !S.cam) return;
+      const perPx = S.cam.dist / Math.max(S.cam._k, 1);
+      S.p.R = clamp(S.p.R + e.dx * perPx * S.p.R, 0.15, 1.2);
+      this.setup(S);
+    },
     plots: [
       { title: 'Energy gained per gap crossing',
         legend: [{ c: '#3DD6F5', label: 'kinetic energy (MeV)' }, { c: '#63729A', label: 'ideal ceiling' }],
@@ -317,6 +512,47 @@
     eqNote: '<b>Notice what is missing from KE<sub>max</sub>: the voltage.</b> Raising V does not raise the final ' +
       'energy at all — it just gets the particle there in fewer turns. Only B, R and the charge-to-mass ratio ' +
       'set the ceiling. This is the single most examined idea about the cyclotron.',
+
+    problems: [
+      { source: 'JEE Main pattern · the resonance condition',
+        q: 'A cyclotron accelerates protons in a magnetic field of 0.500 T. At what frequency must the radio-frequency supply across the dees oscillate? Give the answer in MHz. (m_p = 1.673 × 10⁻²⁷ kg)',
+        params: { species: 'p', B: 0.5, V: 50, R: 0.5, detune: 1 },
+        predict: { label: 'RF frequency', unit: 'MHz', tol: 0.02 },
+        measure: S => S.fc / 1e6,
+        working: 'f_c = qB/2πm = (1.602×10⁻¹⁹ × 0.500)/(2π × 1.673×10⁻²⁷) = <b>7.62 MHz</b>. ' +
+          'The dee radius, the gap voltage and the particle\'s current speed are all irrelevant — that is ' +
+          'the whole content of the word <i>resonance</i> here. Slide the RF away from 1.000× and watch ' +
+          'the energy curve flatten out and then fall.' },
+      { source: 'JEE Main pattern · the energy ceiling',
+        q: 'The same machine — B = 0.500 T, dee radius 0.500 m — is used to accelerate deuterons instead of protons. Find the maximum kinetic energy in MeV. (m_d = 2.014 m_p)',
+        params: { species: 'd', B: 0.5, V: 50, R: 0.5, detune: 1 },
+        predict: { label: 'KE_max', unit: 'MeV', tol: 0.03 },
+        measure: S => S.KEmax,
+        working: 'KE_max = q²B²R²/2m. The deuteron carries the same charge as a proton but is 2.014 times ' +
+          'as heavy, so its ceiling is the proton\'s 2.99 MeV divided by 2.014 = <b>1.49 MeV</b>. ' +
+          'The trap: many students double the mass and expect the energy to double because the particle is ' +
+          '"bigger". Mass sits in the <i>denominator</i> — a heavier particle goes slower at the same radius, ' +
+          'and KE = q²B²R²/2m falls.' },
+      { source: 'JEE Advanced pattern · how many turns',
+        q: 'Protons are accelerated in a cyclotron of dee radius 0.500 m at B = 0.500 T, with 100 kV across the gap. The particle crosses the gap twice per revolution. How many complete revolutions does it make before extraction?',
+        params: { species: 'p', B: 0.5, V: 100, R: 0.5, detune: 1 },
+        predict: { label: 'revolutions', unit: '', tol: 0.05 },
+        measure: S => S.turnsIdeal,
+        working: 'Each gap crossing adds qV = 100 keV, and there are two crossings per revolution, so each ' +
+          'revolution adds 200 keV. n = KE_max/2qV = 2.99 MeV / 0.200 MeV = <b>15 revolutions</b>. ' +
+          'Doubling V halves the number of turns but leaves KE_max untouched — the ceiling is set by ' +
+          'B and R alone. Run it and count the loops in the spiral.' },
+      { source: 'JEE Advanced pattern · alpha versus proton',
+        q: 'An alpha particle (q = 2e, m = 4.00 m_p) replaces the proton in the same cyclotron. By what factor does the required RF frequency change?',
+        params: { species: 'alpha', B: 0.5, V: 50, R: 0.5, detune: 1 },
+        predict: { label: 'f_alpha / f_proton', unit: '×', tol: 0.03 },
+        measure: S => (2 / 4.0015),
+        working: 'f = qB/2πm depends only on q/m. For the alpha, q/m = 2e/4m_p = half the proton\'s, ' +
+          'so f_α = <b>0.50 f_p</b> — about 3.81 MHz. The deuteron and the alpha, by contrast, share ' +
+          'the same q/m to within a fraction of a percent, so <i>one machine tuned for deuterons will ' +
+          'accelerate alphas with no retuning at all</i>. That coincidence is examined more often than ' +
+          'the formula itself.' }
+    ],
 
     walkthrough: [
       { title: '1 · Why one fixed frequency works forever',
