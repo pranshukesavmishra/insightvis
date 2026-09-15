@@ -125,6 +125,7 @@ are **lower than they look**, because each score is given on work I had already 
 | Organic chemistry, 5 labs (2026-09-13) | **"50% matching my expectations"** | The *shape* was right and became the template (§2.5). |
 | Biology, first pass | *"too bad"*, *"the graphics the most I didn't like"* | Led to `art-zoo.js`, then `render.js`. |
 | Physics, 5 labs (2026-09-14) | **"I like only 40%"** | **Lower than organic.** Correctness and layout were not the problem; the ceiling is much higher than I have been building to. |
+| Physics, after the 3D round (2026-09-15) | **"i like all physics simulations you made recently"** — accepted without the "but" | The round that moved it did four things: **true 3D benches** on `render3d.js`, **draggable apparatus** so the student builds the input, **predict-then-check problems**, and three new chapters. Treat that combination as what 40% → accepted actually costs. |
 
 **Read the 40% as an instruction, not a grade.** The physics round was audited clean, laid out to the
 plate standard and numerically correct — and still scored below the organic round. So the gap is
@@ -144,6 +145,17 @@ plate standard and numerically correct — and still scored below the organic ro
    supports it (§2.11 step 7) and the labs must actually use it.
 
 **Never present a round as finished because it verified clean.** Clean is the floor.
+
+**What finally moved the score.** Not more labs, and not more correctness — the physics round that
+scored 40% was already audited clean and numerically right. It was **3D, touchability and depth of
+interaction**: benches you can orbit, apparatus you can drag into shape, and problems that make the
+student commit before the simulation answers. When a round is scored low and the numbers are already
+right, look at those three before adding anything new.
+
+**And the two rounds of corrections that followed are part of the lesson.** The client caught a
+broken bench twice running, both times in a *fullscreen* or *orbited* view I had never looked at.
+Screenshotting the default camera is not verification of a 3D scene — orbit it, and check the
+apparatus proportions numerically (§2.12).
 
 ### 2.12 A 3D bench must still read as the object it is
 Found by the client in a fullscreen screenshot of the rolling lab, 2026-09-14: the incline had become
