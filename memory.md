@@ -126,6 +126,7 @@ are **lower than they look**, because each score is given on work I had already 
 | Biology, first pass | *"too bad"*, *"the graphics the most I didn't like"* | Led to `art-zoo.js`, then `render.js`. |
 | Physics, 5 labs (2026-09-14) | **"I like only 40%"** | **Lower than organic.** Correctness and layout were not the problem; the ceiling is much higher than I have been building to. |
 | Physics, after the 3D round (2026-09-15) | **"i like all physics simulations you made recently"** — accepted without the "but" | The round that moved it did four things: **true 3D benches** on `render3d.js`, **draggable apparatus** so the student builds the input, **predict-then-check problems**, and three new chapters. Treat that combination as what 40% → accepted actually costs. |
+| The four earliest physics labs, same screenshot (2026-09-15) | *"these you made earlier, i didn't like them that much... the 1st one charged particle and cro— is okay but that also needs very much upgradations. so go deeply into it and improve them at high and advance level"* | **A lab is not finished because it once shipped.** Lorentz, cyclotron, YDSE and resolving power all passed audit, all had correct physics, and all read as the older generation the moment they sat next to the new benches. When the bar moves, everything below it becomes work. |
 
 **Read the 40% as an instruction, not a grade.** The physics round was audited clean, laid out to the
 plate standard and numerically correct — and still scored below the organic round. So the gap is
@@ -151,6 +152,21 @@ scored 40% was already audited clean and numerically right. It was **3D, touchab
 interaction**: benches you can orbit, apparatus you can drag into shape, and problems that make the
 student commit before the simulation answers. When a round is scored low and the numbers are already
 right, look at those three before adding anything new.
+
+**"Advance level" means new physics, not more polish.** Asked to take the four earliest physics labs
+"deeply into it", the thing that actually raised them was examinable material they did not have:
+a thin plate over one slit, immersion, unequal slits and white light in YDSE; the mass spectrometer
+and the cycloid drift in the Lorentz chamber; a logarithmic aperture spanning a pinhole to Hubble,
+the microscope form 0.61λ/NA and the Sparrow limit in the resolving lab. Redrawing what was already
+there would not have moved any of them.
+
+**And the one place the rebuild found the old lab was simply wrong.** The resolving lab reported a
+pair as RESOLVED whenever Δθ ≥ θ_min, because it compared two numbers. Rayleigh's 0.735 dip is
+derived for two *equal* sources; a companion at a quarter of the brightness sits inside the bright
+one's Airy skirt and the profile has a single maximum. The verdict now scans the summed profile for
+two maxima and measures the valley against the **weaker** of them — verified at 0.734 for the equal
+pair at exactly θ_min, and 0.997 (one blur) for the unequal pair at the same separation. **When a
+rebuild touches a formula, re-derive the special case the formula assumed.**
 
 **And the two rounds of corrections that followed are part of the lesson.** The client caught a
 broken bench twice running, both times in a *fullscreen* or *orbited* view I had never looked at.
@@ -188,6 +204,40 @@ Rules that follow, for every 3D bench:
 - **Check the sign of every vector against a worked case.** ω was drawn along −y; for motion
   down-slope with the axis across the bench, ω = (n × v)/R points along **+y**. Verify on the flat
   case: n = ẑ, v = +x̂, ẑ × x̂ = ŷ.
+
+**Two more rules, from the orbit sweep on 2026-09-15:**
+- **Occlusion is a question about the camera, not about the scene.** Both the Lorentz chamber and
+  the cyclotron hid their own beam behind a magnet pole face from angles the default view never
+  reaches. Deciding by *mode* ("the flat experiments outline their poles") fixed one view and broke
+  the rest. The right test is `Math.sin(cam.phi)`: whichever solid sits on the camera's side of the
+  mid-plane becomes an outline, the far one stays solid, and the scene is readable from every angle
+  the orbit can reach. Generalise: any large solid that can come between the camera and the subject
+  should decide its own opacity from the camera, every frame.
+- **A 3D label placed by a fixed screen offset is correct from one angle and wrong from the rest.**
+  N landed under S, gap captions sat on top of the dees, and leaders ran off the left edge. Ask the
+  projection first: pick the extreme point of the object's own silhouette (`highest`/`lowest` over
+  its rim), and choose the leader direction from the label's projected x against the scene centre.
+  Where an object is always on one side of the picture, hard-code the direction rather than
+  computing it.
+
+**And the harnesses this needs.** `sweep.mjs id [wait] [views]` renders one lab from a list of
+camera angles; `sweepall.mjs a,b,c` walks several labs at the home view plus two extremes derived
+from it; `narrow.mjs a,b,c` renders at 430 px and reports horizontal overflow. **Reading the default
+view is not verification.** Both bugs above were invisible from the camera each lab opens on.
+
+### 2.13 A drag handle on a compressed axis needs a gain, and the gain is not a fudge
+Several benches draw a quantity on a deliberately compressed or non-linear scale, because the true
+one is unviewable: the double slit's screen distance spans 2.6 m inside 0.90 display units, its slit
+separation is sub-millimetre, and the resolving bench's aperture runs over four decades on a
+logarithmic slider. Mapping a drag 1:1 through that projection sends the parameter from one end of
+its range to the other in a flick — measured, not guessed: 60 px took D across half its range and d
+to its floor.
+
+So: **invert the drawn map first** (recover the parameter from the drawn quantity, not from a
+pixel-per-metre figure taken off the projection), then apply an explicit gain chosen so the full
+range takes roughly a third of the stage, and say in a comment why the gain exists. Verify with
+`drag.mjs id dx dy handleId`, at several dx, in both directions. A handle that saturates is worse
+than no handle.
 
 ### 2.9 The agreed look: rich, volumetric, vivid, dense
 Asked directly on 2026-09-13, the client chose **all three** of rich 3D realism, vivid colour and
@@ -662,6 +712,24 @@ Append only. Never rewrite history.
 ---
 
 ## 13. Session log
+
+- **2026-09-15** — **Rebuilt the four earliest physics labs as 3D benches.** The client kept the new
+  physics round but singled out lorentz, cyclotron, ydse and resolving as the older generation.
+  *Cyclotron*: extruded D-shaped dees tinted by RF polarity, pole faces, a gap that glows only while
+  E is on, a draggable dee rim, four worked problems. *YDSE*: an optical bench on a graduated rail
+  whose screen carries the intensity integral column by column in true colour with exact sin θ, plus
+  four pieces of physics it never had — a thin plate over one slit, immersion, unequal slits and
+  white light — three drag handles, a phasor panel, an order-number plot, five problems and a
+  nine-step walkthrough. *Resolving power*: the real two-dimensional Airy image painted on the focal
+  plane through a new `R3.texPlane`, a logarithmic aperture from a pinhole to Hubble, instrument
+  presets, the microscope form 0.61λ/NA, the Sparrow limit, and a resolved/not-resolved verdict that
+  scans the profile instead of comparing two numbers — which caught the old lab calling an unequal
+  pair resolved. Removed the stale `sims-extend.js` patches for lorentz and ydse; the ydse one had
+  come to collide over the key `mu`. The orbit sweep then found the pole faces occluding their own
+  beam from angles the default camera never reaches, and the instrument panels overlapping at phone
+  width. Wrote `sweep.mjs`, `sweepall.mjs`, `narrow.mjs`, `probchk.mjs`, `preset.mjs`, `ydchk.mjs`,
+  `dipchk.mjs` and `instchk.mjs`. Audit clean at 34 sims; all fifteen worked answers across the four
+  labs reproduce their own working.
 
 - **2026-09-14 (c)** — **Acted on the 40%.** Client: *"i like what you built, but i like only 40% so it
   still need very much upgradations."* Recorded the build method and the calibration table (§2.11, §2.10)

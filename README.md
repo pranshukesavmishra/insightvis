@@ -105,29 +105,42 @@ Every experiment is held to this bar:
 
 Source: [`smartlab/`](./smartlab). **Thirty-four experiments across twenty chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
-**Physics now spans ten chapters** — five of its benches are built in true 3D on `render3d.js`,
+**Physics now spans ten chapters** — nine of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
 
 ### Physics · Moving Charges & Magnetism
 **1 · Charged Particle in Crossed E and B Fields**
-Integrated with a **Boris pusher**, which conserves |v| exactly under a pure magnetic field — so the
-flat speed trace is a proof that the magnetic force does no work. Cyclotron motion, helices, the
-velocity selector and the mass spectrometer.
+A vacuum chamber you can walk around, with pole faces, deflecting plates, an aimable injector and a
+detector. Integrated with a **Boris pusher**, which conserves |v| exactly under a pure magnetic
+field — so the flat speed trace is a proof that the magnetic force does no work. Five modes: the
+helix, the velocity selector, a **mass spectrometer** that separates ¹²C from ¹³C by 22 mm on a real
+detector strip, the **cycloid drift**, and E parallel to B.
 
 **2 · The Cyclotron — Resonance and Maximum Energy**
-The real device: E exists **only inside the dee gap** and oscillates at the RF frequency, so you can
-**detune the RF** and watch the acceleration collapse as the phase error accumulates. Proves that
-KE_max = q²B²R²/2m is independent of the gap voltage.
+The real machine in 3D: two extruded D-shaped dees tinted by the RF polarity, magnet pole faces with
+the field running between them, and an accelerating gap that glows **only while E is on**. Drag the
+dee rim to resize the machine. **Detune the RF** and watch the acceleration collapse as the phase
+error accumulates. Proves that KE_max = q²B²R²/2m is independent of the gap voltage.
 
 ### Physics · Wave Optics
 **3 · Young's Double Slit — Path Difference to Fringe**
-True intensity formula including the **single-slit sinc² envelope**, so missing orders appear exactly
-where d/a is integral. A λ-ruler counts the path difference in whole wavelengths as P sweeps.
-Immersion in a medium narrows every fringe by μ.
+An optical bench on a graduated rail: lamp, collimating slit, slit plate and screen, each on its own
+post. The pattern is the intensity integral evaluated column by column **across the real screen** in
+the true colour of the light, with exact sin θ rather than the small-angle form — including the
+**single-slit sinc² envelope**, so missing orders appear exactly where d/a is integral. Four further
+effects, all examined: a **thin plate over one slit** translates the whole pattern by (μ−n)tD/nd
+while β is untouched; **immersion** makes λ into λ/n; **unequal slits** kill the contrast and move
+nothing; and **white light** shows why only the central fringe is white. Drag P across the pattern,
+the screen along the rail, or a slit across the plate.
 
 **4 · Diffraction & Resolving Power — the Rayleigh Criterion**
-The true **Airy pattern** from the Bessel function J₁ — not a Gaussian stand-in. Two point sources are
-summed and the lab reports resolved / just resolved / unresolved against θ_min = 1.22 λ/D.
+The focal plane carries the real **two-dimensional Airy image** — the J₁ rings and all — with the
+first dark ring drawn on it, so the Rayleigh criterion is something you look at rather than read.
+The aperture slider is logarithmic and spans a 0.5 mm pinhole to Hubble's 2.4 m mirror, with
+instrument presets that say what each one separates at 25 cm, at 1 km and on the Moon. Carries the
+microscope form 0.61 λ/NA and the **Sparrow limit** alongside Rayleigh's 1.22. The verdict scans the
+summed profile for two maxima and measures the valley against the *weaker* of them, because
+Rayleigh's 0.735 dip assumes an equal pair — a faint companion at exactly θ_min is **not** resolved.
 
 ### Physics · System of Particles & Rotational Motion
 **27 · Rolling, Slipping and the Moment of Inertia**
@@ -373,9 +386,23 @@ smartlab/
 ├── art-bio.js           anatomical figure library (`window.BIOART`) — the vertebrate heart,
 │                        the neuron, the phospholipid bilayer and the synapse. Every figure is
 │                        drawn in a normalised box and scaled, so any lab places one at any size.
+├── render3d.js          3D apparatus layer (`window.R3`) — a depth-sorted frame you push
+│                        primitives into: spheres, cylinders, tubes, boxes, planes, arrows,
+│                        coils, polylines and labels, plus `texPlane`, which paints an
+│                        offscreen canvas onto any plane in the scene as a grid of affine
+│                        triangles. Ground geometry declares itself with `F.GROUND`, because
+│                        a single depth key cannot sort a large flat surface against the
+│                        small objects standing on it.
 └── sims-extend.js       depth pass — extra controls, second graphs and quizzes
-                         bolted onto the original six via `InsightLab.extend()`
+                         bolted onto the earlier labs via `InsightLab.extend()`
 ```
+
+**Nine physics benches are real 3D scenes.** Rolling bodies on an inclined bench, a vacuum chamber
+with pole faces and an aimable injector, a cyclotron with extruded dees, an optical rail carrying a
+double slit, and a focal plane painted with a true Airy image — all orbitable, all with apparatus
+you can drag into shape. Three harnesses exist because the default camera hides things:
+`sweep.mjs` renders one lab from a list of angles, `sweepall.mjs` walks several labs at their home
+view plus two extremes, and `narrow.mjs` checks 430 px for overflow.
 
 **Mechanisms animate, step by step.** `smartlab/mech.js` renders a reaction as a list of scenes and
 interpolates between them: bonds genuinely break and form, charges fade in, fractional bond orders
