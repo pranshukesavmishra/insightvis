@@ -742,6 +742,25 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-15 (b)** — **Batch 1 of ten syllabus labs: Current Electricity, Ray Optics, Waves.**
+  Client chose JEE Main/Advanced syllabus topics over Olympiad exotica, so "ultra level" now means
+  depth of computation on common chapters. Built `solve.js` first (linear solve, resistive network
+  by modified nodal analysis, the 1D wave equation, Snell in vectors, an accumulating histogram) so
+  ten labs reuse machinery instead of inventing it, and added a DC cell and a moving-coil
+  galvanometer to `art-physics.js`. **Every solver was verified against hand-worked cases before a
+  single pixel was drawn** — series and parallel networks, internal resistance, a balanced
+  Wheatstone bridge at 1.8e-17 A, a two-loop Kirchhoff problem giving exactly 19/3 V, the thin-lens
+  limit to 4e-5, the thick-lens back focal distance to 0.03%, mirror formula to 5e-6, and the string
+  and pipe mode frequencies to five figures. Six real defects found and fixed this way, each
+  recorded in its commit: a conductance floor too small to keep a null exact; a 2D least-squares
+  crossing point that turned 2 mm of aberration into 60 mm of error; longitudinal aberration measured
+  from an off-axis point where it is not defined; field angle breaking the lens formula independently
+  of aperture; inverted pipe boundary conditions; and a step-count clamp that broke the Courant
+  condition and sent the wave equation to NaN. The waves lab ended up drawing the exact steady state
+  rather than an integrator run, because a driven string needs ~Q cycles to settle and Q is in the
+  hundreds — the integrator stayed as the authority that fixes the mode frequencies. Audit clean at
+  37 sims; all fifteen worked answers reproduce their working.
+
 - **2026-09-15** — **Rebuilt the four earliest physics labs as 3D benches.** The client kept the new
   physics round but singled out lorentz, cyclotron, ydse and resolving as the older generation.
   *Cyclotron*: extruded D-shaped dees tinted by RF polarity, pole faces, a gap that glows only while

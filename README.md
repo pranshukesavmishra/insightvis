@@ -103,9 +103,9 @@ Every experiment is held to this bar:
 
 ## 4. Insight Smart Lab — v7 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Thirty-four experiments across twenty chapters.**
+Source: [`smartlab/`](./smartlab). **Thirty-seven experiments across twenty-three chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
-**Physics now spans ten chapters** — nine of its benches are built in true 3D on `render3d.js`,
+**Physics now spans thirteen chapters** — ten of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
 
 ### Physics · Moving Charges & Magnetism
@@ -141,6 +141,29 @@ instrument presets that say what each one separates at 25 cm, at 1 km and on the
 microscope form 0.61 λ/NA and the **Sparrow limit** alongside Rayleigh's 1.22. The verdict scans the
 summed profile for two maxima and measures the valley against the *weaker* of them, because
 Rayleigh's 0.735 dip assumes an equal pair — a faint companion at exactly θ_min is **not** resolved.
+
+### Physics · Current Electricity
+**The Circuit Bench — Kirchhoff, Wheatstone and the Potentiometer**
+Knows no circuit law. It assembles the **node-admittance matrix** from whatever is wired up and
+solves it, so the Wheatstone balance condition, the metre-bridge null and the potentiometer's
+zero-current reading are all read back out of the solution. Drag the jockey and hunt the null: at
+balance the galvanometer reads 10⁻¹⁷ A, and the potentiometer's balance point does not move when
+you change the test cell's internal resistance — which is the whole reason the instrument exists.
+
+### Physics · Ray Optics & Optical Instruments
+**The Optical Bench — Lenses, Mirrors and Real Images**
+Every ray is refracted with **Snell's law at both spherical surfaces** of a real thick lens, and the
+image is found as the plane of least confusion of the emergent bundle. The lens formula is printed
+beside the traced result so you can watch the two agree at a narrow aperture and **pull apart as you
+open it** — that gap is spherical aberration. Convex and concave lenses, both mirrors, and a
+two-lens combination.
+
+### Physics · Waves
+**Waves and Sound — Standing Waves, Beats and Doppler**
+The harmonic series is a **result of the boundary conditions**, not a rule: a closed pipe resonates
+at f₁ and 3f₁ and flatly refuses at 2f₁, while an open pipe of the same length takes every
+harmonic. Beats are drawn as an exact sum, and the Doppler panel shows that a moving source and a
+moving observer at the same speed give **genuinely different** frequencies.
 
 ### Physics · System of Particles & Rotational Motion
 **27 · Rolling, Slipping and the Moment of Inertia**
