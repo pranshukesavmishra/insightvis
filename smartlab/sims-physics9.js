@@ -831,4 +831,938 @@
       'meter branch — not to ignore the cell\'s internal resistance elsewhere in the circuit.</div>'
   });
 
+
+  /* =========================================================================
+     14 · RAY OPTICS — traced surface by surface, never by the lens formula
+
+     Every ray is refracted with Snell's law at each spherical surface and
+     reflected at each mirror. The image position is then found by asking
+     where the emergent rays ACTUALLY cross (a least-squares crossing point),
+     not by evaluating 1/v − 1/u = 1/f. The two disagree, and the difference
+     is spherical aberration — which is the point of tracing at all.
+     ========================================================================= */
+
+  /* Intersection of a ray with a spherical surface whose vertex sits at x = xv
+     and whose centre of curvature is at x = xv + R. R > 0 means the centre is
+     to the right, i.e. the surface bulges toward −x. Returns the hit nearest
+     the vertex that lies ahead of the ray. */
+  function hitSphere(P, D, xv, R, aperture) {
+    if (!isFinite(R) || Math.abs(R) > 1e6) {
+      // a plane surface
+      if (Math.abs(D[0]) < 1e-12) return null;
+      const t = (xv - P[0]) / D[0];
+      if (t <= 1e-9) return null;
+      const z = P[1] + t * D[1];
+      if (Math.abs(z) > aperture) return null;
+      return { t: t, p: [xv, z], n: [1, 0] };
+    }
+    const cx = xv + R;
+    const ox = P[0] - cx, oz = P[1];
+    const b = 2 * (ox * D[0] + oz * D[1]);
+    const c = ox * ox + oz * oz - R * R;
+    const disc = b * b - 4 * c;                  // |D| = 1
+    if (disc < 0) return null;
+    const sq = Math.sqrt(disc);
+    const cand = [(-b - sq) / 2, (-b + sq) / 2].filter(t => t > 1e-9);
+    let best = null;
+    cand.forEach(t => {
+      const px = P[0] + t * D[0], pz = P[1] + t * D[1];
+      if (Math.abs(pz) > aperture) return;
+      // keep the intersection on the vertex side of the centre
+      if (R > 0 ? px > cx : px < cx) return;
+      if (!best || Math.abs(px - xv) < Math.abs(best.p[0] - xv)) {
+        const nx = (px - cx) / R, nz = pz / R;
+        best = { t: t, p: [px, pz], n: [nx, nz] };
+      }
+    });
+    return best;
+  }
+
+  /* Trace one ray through an ordered list of surfaces.
+     Each surface: { xv, R, n1, n2, aperture, mirror }
+     Returns the polyline of the path plus the final ray, or null if the ray
+     is blocked by an aperture or totally internally reflected. */
+  function traceRay(P, D, surfaces, xEnd) {
+    const path = [[P[0], P[1]]];
+    let p = P.slice(), d = D.slice();
+    for (let i = 0; i < surfaces.length; i++) {
+      const s = surfaces[i];
+      const h = hitSphere(p, d, s.xv, s.R, s.aperture);
+      if (!h) return { path: path, dir: d, p: p, blocked: true };
+      path.push([h.p[0], h.p[1]]);
+      p = h.p;
+      let nd;
+      if (s.mirror) nd = SV.reflect(d, h.n);
+      else nd = SV.refract(d, h.n, s.n1, s.n2);
+      if (!nd) return { path: path, dir: d, p: p, tir: true };
+      const L = Math.hypot(nd[0], nd[1]) || 1;
+      d = [nd[0] / L, nd[1] / L];
+    }
+    // run on to the end of the bench
+    const tEnd = Math.abs(d[0]) > 1e-9 ? (xEnd - p[0]) / d[0] : 0;
+    const t = tEnd > 0 ? tEnd : 2.4;
+    path.push([p[0] + t * d[0], p[1] + t * d[1]]);
+    return { path: path, dir: d, p: p };
+  }
+
+  /* Where do a bundle of rays actually cross?
+
+     The obvious answer — least squares over the perpendicular distances to
+     every ray — is badly conditioned for a NARROW pencil: the position along
+     the beam is barely constrained when every ray points nearly the same way,
+     and a 2 mm aberration came out as a 60 mm error. So instead find the
+     plane of least confusion, which is both well conditioned and the actual
+     definition of a focus: write each ray's height as z_i(x) = a_i + b_i·x
+     and minimise the VARIANCE of the z_i over x. With A = a − ā and B = b − b̄
+     that is a one-line least squares, x = −ΣAB/ΣB², and it needs no special
+     case for a virtual image — x simply comes out negative. */
+  function crossingPoint(rays) {
+    const a = [], b = [];
+    rays.forEach(r => {
+      if (!r || r.blocked || r.tir) return;
+      if (Math.abs(r.dir[0]) < 1e-9) return;
+      const m = r.dir[1] / r.dir[0];
+      b.push(m); a.push(r.p[1] - m * r.p[0]);            // z = a + b·x
+    });
+    const n = a.length;
+    if (n < 2) return null;
+    let am = 0, bm = 0;
+    for (let i = 0; i < n; i++) { am += a[i]; bm += b[i]; }
+    am /= n; bm /= n;
+    let sAB = 0, sBB = 0;
+    for (let i = 0; i < n; i++) {
+      const A = a[i] - am, B = b[i] - bm;
+      sAB += A * B; sBB += B * B;
+    }
+    if (sBB < 1e-20) return null;                        // a genuinely parallel bundle
+    const x = -sAB / sBB;
+    return [x, am + bm * x, n];
+  }
+
+
+  /* Assemble the surfaces for whichever element is on the bench. A lens is
+     always two real spherical surfaces; the focal length slider sets their
+     radius through the lens-maker's equation, and everything after that is
+     pure geometry. */
+  function optics(S) {
+    const p = S.p, ap = p.aperture / 2, n = p.nGlass;
+    if (p.mode === 'cmirror' || p.mode === 'xmirror') {
+      const R = (p.mode === 'cmirror' ? -1 : 1) * Math.abs(p.Rm);
+      return { surf: [{ xv: 0, R: R, n1: 1, n2: 1, aperture: ap, mirror: true }],
+               f: R / 2, ap: ap, mirror: true, xEnd: -3.2 };
+    }
+    const sgn = p.mode === 'concave' ? -1 : 1;
+    const f = sgn * Math.abs(p.f);
+    const R = 2 * (n - 1) * f;                        // symmetric, R1 = R, R2 = −R
+    const t = Math.max(p.thick, 1e-4);
+    const first = [{ xv: -t / 2, R: R, n1: 1, n2: n, aperture: ap },
+                   { xv:  t / 2, R: -R, n1: n, n2: 1, aperture: ap }];
+    if (p.mode !== 'combo') return { surf: first, f: f, ap: ap, xEnd: 3.2 };
+    // a second lens further down the bench — the combination question
+    const f2 = Math.abs(p.f2), R2 = 2 * (n - 1) * f2;
+    return { surf: first.concat([
+        { xv: p.sep - t / 2, R: R2, n1: 1, n2: n, aperture: ap },
+        { xv: p.sep + t / 2, R: -R2, n1: n, n2: 1, aperture: ap }]),
+      f: f, f2: f2, ap: ap, xEnd: 3.2, two: true };
+  }
+
+  L.register({
+    id: 'rayoptics', subject: 'physics',
+    name: 'The Optical Bench — Lenses, Mirrors and Real Images',
+    chapter: 'Ray Optics & Optical Instruments',
+    exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
+    weight: 'Very high yield',
+    is3D: true,
+    stageHint: 'Drag to walk round the bench · drag the object along the rail · slide the screen to find focus',
+    lede: 'The lens formula is never used here. Every ray is <b>refracted with Snell\'s law at each of the two ' +
+      'real spherical surfaces</b>, and the image is found by asking where the emergent rays actually cross. ' +
+      'Compare that with 1/v − 1/u = 1/f in the readouts: they agree beautifully for a narrow bundle and ' +
+      '<b>disagree as you open the aperture</b>, because a spherical surface does not bring marginal rays to ' +
+      'the same point as paraxial ones. That gap is spherical aberration, and it is the reason the formula ' +
+      'is an approximation rather than a law.',
+
+    params: { mode: 'convex', u: 0.60, f: 0.20, nGlass: 1.50, thick: 0.010, aperture: 0.050,
+              hObj: 0.030, nRays: 13, Rm: 0.40, f2: 0.15, sep: 0.55,
+              screenX: 0.30, principal: true, autoFocus: true },
+
+    presets: [
+      { name: 'Convex lens · real image', params: { mode: 'convex', u: 0.60, f: 0.20, aperture: 0.05, autoFocus: true } },
+      { name: 'Object at 2f · image at 2f', params: { mode: 'convex', u: 0.40, f: 0.20, aperture: 0.05, autoFocus: true } },
+      { name: 'Inside the focus · magnifier', params: { mode: 'convex', u: 0.12, f: 0.20, aperture: 0.018, autoFocus: true } },
+      { name: 'Open the aperture · aberration', params: { mode: 'convex', u: 0.60, f: 0.20, aperture: 0.16, autoFocus: true } },
+      { name: 'Concave lens · always virtual', params: { mode: 'concave', u: 0.40, f: 0.20, aperture: 0.05, autoFocus: true } },
+      { name: 'Concave mirror', params: { mode: 'cmirror', u: 0.60, Rm: 0.40, aperture: 0.05, autoFocus: true } },
+      { name: 'Convex mirror · always virtual', params: { mode: 'xmirror', u: 0.60, Rm: 0.40, aperture: 0.05, autoFocus: true } },
+      { name: 'Two lenses in a row', params: { mode: 'combo', u: 0.60, f: 0.20, f2: 0.15, sep: 0.55, aperture: 0.0145, autoFocus: true } }
+    ],
+
+    controls: [
+      { group: 'What is on the bench', items: [
+        { key: 'mode', type: 'select', label: 'Element', restructure: true, options: [
+          { value: 'convex', label: 'Convex lens' }, { value: 'concave', label: 'Concave lens' },
+          { value: 'cmirror', label: 'Concave mirror' }, { value: 'xmirror', label: 'Convex mirror' },
+          { value: 'combo', label: 'Two lenses' }] }
+      ] },
+      { group: 'The object', items: [
+        { key: 'u', label: 'Object distance <i>u</i>', min: 0.06, max: 1.6, step: 0.005, unit: 'm',
+          fmt: v => v.toFixed(3), restructure: true },
+        { key: 'hObj', label: 'Object height', min: 0.01, max: 0.08, step: 0.002, unit: 'm',
+          fmt: v => v.toFixed(3), restructure: true }
+      ] },
+      { group: 'The lens', items: [
+        { key: 'f', label: 'Focal length <i>f</i>', min: 0.06, max: 0.60, step: 0.005, unit: 'm',
+          fmt: v => v.toFixed(3), restructure: true },
+        { key: 'nGlass', label: 'Refractive index <i>n</i>', min: 1.30, max: 1.90, step: 0.01, unit: '',
+          fmt: v => v.toFixed(2), restructure: true },
+        { key: 'thick', label: 'Lens thickness', min: 0.002, max: 0.05, step: 0.001, unit: 'm',
+          fmt: v => v.toFixed(3), restructure: true },
+        { key: 'aperture', label: 'Aperture (clear diameter)', min: 0.01, max: 0.20, step: 0.002, unit: 'm',
+          fmt: v => v.toFixed(3), restructure: true }
+      ] },
+      { group: 'The mirror', items: [
+        { key: 'Rm', label: 'Radius of curvature <i>R</i>', min: 0.12, max: 1.2, step: 0.01, unit: 'm',
+          fmt: v => v.toFixed(2), restructure: true }
+      ] },
+      { group: 'Second lens', items: [
+        { key: 'f2', label: 'Focal length <i>f</i>₂', min: 0.05, max: 0.50, step: 0.005, unit: 'm',
+          fmt: v => v.toFixed(3), restructure: true },
+        { key: 'sep', label: 'Separation', min: 0.10, max: 1.2, step: 0.01, unit: 'm',
+          fmt: v => v.toFixed(2), restructure: true }
+      ] },
+      { group: 'Display', items: [
+        { key: 'nRays', label: 'Rays traced', min: 3, max: 41, step: 2, unit: '', fmt: v => v.toFixed(0),
+          restructure: true },
+        { key: 'principal', type: 'toggle', label: 'Highlight the three principal rays' },
+        { key: 'autoFocus', type: 'toggle', label: 'Put the screen at the image' }
+      ] }
+    ],
+
+    setup(S) {
+      const p = S.p;
+      const O = optics(S);
+      S.O = O;
+      const ap = O.ap;
+      /* the tip of the object, and a fan of rays from it that fills the
+         aperture — every one traced independently */
+      const tip = [-p.u, p.hObj];
+      const rays = [], N = Math.max(3, Math.round(p.nRays) | 1);
+      for (let i = 0; i < N; i++) {
+        const z = (N === 1 ? 0 : (i / (N - 1) - 0.5) * 2) * ap * 0.94;
+        const dx = 0 - tip[0], dz = z - tip[1], Lr = Math.hypot(dx, dz) || 1;
+        rays.push(traceRay(tip, [dx / Lr, dz / Lr], O.surf, O.xEnd));
+      }
+      S.rays = rays;
+      S.tip = tip;
+
+      /* where the rays ACTUALLY cross, and where each individual ray crosses
+         the axis — the second of those is the aberration curve */
+      const q = crossingPoint(rays);
+      S.img = q ? [q[0], q[1]] : null;
+      /* Longitudinal spherical aberration is defined for an AXIAL object
+         point: rays from a point off the axis need not cross the axis at all
+         (the one through the front focus emerges parallel to it), so measuring
+         their axis crossings gives metres of nonsense. Launch a second fan
+         from (−u, 0) purely for this measurement. */
+      S.axisCross = [];
+      const axRays = [];
+      for (let i = 0; i < N; i++) {
+        const z = (N === 1 ? 0 : (i / (N - 1) - 0.5) * 2) * ap * 0.94;
+        if (Math.abs(z) < ap * 0.02) continue;          // the axial ray never leaves the axis
+        const dx = 0 - (-p.u), dz = z, Lr = Math.hypot(dx, dz) || 1;
+        const r = traceRay([-p.u, 0], [dx / Lr, dz / Lr], O.surf, O.xEnd);
+        axRays.push(r);
+        if (!r || r.blocked || r.tir || Math.abs(r.dir[1]) < 1e-9) continue;
+        const t = -r.p[1] / r.dir[1];
+        const cx = r.p[0] + t * r.dir[0];
+        if (!isFinite(cx) || Math.abs(cx) > 40) continue;
+        S.axisCross.push([r.path.length > 1 ? r.path[1][1] : z, cx]);
+      }
+      S.axRays = axRays;
+
+      /* the textbook prediction, for comparison only — it is never used to
+         draw anything */
+      const f = O.f;
+      S.fPred = f;
+      if (O.mirror) {
+        // Cartesian: object on the left is at u = −p.u, f = R/2
+        S.vPred = 1 / (1 / f - 1 / (-p.u));
+      } else if (O.two) {
+        const v1 = 1 / (1 / Math.abs(p.f) - 1 / p.u);
+        const u2 = p.sep - v1;                      // object for the second lens
+        S.v1Pred = v1;
+        S.vPred = u2 === 0 ? Infinity : 1 / (1 / Math.abs(p.f2) - 1 / u2);
+        S.mPred = (v1 / p.u) * (S.vPred / u2);
+      } else {
+        S.vPred = 1 / (1 / f - 1 / p.u);
+      }
+      if (!O.two) S.mPred = O.mirror ? -S.vPred / (-p.u) : -S.vPred / p.u;
+
+      S.vMeas = S.img ? (O.two ? S.img[0] - p.sep : S.img[0]) : null;
+      S.mMeas = S.img ? S.img[1] / p.hObj : null;
+      S.real = S.img ? (O.mirror ? S.img[0] < 0 : S.img[0] > (O.two ? p.sep : 0)) : false;
+
+      /* the spread of individual axis crossings IS the aberration */
+      if (S.axisCross.length > 2) {
+        const xs = S.axisCross.map(a => a[1]);
+        S.abMin = Math.min.apply(null, xs);
+        S.abMax = Math.max.apply(null, xs);
+        S.aberration = S.abMax - S.abMin;
+      } else { S.aberration = 0; S.abMin = 0; S.abMax = 0; }
+
+      /* A screen can only catch a REAL image. Snapping it onto a virtual one
+         would park it behind the object catching nothing, which teaches the
+         opposite of the thing this lab is for. */
+      if (p.autoFocus) {
+        if (S.real && S.img && isFinite(S.img[0])) p.screenX = clamp(S.img[0], -2.6, 2.9);
+        else p.screenX = O.mirror ? -Math.max(p.u * 0.55, 0.22) : Math.max(p.u * 0.6, 0.30);
+      }
+
+      /* Fit the bench to the stage. The optics are solved in metres; the
+         drawing multiplies by S.K and centres on S.xc, so an object at 6 cm
+         and an object at 1.6 m both fill the frame instead of one of them
+         vanishing. Scale is a DRAWING choice only — nothing upstream sees it. */
+      {
+        const xs = [-p.u, 0, O.two ? p.sep : 0, clamp(p.screenX, -2.6, 2.9)];
+        if (S.img && isFinite(S.img[0])) xs.push(clamp(S.img[0], -2.6, 2.9));
+        if (O.mirror) xs.push(O.f, 2 * O.f);
+        const lo = Math.min.apply(null, xs), hi = Math.max.apply(null, xs);
+        const span = Math.max(hi - lo, 0.25);
+        S.K = clamp(2.30 / span, 0.6, 7.0);
+        S.xc = (lo + hi) / 2;
+      }
+
+      if (!S.cam) {
+        S.cam = Camera({ theta: -1.57, phi: 0.15, dist: 2.62, target: [0, 0, -0.06] });
+        S.cam.minDist = 1.3; S.cam.maxDist = 12;
+      }
+    },
+
+    step(S, dt) { S.t2 = (S.t2 || 0) + dt; },
+
+    drawStage(S, g) {
+      const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
+      const cam = S.cam, F = R3.Frame(ctx, cam, { ambient: 0.26, floorZ: null });
+      const O = S.O, ap = O.ap;
+      /* DEPTH POLICY (memory §14.6): only the rail carries F.GROUND. Every
+         component sorts on its own depth; rays and markers take a few
+         hundredths so they sit on their parent without jumping a nearer one. */
+      const K = S.K;                                   // display units per metre
+      const X = x => (x - S.xc) * K;                   // metres -> display, centred
+      const acc = th.phys;
+      const Ocent = cam.project([0, 0, 0]);
+      const away = (pt) => { const q = cam.project(pt); return (q.ok && Ocent.ok && q.x < Ocent.x) ? -1 : 1; };
+      const xL = O.two ? p.sep : 0;
+
+      /* ---------------- the rail ---------------- */
+      {
+        const x0 = X(-p.u) - 0.22, x1 = X(O.mirror ? 0.06 : Math.max(xL, p.screenX, 0.1)) + 0.22;
+        R3.box(F, [(x0 + x1) / 2, 0, -0.62], [x1 - x0, 0.26, 0.055], '#222C44',
+               { shadow: false, ambient: 0.15, bias: F.GROUND });
+        const n = clamp(Math.round((x1 - x0) / 0.1), 4, 60);
+        for (let i = 0; i <= n; i++) {
+          const xx = x0 + (x1 - x0) * i / n, big = i % 5 === 0;
+          R3.polyline(F, [[xx, 0.13, -0.5925], [xx, 0.13, -0.5925 + (big ? 0.026 : 0.014)]],
+                      '#6E80A8', { alpha: big ? 0.75 : 0.4, width: 1, bias: F.GROUND });
+        }
+        // the optical axis
+        R3.polyline(F, [[x0, 0, 0], [x1, 0, 0]], th['text-3'], { alpha: .3, width: 1, bias: F.GROUND });
+      }
+      const post = (xm, top) => {          // xm in metres
+        const xx = X(xm);
+        R3.cylinder(F, [xx, 0, -0.592], [xx, 0, top], 0.026, '#55658C',
+                    { segments: 12, shadow: false, ambient: 0.28, bias: F.GROUND });
+        R3.cylinder(F, [xx, 0, -0.592], [xx, 0, -0.562], 0.058, '#3B496B',
+                    { segments: 14, shadow: false, ambient: 0.24, bias: F.GROUND });
+      };
+
+      /* ---------------- the object: a lit arrow ---------------- */
+      {
+        const ox = X(-p.u), hh = p.hObj * K;
+        post(-p.u, -0.02);
+        R3.cylinder(F, [ox, 0, 0], [ox, 0, hh * 0.80], 0.012, '#FFD36B',
+                    { segments: 10, shadow: false, ambient: 0.6 });
+        R3.arrow(F, [ox, 0, hh * 0.72], [ox, 0, hh], 0.012, '#FFD36B',
+                 { head: 0.048, shadow: false, ambient: 0.85 });
+        R3.callout(F, [ox, 0, hh], away([ox, 0, 0]) * 24, -22,
+                   'object  h = ' + (p.hObj * 100).toFixed(1) + ' cm', '#FFD36B');
+        const qo = cam.project([ox, 0, hh]);
+        if (qo.ok) {
+          const on = g.dragging === 'obj';
+          ctx.save();
+          ctx.strokeStyle = on ? th.text : g.alpha('#FFD36B', .8);
+          ctx.lineWidth = on ? 2.2 : 1.5;
+          ctx.beginPath(); ctx.arc(qo.x, qo.y, 9, 0, TAU); ctx.stroke();
+          ctx.restore();
+          S._axU = (function () {
+            const a = cam.project([X(0), 0, 0]), b = cam.project([X(1), 0, 0]);
+            if (!a.ok || !b.ok) return null;
+            const dx = b.x - a.x, dy = b.y - a.y, Lp = Math.hypot(dx, dy) || 1;
+            return { ux: dx / Lp, uy: dy / Lp, perPx: 1 / Lp };
+          })();
+          g.handle(qo.x, qo.y, 14, 'obj');
+        }
+      }
+
+      /* ---------------- the element ---------------- */
+      if (O.mirror) {
+        const R = O.surf[0].R, sgn = Math.sign(R);
+        post(0, -ap * K - 0.02);
+        const prof = [];
+        for (let i = 0; i <= 40; i++) {
+          const zm = (i / 40 - 0.5) * 2 * ap;                 // metres
+          const dx = R - sgn * Math.sqrt(Math.max(R * R - zm * zm, 0));
+          prof.push([X(dx), 0, zm * K]);
+        }
+        F.push([0, 0, 0], () => {
+          const q = prof.map(v => cam.project(v));
+          if (q.some(x => !x.ok)) return;
+          ctx.strokeStyle = g.alpha('#BFE2F5', .95); ctx.lineWidth = 3.4;
+          ctx.beginPath();
+          q.forEach((x, i) => i ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+          ctx.stroke();
+          ctx.strokeStyle = g.alpha('#55658C', .95); ctx.lineWidth = 7;
+          ctx.beginPath();
+          q.forEach((x, i) => i ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+          ctx.stroke();
+          ctx.strokeStyle = g.alpha('#BFE2F5', .95); ctx.lineWidth = 3;
+          ctx.beginPath();
+          q.forEach((x, i) => i ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
+          ctx.stroke();
+        }, 0);
+        R3.callout(F, [X(0), 0, ap * K], away([X(0), 0, 0]) * 26, -24,
+                   (p.mode === 'cmirror' ? 'concave' : 'convex') + ' mirror  R = ' + p.Rm.toFixed(2) + ' m',
+                   '#BFE2F5');
+        // centre of curvature and focus, both real points on the axis
+        [[R, 'C'], [R / 2, 'F']].forEach(([xm, tag]) => {
+          R3.sphere(F, [X(xm), 0, 0], 0.016, th['text-3'], { shadow: false });
+          R3.label(F, [X(xm), 0, -0.07], tag, th['text-2'], { size: 10 });
+        });
+      } else {
+        const lenses = O.two ? [[0, Math.abs(p.f)], [p.sep, Math.abs(p.f2)]] : [[0, p.f]];
+        lenses.forEach(([lx, lf], li) => {
+          const conc = p.mode === 'concave';
+          const t = Math.max(p.thick, 1e-4) * K;
+          post(lx, -ap * K - 0.02);
+          F.push([X(lx), 0, 0], () => {
+            // build the two faces explicitly so a concave lens is a real waist
+            const face = (sg) => {
+              const out = [];
+              for (let i = 0; i <= 34; i++) {
+                const z = (i / 34 - 0.5) * 2 * ap * K;
+                const Rr2 = 2 * (p.nGlass - 1) * lf * K;
+                const sag = Math.sqrt(Math.max(Rr2 * Rr2 - z * z, 0)) -
+                            Math.sqrt(Math.max(Rr2 * Rr2 - (ap * K) * (ap * K), 0));
+                const dxs = conc ? -sag : sag;
+                out.push(cam.project([X(lx) + sg * (t / 2 + dxs * 0.55), 0, z]));
+              }
+              return out;
+            };
+            const fR = face(1), fL = face(-1).reverse();
+            if (fR.some(q => !q.ok) || fL.some(q => !q.ok)) return;
+            ctx.save();
+            ctx.beginPath();
+            fR.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
+            fL.forEach(q => ctx.lineTo(q.x, q.y));
+            ctx.closePath();
+            const qa = cam.project([X(lx), 0, ap * K]), qb = cam.project([X(lx), 0, -ap * K]);
+            const gg = ctx.createLinearGradient(qa.x, qa.y, qb.x, qb.y);
+            gg.addColorStop(0, 'rgba(191,226,245,.30)');
+            gg.addColorStop(0.5, 'rgba(120,180,225,.14)');
+            gg.addColorStop(1, 'rgba(191,226,245,.30)');
+            ctx.fillStyle = gg; ctx.fill();
+            ctx.strokeStyle = g.alpha('#BFE2F5', .8); ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.restore();
+          }, 0);
+          // the rim, to say it is a disc and not a shape drawn on the page
+          const rim = [];
+          for (let i = 0; i <= 44; i++) {
+            const a = i / 44 * TAU;
+            rim.push([X(lx), Math.cos(a) * ap * K, Math.sin(a) * ap * K]);
+          }
+          R3.polyline(F, rim, '#8FB6DE', { alpha: .30, width: 1.2 });
+          if (li === 0)
+            R3.callout(F, [X(lx), 0, ap * K], away([X(lx), 0, 0]) * 26, -26,
+                       (p.mode === 'concave' ? 'concave' : 'convex') + ' lens  f = ' +
+                       (lf * 100).toFixed(1) + ' cm  ·  n = ' + p.nGlass.toFixed(2), '#BFE2F5');
+          // the two focal points
+          [[-Math.abs(lf) * (p.mode === 'concave' ? -1 : 1), 'F'],
+           [Math.abs(lf) * (p.mode === 'concave' ? -1 : 1), "F'"]].forEach(([dx, tag]) => {
+            R3.sphere(F, [X(lx + dx), 0, 0], 0.014, th['text-3'], { shadow: false });
+            R3.label(F, [X(lx + dx), 0, -0.065], tag, th['text-2'], { size: 9.5 });
+          });
+        });
+      }
+
+      /* ---------------- the rays ----------------
+         Drawn straight from the traced paths. Nothing is idealised: a ray
+         that misses the aperture simply stops at the rim. */
+      {
+        const N = S.rays.length;
+        /* Stop the rays a little past whatever they were going to land on, so
+           the bench is not buried under a fan running off to infinity. */
+        const xStop = Math.max(p.screenX, S.img && isFinite(S.img[0]) ? S.img[0] : 0,
+                               O.two ? p.sep : 0) + 0.18;
+        const trim = (path) => {
+          const out = [];
+          for (let k = 0; k < path.length; k++) {
+            const q = path[k];
+            if (O.mirror ? q[0] >= -0.001 || k === 0 : q[0] <= xStop) { out.push(q); continue; }
+            const pr = path[k - 1];
+            if (!pr) break;
+            const t = (xStop - pr[0]) / (q[0] - pr[0]);
+            if (t > 0 && t <= 1) out.push([xStop, pr[1] + (q[1] - pr[1]) * t]);
+            break;
+          }
+          return out.length > 1 ? out : path;
+        };
+        S.rays.forEach((r, i) => {
+          if (!r) return;
+          const pts = trim(r.path).map(q => [X(q[0]), 0, q[1] * K]);
+          const edge = Math.abs(i - (N - 1) / 2) / ((N - 1) / 2 || 1);
+          const col = r.blocked ? th.crit : r.tir ? th.warn : '#FFD36B';
+          R3.polyline(F, pts, col,
+                      { alpha: r.blocked ? .35 : (0.28 + 0.42 * (1 - edge * 0.6)), width: 1.3,
+                        bias: -0.03 });
+          // the virtual continuation, dashed backwards, when the image is virtual
+          if (!S.real && S.img && !r.blocked && !r.tir) {
+            const q0 = r.p, d = r.dir;
+            const tb = (S.img[0] - q0[0]) / (Math.abs(d[0]) > 1e-9 ? d[0] : 1e-9);
+            if (tb < 0) {
+              R3.polyline(F, [[X(q0[0]), 0, q0[1] * K], [X(S.img[0]), 0, (q0[1] + tb * d[1]) * K]],
+                          '#8FA4CE', { alpha: .22, width: 1, bias: -0.03 });
+            }
+          }
+        });
+
+        /* the three principal rays, drawn thicker — the construction a student
+           is asked to draw by hand, done here by the same tracer */
+        if (p.principal && !O.two) {
+          const tip = S.tip, hh = p.hObj;
+          const targets = [[0, hh], [0, 0], [0, -hh * 0.0]];
+          const special = [];
+          // parallel to the axis
+          special.push(traceRay([tip[0], hh], [1, 0], O.surf, O.xEnd));
+          // through the optical centre (pole for a mirror)
+          {
+            const dx = 0 - tip[0], dz = 0 - hh, Lr = Math.hypot(dx, dz);
+            special.push(traceRay([tip[0], hh], [dx / Lr, dz / Lr], O.surf, O.xEnd));
+          }
+          // through the front focus, emerging parallel
+          {
+            const fx = O.mirror ? O.f : -Math.abs(S.fPred) * (p.mode === 'concave' ? -1 : 1);
+            const dx = fx - tip[0], dz = 0 - hh, Lr = Math.hypot(dx, dz);
+            if (Lr > 1e-6) special.push(traceRay([tip[0], hh], [dx / Lr, dz / Lr], O.surf, O.xEnd));
+          }
+          special.forEach((r, k) => {
+            if (!r || r.blocked) return;
+            R3.polyline(F, trim(r.path).map(q => [X(q[0]), 0, q[1] * K]),
+                        ['#5AE8B0', '#5AA9FF', '#FF9ECF'][k], { alpha: .95, width: 2, bias: -0.05 });
+          });
+        }
+      }
+
+      /* ---------------- the image ---------------- */
+      if (S.img && isFinite(S.img[0]) && Math.abs(S.img[0]) < 4) {
+        const ix = X(S.img[0]), ih = S.img[1] * K;
+        const col = S.real ? '#7CE0A8' : '#C9A8F0';
+        R3.cylinder(F, [ix, 0, 0], [ix, 0, ih * 0.80], 0.010, col,
+                    { segments: 8, shadow: false, ambient: 0.6, bias: -0.04 });
+        R3.arrow(F, [ix, 0, ih * 0.72], [ix, 0, ih], 0.010, col,
+                 { head: 0.042, shadow: false, ambient: 0.85, bias: -0.04 });
+        R3.callout(F, [ix, 0, ih], away([ix, 0, 0]) * 24, ih > 0 ? -22 : 22,
+                   (S.real ? 'REAL' : 'virtual') + ' · ' + (ih * p.hObj > 0 ? 'erect' : 'inverted') +
+                   ' · m = ' + S.mMeas.toFixed(2), col);
+      }
+
+      /* ---------------- the screen ---------------- */
+      {
+        const sx = X(clamp(p.screenX, -2.6, 2.9));
+        const hh = clamp(4.2 * Math.abs(p.hObj) * K, 0.16, 0.42);
+        const inFocus = S.img && Math.abs(p.screenX - S.img[0]) < 0.006 && S.real;
+        F.push([sx, 0, 0], () => {
+          const c4 = [[sx, -hh, hh], [sx, hh, hh], [sx, hh, -hh], [sx, -hh, -hh]].map(v => cam.project(v));
+          if (c4.some(q => !q.ok)) return;
+          ctx.beginPath();
+          c4.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y));
+          ctx.closePath();
+          ctx.fillStyle = g.alpha('#141D2E', .88); ctx.fill();
+          ctx.strokeStyle = g.alpha(inFocus ? th.ok : '#8FA4CE', inFocus ? .9 : .5);
+          ctx.lineWidth = inFocus ? 2 : 1.3; ctx.stroke();
+          /* what actually lands on the screen: every ray's height where it
+             crosses this plane, smeared into a blur when out of focus */
+          ctx.save(); ctx.clip(); ctx.globalCompositeOperation = 'lighter';
+          S.rays.forEach(r => {
+            if (!r || r.blocked || r.tir) return;
+            const d = r.dir, q0 = r.p;
+            if (Math.abs(d[0]) < 1e-9) return;
+            const t = (p.screenX - q0[0]) / d[0];
+            if (t < 0) return;
+            const z = (q0[1] + t * d[1]) * K;
+            if (Math.abs(z) > hh) return;
+            const a = cam.project([sx, 0, z]);
+            if (!a.ok) return;
+            const gr = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 7);
+            gr.addColorStop(0, g.alpha('#FFD36B', .55)); gr.addColorStop(1, g.alpha('#FFD36B', 0));
+            ctx.fillStyle = gr;
+            ctx.beginPath(); ctx.arc(a.x, a.y, 7, 0, TAU); ctx.fill();
+          });
+          ctx.restore();
+        }, 0);
+        R3.label(F, [sx, 0, -hh - 0.09],
+                 inFocus ? 'screen · IN FOCUS'
+                         : S.real ? 'screen' : 'screen · a virtual image cannot be caught',
+                 inFocus ? th.ok : S.real ? th['text-2'] : th['text-3'], { size: 9.5 });
+        const qs = cam.project([sx, 0, -hh - 0.02]);
+        if (qs.ok && !p.autoFocus) {
+          const on = g.dragging === 'scr';
+          ctx.save();
+          ctx.strokeStyle = on ? th.text : g.alpha(acc, .7);
+          ctx.lineWidth = on ? 2.2 : 1.5;
+          ctx.beginPath(); ctx.arc(qs.x, qs.y, 8, 0, TAU); ctx.stroke();
+          ctx.restore();
+          g.handle(qs.x, qs.y, 15, 'scr');
+        }
+      }
+
+      F.render();
+
+      /* ---------------- the comparison panel ----------------
+         The traced result and the textbook formula, side by side, with the
+         gap between them named. */
+      {
+        const bw = Math.min(W * 0.36, 316), bh = 120, bx = 12, by = H - bh - 22;
+        ctx.fillStyle = g.alpha('#0B1020', .90);
+        ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+        PA.lbl(ctx, bx + 10, by + 13, 'TRACED  vs  THE LENS FORMULA', th['text-3'], 'left', 8.5);
+        const row = (i, k, a, b, c) => {
+          PA.lbl(ctx, bx + 10, by + 30 + i * 15, k, th['text-3'], 'left', 9);
+          PA.lbl(ctx, bx + bw - 86, by + 30 + i * 15, a, c || th.text, 'right', 9.5);
+          PA.lbl(ctx, bx + bw - 10, by + 30 + i * 15, b, th['text-2'], 'right', 9.5);
+        };
+        PA.lbl(ctx, bx + bw - 86, by + 17, 'traced', g.alpha(acc, .95), 'right', 8);
+        PA.lbl(ctx, bx + bw - 10, by + 17, 'formula', g.alpha(th['text-3'], .95), 'right', 8);
+        const fm = (v, d) => (v == null || !isFinite(v)) ? '—' : v.toFixed(d == null ? 3 : d);
+        row(0, 'image distance  v (m)', fm(S.vMeas), fm(S.vPred), acc);
+        row(1, 'magnification  m', fm(S.mMeas, 3), fm(S.mPred, 3), acc);
+        row(2, 'image is', S.real ? 'REAL' : 'virtual',
+            (S.mMeas || 0) < 0 ? 'inverted' : 'erect', S.real ? th.ok : '#C9A8F0');
+        const dv = (S.vMeas != null && isFinite(S.vPred)) ? Math.abs(S.vMeas - S.vPred) : null;
+        row(3, 'they differ by', dv == null ? '—' : (dv * 1000).toFixed(1) + ' mm', '',
+            dv != null && dv > 0.004 ? th.warn : th.ok);
+        PA.lbl(ctx, bx + 10, by + bh - 9,
+               S.aberration > 0.004
+                 ? 'marginal and paraxial rays focus ' + (S.aberration * 1000).toFixed(0) +
+                   ' mm apart — spherical aberration'
+                 : 'narrow bundle: the formula is an excellent approximation',
+               S.aberration > 0.004 ? th.warn : th.ok, 'left', 8.5);
+      }
+
+      /* ---------------- header ---------------- */
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif';
+      ctx.fillStyle = S.img ? (S.real ? th.ok : '#C9A8F0') : th.crit;
+      ctx.fillText(!S.img ? 'no image — the rays do not converge'
+        : (S.real ? 'REAL image' : 'VIRTUAL image') + ' at v = ' +
+          (S.vMeas * 100).toFixed(1) + ' cm, m = ' + S.mMeas.toFixed(2), 14, 8);
+      ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
+      ctx.fillText('u = ' + (p.u * 100).toFixed(1) + ' cm   ·   ' +
+        (O.mirror ? 'R = ' + (p.Rm * 100).toFixed(0) + ' cm, f = R/2 = ' + (O.f * 100).toFixed(1) + ' cm'
+                  : 'f = ' + (Math.abs(p.f) * 100).toFixed(1) + ' cm, n = ' + p.nGlass.toFixed(2) +
+                    ', aperture ' + (p.aperture * 100).toFixed(0) + ' cm') +
+        '   ·   every ray refracted at each surface', 14, 31);
+      ctx.fillStyle = th['text-3'];
+      ctx.fillText('the lens formula is printed for comparison and never used to draw anything', 14, 45);
+    },
+
+    onDrag(S, e) {
+      const p = S.p;
+      if (e.id === 'obj' && S._axU) {
+        const along = e.dx * S._axU.ux + e.dy * S._axU.uy;
+        p.u = clamp(p.u - along * S._axU.perPx, 0.06, 1.6);
+        this.setup(S);
+      } else if (e.id === 'scr' && S._axU) {
+        const along = e.dx * S._axU.ux + e.dy * S._axU.uy;
+        p.autoFocus = false;
+        p.screenX = clamp(p.screenX + along * S._axU.perPx, -2.6, 2.9);
+      }
+    },
+
+    plots: [
+      { title: 'Where each ray crosses the axis — the aberration curve',
+        legend: [{ c: '#3DD6F5', label: 'crossing point of that ray' },
+                 { c: '#FFAE4C', label: 'the paraxial (formula) focus' }],
+        draw(S, g) {
+          const pts = S.axisCross.map(a => [a[0] * 100, a[1] * 100]);
+          if (!pts.length) { g.Plot({ xmin: -1, xmax: 1, ymin: -1, ymax: 1, xlabel: '', ylabel: '' }).frame(); return; }
+          const xs = pts.map(q => q[1]);
+          const lo = Math.min.apply(null, xs), hi = Math.max.apply(null, xs);
+          const pad = Math.max((hi - lo) * 0.25, 0.4);
+          const ah = S.O.ap * 100;
+          const P = g.Plot({
+            xmin: -ah * 1.1, xmax: ah * 1.1, ymin: lo - pad, ymax: hi + pad,
+            xlabel: 'height of the ray at the lens (cm)', ylabel: 'axis crossing (cm)',
+            xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1)
+          }).frame();
+          P.clip(() => {
+            if (isFinite(S.vPred)) P.hline(S.vPred * 100, g.alpha(g.theme.warn, .9), [4, 3]);
+            P.line(pts.slice().sort((a, b) => a[0] - b[0]), g.theme.phys, 2);
+            pts.forEach(q => P.dot(q[0], q[1], 3, g.theme.phys, g.theme['ink-950']));
+          });
+          P.tag(-ah * 1.05, isFinite(S.vPred) ? S.vPred * 100 : 0,
+                'paraxial focus  v = ' + (S.vPred * 100).toFixed(1) + ' cm', g.theme.warn, 'left', -9);
+          if (S.aberration > 0.001)
+            P.tag(0, lo, 'marginal rays focus ' + (S.aberration * 1000).toFixed(0) + ' mm short',
+                  g.theme['text-2'], 'center', 12);
+        },
+        hover(S, x) {
+          if (!S.axisCross.length) return null;
+          let best = S.axisCross[0];
+          S.axisCross.forEach(a => { if (Math.abs(a[0] * 100 - x) < Math.abs(best[0] * 100 - x)) best = a; });
+          return [{ label: 'ray height', value: (best[0] * 100).toFixed(2) + ' cm' },
+                  { label: 'crosses at', value: (best[1] * 100).toFixed(2) + ' cm', color: '#3DD6F5' },
+                  { label: 'paraxial', value: (S.vPred * 100).toFixed(2) + ' cm' }];
+        } },
+
+      { title: 'The whole u–v curve — and why u = f has no image',
+        legend: [{ c: '#3DD6F5', label: 'image distance v' }, { c: '#63729A', label: 'magnification m' }],
+        draw(S, g) {
+          const p = S.p, f = S.fPred, vs = [], ms = [];
+          const lim = 4 * Math.abs(f);
+          for (let i = 1; i <= 400; i++) {
+            const u = i / 400 * 1.6;
+            if (Math.abs(u - Math.abs(f)) < 0.004) { vs.push([u, NaN]); ms.push([u, NaN]); continue; }
+            const v = S.O.mirror ? 1 / (1 / f - 1 / (-u)) : 1 / (1 / f - 1 / u);
+            vs.push([u, clamp(v, -lim, lim)]);
+            ms.push([u, clamp(S.O.mirror ? -v / (-u) : -v / u, -lim, lim)]);
+          }
+          const P = g.Plot({
+            xmin: 0, xmax: 1.6, ymin: -lim, ymax: lim,
+            xlabel: 'object distance u (m)', ylabel: 'image distance v (m)  /  magnification',
+            xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1)
+          }).frame();
+          P.clip(() => {
+            P.hline(0, g.alpha(g.theme['text-3'], .6), [3, 4]);
+            P.vline(Math.abs(f), g.alpha(g.theme.crit, .8), [4, 3]);
+            P.vline(2 * Math.abs(f), g.alpha(g.theme['text-3'], .5), [2, 5]);
+            P.line(ms.filter(q => isFinite(q[1])), g.alpha(g.theme['text-3'], .95), 1.5, [4, 3]);
+            P.line(vs.filter(q => isFinite(q[1])), g.theme.phys, 2.2);
+            if (S.vMeas != null && isFinite(S.vMeas))
+              P.dot(p.u, clamp(S.vMeas, -lim, lim), 4.5, g.theme.text, g.theme['ink-950']);
+          });
+          P.tag(Math.abs(f), lim * 0.8, 'u = f : rays emerge parallel, no image',
+                g.theme.crit, 'left', 0);
+          P.tag(2 * Math.abs(f), 0, 'u = 2f', g.theme['text-3'], 'left', -9);
+        },
+        hover(S, x) {
+          const f = S.fPred, u = Math.max(x, 0.01);
+          const v = S.O.mirror ? 1 / (1 / f - 1 / (-u)) : 1 / (1 / f - 1 / u);
+          return [{ label: 'u', value: u.toFixed(3) + ' m' },
+                  { label: 'v', value: isFinite(v) ? v.toFixed(3) + ' m' : '∞', color: '#3DD6F5' },
+                  { label: 'm', value: (S.O.mirror ? -v / (-u) : -v / u).toFixed(3) },
+                  { label: 'image', value: (S.O.mirror ? v < 0 : v > 0) ? 'real' : 'virtual' }];
+        } }
+    ],
+
+    readouts(S) {
+      const p = S.p, O = S.O;
+      const out = [
+        { label: 'Object distance u', value: (p.u * 100).toFixed(1), unit: 'cm' },
+        { label: 'Focal length f', value: (O.f * 100).toFixed(2), unit: 'cm', flag: 'accent',
+          hint: O.mirror ? 'R/2' : "(n−1)(1/R₁ − 1/R₂)" },
+        { label: 'v — traced', value: S.vMeas == null ? '—' : (S.vMeas * 100).toFixed(2), unit: 'cm',
+          flag: 'accent', hint: 'where the rays actually cross' },
+        { label: 'v — lens formula', value: isFinite(S.vPred) ? (S.vPred * 100).toFixed(2) : '∞', unit: 'cm',
+          hint: '1/v − 1/u = 1/f' },
+        { label: 'Magnification m', value: S.mMeas == null ? '—' : S.mMeas.toFixed(3), unit: '×',
+          flag: 'accent', hint: (S.mMeas || 0) < 0 ? 'negative — inverted' : 'positive — erect' },
+        { label: 'Image', value: S.real ? 'real' : 'virtual', unit: '',
+          flag: S.real ? 'ok' : '', hint: S.real ? 'can be caught on a screen' : 'cannot be projected' },
+        { label: 'Image height', value: S.img ? (S.img[1] * 100).toFixed(2) : '—', unit: 'cm' },
+        { label: 'Spherical aberration', value: (S.aberration * 1000).toFixed(1), unit: 'mm',
+          flag: S.aberration > 0.004 ? 'warn' : 'ok',
+          hint: 'spread of the axis crossings' }
+      ];
+      if (!O.mirror) {
+        out.push({ label: 'Power P = 1/f', value: (1 / O.f).toFixed(2), unit: 'D',
+          hint: 'dioptres, f in metres' });
+        out.push({ label: 'Surface radius |R|', value: (Math.abs(2 * (p.nGlass - 1) * O.f) * 100).toFixed(1),
+          unit: 'cm', hint: 'symmetric, set by n and f' });
+      }
+      if (O.two) {
+        out.push({ label: 'First image v₁', value: (S.v1Pred * 100).toFixed(2), unit: 'cm',
+          hint: 'object for the second lens' });
+        out.push({ label: 'Combined power', value: (1 / Math.abs(p.f) + 1 / Math.abs(p.f2) -
+          p.sep / (Math.abs(p.f) * Math.abs(p.f2))).toFixed(2), unit: 'D',
+          hint: 'P₁ + P₂ − dP₁P₂' });
+      }
+      return out;
+    },
+
+    equation(S) {
+      const p = S.p, O = S.O;
+      if (O.mirror) {
+        return E.frac('1', E.v('v')) + ' ' + E.op('+') + ' ' + E.frac('1', E.v('u')) + ' ' +
+          E.op('=') + ' ' + E.frac('1', E.v('f')) + ' ' + E.op('=') + ' ' + E.frac('2', E.v('R')) +
+          E.op('·') + ' ' + E.v('f') + ' ' + E.op('=') + ' ' + E.n(O.f * 100, 'cm') +
+          '<br>traced ' + E.v('v') + ' ' + E.op('=') + ' ' + E.n(S.vMeas * 100, 'cm') +
+          E.op('·') + ' formula ' + E.n(S.vPred * 100, 'cm') +
+          E.op('·') + ' ' + E.v('m') + ' ' + E.op('=') + ' ' + E.n(S.mMeas, '');
+      }
+      return E.frac('1', E.v('f')) + ' ' + E.op('=') + ' (' + E.v('n') + E.op('−') + '1)(' +
+        E.frac('1', E.v('R') + '₁') + E.op('−') + E.frac('1', E.v('R') + '₂') + ')' + E.op('·') +
+        ' here ' + E.v('R') + '₁ ' + E.op('=') + ' ' + E.op('−') + E.v('R') + '₂ ' + E.op('=') + ' ' +
+        E.n(Math.abs(2 * (p.nGlass - 1) * O.f) * 100, 'cm') +
+        '<br>' + E.frac('1', E.v('v')) + ' ' + E.op('−') + ' ' + E.frac('1', E.v('u')) + ' ' +
+        E.op('=') + ' ' + E.frac('1', E.v('f')) + E.op('→') + ' ' + E.v('v') + ' ' + E.op('=') + ' ' +
+        E.n(S.vPred * 100, 'cm') + E.op(',') + ' traced ' + E.n(S.vMeas * 100, 'cm') +
+        '<br>' + E.v('m') + ' ' + E.op('=') + ' ' + E.frac(E.v('v'), E.v('u')) + ' ' + E.op('=') + ' ' +
+        E.n(S.mMeas, '') + E.op('·') + ' ' + E.v('P') + ' ' + E.op('=') + ' 1/' + E.v('f') + ' ' +
+        E.op('=') + ' ' + E.n(1 / O.f, 'D');
+    },
+
+    eqNote: '<b>The formula is a paraxial approximation, and this lab shows you its error bar.</b> ' +
+      '1/v − 1/u = 1/f is derived by assuming every angle is small enough that sin θ ≈ tan θ ≈ θ. ' +
+      'The tracer makes no such assumption — it applies Snell\'s law exactly at each surface — so opening ' +
+      'the aperture makes the two columns in the panel drift apart. That drift is <b>spherical aberration</b>: ' +
+      'rays through the rim of the lens cross the axis <i>nearer</i> than paraxial rays do. It is why a ' +
+      'camera stopped down to a small aperture gives a sharper picture, and why the lens formula is ' +
+      'perfectly safe for exam problems, which are always paraxial by construction.' +
+      '<br><br><b>Two things have to be small, not one.</b> Opening the aperture breaks the ' +
+      'approximation through the <i>ray angle</i>; raising the object height breaks it through the ' +
+      '<b>field angle</b>, and a single uncorrected lens imaging a tall object is far worse than the ' +
+      'same lens imaging a short one. Set the object to 8 cm at u = 30 cm — a field angle of 15° — and ' +
+      'the traced image runs centimetres short of the formula even at a tiny aperture. That is field ' +
+      'curvature, and it is why a real camera lens has six elements rather than one.',
+
+    problems: [
+      { source: 'JEE Main pattern · the lens formula',
+        q: 'An object is placed 30.0 cm from a convex lens of focal length 20.0 cm. Find the image distance in centimetres.',
+        params: { mode: 'convex', u: 0.30, f: 0.20, aperture: 0.014, hObj: 0.012, nGlass: 1.5, thick: 0.002, autoFocus: true },
+        predict: { label: 'image distance v', unit: 'cm', tol: 0.02 },
+        measure: S => S.vPred * 100,
+        working: '1/v − 1/u = 1/f with u = −30 cm, f = +20 cm gives 1/v = 1/20 − 1/30 = 1/60, so ' +
+          'v = <b>+60 cm</b>: real, on the far side, and inverted. The magnification is m = −v/u = −2, ' +
+          'so the image is twice the size and upside down. Watch the traced column agree to the ' +
+          'millimetre at this narrow aperture.' },
+      { source: 'JEE Main pattern · a concave lens',
+        q: 'An object is 40.0 cm from a concave lens of focal length 20.0 cm. Find the image distance in centimetres (give the magnitude).',
+        params: { mode: 'concave', u: 0.40, f: 0.20, aperture: 0.014, hObj: 0.012, nGlass: 1.5, thick: 0.002, autoFocus: true },
+        predict: { label: '|v|', unit: 'cm', tol: 0.03 },
+        measure: S => Math.abs(S.vPred * 100),
+        working: 'For a concave lens f = −20 cm, so 1/v = 1/(−20) − 1/(−40) = −1/40 and v = −40/3 = ' +
+          '<b>13.3 cm</b> on the same side as the object. A concave lens gives a virtual, erect, ' +
+          'diminished image for <i>every</i> object position — drag the object anywhere on the rail and ' +
+          'the image never becomes real.' },
+      { source: 'NEET pattern · a concave mirror',
+        q: 'An object is 30.0 cm in front of a concave mirror of radius of curvature 40.0 cm. Find the image distance in centimetres (magnitude).',
+        params: { mode: 'cmirror', u: 0.30, Rm: 0.40, aperture: 0.014, hObj: 0.012, autoFocus: true },
+        predict: { label: '|v|', unit: 'cm', tol: 0.02 },
+        measure: S => Math.abs(S.vPred * 100),
+        working: 'f = R/2 = 20 cm for a concave mirror. 1/v + 1/u = 1/f with u = 30 cm gives ' +
+          '1/v = 1/20 − 1/30 = 1/60, so v = <b>60 cm</b> in front of the mirror: real and inverted. ' +
+          'The trap is using R instead of R/2 — the mirror formula takes the focal length, and the ' +
+          'focus sits halfway to the centre of curvature. Both points are marked on the axis.' },
+      { source: 'JEE Advanced pattern · the lens maker',
+        q: 'A symmetric biconvex lens is made of glass of refractive index 1.50 and has surfaces of radius 20.0 cm. Find its focal length in centimetres.',
+        params: { mode: 'convex', u: 0.60, f: 0.20, nGlass: 1.5, aperture: 0.014, hObj: 0.012, thick: 0.002, autoFocus: true },
+        predict: { label: 'focal length f', unit: 'cm', tol: 0.02 },
+        measure: S => Math.abs(S.O.f) * 100,
+        working: '1/f = (n − 1)(1/R₁ − 1/R₂) with R₁ = +20 cm and R₂ = −20 cm gives ' +
+          '1/f = 0.50 × (1/20 + 1/20) = 1/20, so f = <b>20 cm</b>. Note R₂ is negative for the second ' +
+          'surface of a biconvex lens — getting that sign wrong turns the lens into a flat plate and ' +
+          'sends f to infinity. Raise the index slider and watch the surfaces flatten as f is held fixed.' },
+      { source: 'JEE Advanced pattern · two lenses',
+        q: 'Two thin convex lenses of focal lengths 20.0 cm and 15.0 cm are placed 55.0 cm apart. An object sits 60.0 cm before the first. Where is the final image, measured from the second lens, in centimetres?',
+        params: { mode: 'combo', u: 0.60, f: 0.20, f2: 0.15, sep: 0.55, aperture: 0.040, hObj: 0.010, nGlass: 1.5, thick: 0.002, autoFocus: true },
+        predict: { label: 'final image from lens 2', unit: 'cm', tol: 0.03 },
+        measure: S => S.vPred * 100,
+        working: 'Do them one at a time. First lens: 1/v₁ = 1/20 − 1/60 = 1/30, v₁ = 30 cm. That image ' +
+          'lies 55 − 30 = 25 cm before the second lens, so it is a real object for it at u₂ = 25 cm. ' +
+          'Second lens: 1/v₂ = 1/15 − 1/25 = 10/375, v₂ = <b>37.5 cm</b>. ' +
+          'The whole method is: <b>the image formed by the first element is the object for the next</b>, ' +
+          'every time, with its own sign.' }
+    ],
+
+    walkthrough: [
+      { title: '1 · A real image is where light actually goes',
+        body: 'The object sits at 60 cm and the screen has snapped to the image. Look at the screen: the rays genuinely land there and build an inverted arrow.',
+        ask: 'What makes this image "real" rather than "virtual"?',
+        reveal: 'Light <b>physically arrives</b> at that plane, so a screen put there catches a picture. Turn off "put the screen at the image" and drag the screen: the spot smears out either side of focus and sharpens exactly at v. A virtual image has no such plane — nothing to catch.',
+        params: { mode: 'convex', u: 0.60, f: 0.20, aperture: 0.05, autoFocus: true } },
+      { title: '2 · Object at 2f',
+        body: 'Move the object to 40 cm, which is exactly 2f for this lens.',
+        ask: 'Where does the image land, and how big is it?',
+        reveal: 'At <b>2f on the other side</b>, the same size, inverted: m = −1. This is the one position where object and image swap places symmetrically, and it is the standard way an optical bench is calibrated. The u–v graph shows it as the point where the curve crosses the line v = u.',
+        params: { mode: 'convex', u: 0.40, f: 0.20, aperture: 0.05, autoFocus: true } },
+      { title: '3 · Cross the focus and the image flips over',
+        body: 'Drag the object inside the focal length, to about 12 cm.',
+        ask: 'The image has become virtual, erect and magnified. Where is it?',
+        reveal: 'On the <b>same side as the object</b>, further away: v is negative. The emerging rays diverge, so they never meet — but extended backwards they appear to come from a point behind the lens. That is a magnifying glass, and it is why you must hold one closer to the object than its focal length for it to work at all.',
+        params: { mode: 'convex', u: 0.12, f: 0.20, aperture: 0.018, autoFocus: true } },
+      { title: '4 · The formula is an approximation',
+        body: 'Put the object back at 60 cm and open the aperture from 16 cm to 44 cm. Watch the two columns in the panel, and the first graph.',
+        ask: 'Why do the traced and formula values now disagree?',
+        reveal: 'Because 1/v − 1/u = 1/f assumes every angle is small enough that sin θ ≈ θ. The tracer never assumes that, so rays through the <b>rim</b> of the lens cross the axis <i>nearer</i> than paraxial ones. The first graph plots exactly this: crossing point against ray height, and it bends. This is <b>spherical aberration</b>, and stopping a camera down is how photographers avoid it.',
+        params: { mode: 'convex', u: 0.60, f: 0.20, aperture: 0.16, autoFocus: true } },
+      { title: '5 · A concave lens can never make a real image',
+        body: 'Switch to the concave lens and drag the object anywhere along the rail.',
+        ask: 'Try to produce a real image. Why is it impossible?',
+        reveal: 'Because a diverging lens bends every ray <b>away</b> from the axis, so the emergent bundle never converges at any distance. v stays negative for every u: the image is always virtual, erect and diminished. The u–v graph for f < 0 has no positive branch at all.',
+        params: { mode: 'concave', u: 0.40, f: 0.20, aperture: 0.05, autoFocus: true } },
+      { title: '6 · f = R/2, and the two points are marked',
+        body: 'Switch to the concave mirror. C and F are drawn on the axis.',
+        ask: 'Why is the focus halfway to the centre of curvature?',
+        reveal: 'A ray parallel to the axis strikes the mirror at height h, where the surface normal points at C. The law of reflection turns it through twice the angle of incidence, and for small h that lands it at <b>half the distance to C</b>. So f = R/2 — and the commonest mistake in the chapter is to put R into the mirror formula where f belongs.',
+        params: { mode: 'cmirror', u: 0.60, Rm: 0.40, aperture: 0.05, autoFocus: true } },
+      { title: '7 · A convex mirror shrinks everything',
+        body: 'Switch to the convex mirror and drag the object in and out.',
+        ask: 'Where is the image, and why is this the mirror on a car?',
+        reveal: 'Always <b>behind the mirror, virtual, erect and diminished</b>, for every object distance. A diminished image means a wide field of view packed into a small mirror — which is exactly what a wing mirror needs, and exactly why it must be stamped "objects are closer than they appear".',
+        params: { mode: 'xmirror', u: 0.60, Rm: 0.40, aperture: 0.05, autoFocus: true } },
+      { title: '8 · Two elements: the image of one is the object of the next',
+        body: 'Switch to two lenses, 55 cm apart, with the object at 60 cm.',
+        ask: 'The first lens forms its image 30 cm along, which is 25 cm before the second. What happens next?',
+        reveal: 'That image becomes the <b>object for the second lens</b>, at u₂ = 25 cm, and the calculation simply repeats: 1/v₂ = 1/15 − 1/25 gives 37.5 cm. Every compound instrument — microscope, telescope, camera — is this one step applied over and over. If the first image falls <i>behind</i> the second lens, it becomes a <b>virtual object</b> with a positive u, and the same formula still works.',
+        params: { mode: 'combo', u: 0.60, f: 0.20, f2: 0.15, sep: 0.55, aperture: 0.0145, autoFocus: true } }
+    ],
+
+    quiz: [
+      { q: 'An object is placed at the focus of a convex lens. The image is formed:',
+        options: ['at the focus on the other side', 'at infinity', 'at 2f', 'at the lens'], answer: 1,
+        why: 'With u = f, 1/v = 1/f − 1/f = 0, so v → ∞: the rays emerge parallel and never meet. The u–v graph shows this as the asymptote at u = f. This is how a collimator works.' },
+      { q: 'A concave lens forms, for a real object, an image that is always:',
+        options: ['real and inverted', 'virtual, erect and diminished', 'real and magnified', 'virtual and magnified'], answer: 1,
+        why: 'A diverging lens bends rays away from the axis, so they never converge. v is negative for every u, and |m| < 1 always. Drag the object anywhere in the lab and you cannot make a real image.' },
+      { q: 'For a concave mirror of radius of curvature R, the focal length is:',
+        options: ['R', 'R/2', '2R', 'R/4'], answer: 1,
+        why: 'f = R/2. Reflection turns a ray through twice the angle of incidence, so a paraxial parallel ray crosses the axis halfway to the centre of curvature. Putting R into the mirror formula instead of R/2 is the single commonest error in this chapter.' },
+      { q: 'A symmetric biconvex lens of glass n = 1.5 has surfaces of radius 20 cm. Its focal length is:',
+        options: ['10 cm', '20 cm', '40 cm', '30 cm'], answer: 1,
+        why: '1/f = (n−1)(1/R₁ − 1/R₂) = 0.5 × (1/20 − 1/(−20)) = 1/20, so f = 20 cm. The second radius is negative for a biconvex lens; treating both as positive gives infinity.' },
+      { q: 'Opening the aperture of a lens while keeping everything else fixed:',
+        options: ['moves the paraxial focus', 'blurs the image because rim rays focus nearer',
+                  'changes the focal length', 'makes the image virtual'], answer: 1,
+        why: 'The paraxial focus is unchanged — it is a property of the surfaces, not of how much of them you use. But marginal rays cross the axis nearer than paraxial ones, so the bundle no longer meets at a point. That is spherical aberration, and the first graph in this lab measures it directly.' }
+    ],
+
+    notes: '<b>Where this shows up in the paper.</b>' +
+      '<ul><li>Direct substitution into 1/v − 1/u = 1/f and m = v/u, with the sign convention applied ' +
+      'consistently — measure everything from the pole, positive in the direction light travels.</li>' +
+      '<li>Mirror problems with f = R/2, and the standard real/virtual, erect/inverted classification.</li>' +
+      '<li>The lens-maker\'s equation, including what happens when the lens is put in water: ' +
+      '(n − 1) becomes (n_lens/n_medium − 1), so f grows and can even change sign.</li>' +
+      '<li>Two-element combinations, where the image of the first is the object for the second, ' +
+      'and P = P₁ + P₂ − dP₁P₂ for the equivalent power.</li>' +
+      '<li>Magnifying glass, compound microscope and astronomical telescope: magnification and tube ' +
+      'length in normal adjustment.</li></ul>' +
+      '<div class="pyq"><em>Trap to avoid</em>The sign convention is not optional decoration. Distances ' +
+      'are measured <b>from the pole or optical centre</b>, positive in the direction the light travels. ' +
+      'A real object is therefore at negative u for a lens, and the commonest lost mark in the chapter is ' +
+      'a correct calculation with one sign dropped.</div>' +
+      '<div class="pyq"><em>Trap to avoid</em>For a mirror the formula is 1/v + 1/u = 1/f, with a ' +
+      '<b>plus</b>. For a lens it is 1/v − 1/u = 1/f. Writing one when you mean the other is a whole ' +
+      'question thrown away, and no amount of checking the arithmetic will find it.</div>'
+  });
+
 })(window.InsightLab);
