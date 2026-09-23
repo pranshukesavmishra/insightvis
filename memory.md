@@ -6,7 +6,7 @@
 > whenever a decision is made or a constraint is discovered.** A stale memory is worse than
 > no memory — fix anything here that no longer matches reality.
 
-Last updated: 2026-09-23 (v8, artifact v20)
+Last updated: 2026-09-23 (v8, artifact v22)
 
 ---
 
@@ -741,6 +741,30 @@ Append only. Never rewrite history.
 ---
 
 ## 13. Session log
+
+- **2026-09-23 (c)** — **Client: batch 2 is "only 10–20%", upgrade it very much — visuals, working and
+  correctness.** Built **`bench3d.js` (window.BENCH)**, the apparatus layer every future bench should use:
+  `wood/metal` procedural textures, `texBox` (textured, lit, per-face sorted), `table`, `clampStand`,
+  `bossClamp`, `pulley` (flanges, spokes, hub, turning mark), `rule` (graduated metre rule), `meter`
+  (LCD redrawn from a live value), `photogate`, `spring`, `string`, `faceTex`, `shadeOverlay`. Its
+  texture mapper must compose with the canvas transform (`ctx.transform`, never `setTransform`) or
+  it breaks at devicePixelRatio ≠ 1. The headless harness runs at 1 and would not catch this.
+  **Rebuilt all three labs** as instrumented experiments: newton (massive pulley, sliding wedge,
+  lift trip + cable cut, motion sensor with LS fit), collisions (soft-contact bumpers with calibrated
+  e, force–time and impulse, photogates, air table by strobe, Blackwood pendulum), capacitance (three
+  dielectric arrangements on the same Laplace grid, plates on posts with meters, breadboard circuits
+  with true resistor colour codes). **Bugs found by reading the code or the renders:**
+  - The old free-body diagram drew the Atwood tension horizontal, tilted the ramp normal the wrong
+    way, drew ramp friction horizontal, and pointed the push force backwards.
+  - A statically indeterminate contact force was reported as 0.
+  - The bumper "stuck" test fired exactly when the gliders part.
+  - Impulse taken from 2 ms samples undercounted short contacts.
+  - A smooth sensor-noise wobble biased the fitted slope by 7%; it must be independent per sample.
+  - A large texture sheet sorted by its centre was painted over by a nearer box; split it at the
+    boxes' x-cuts (§14.6).
+
+  **Rule:** every value a meter shows must be the value a real instrument would give (gates time a
+  flag; sensors fit a noisy record), shown beside the model's value.
 
 - **2026-09-23 (b)** — **Client: labels overlap too much, give a tick box to hide them; and the Cardiac
   Cycle lab is only "10–20%" liked, upgrade it very much.** Added a global **Labels** switch to the
