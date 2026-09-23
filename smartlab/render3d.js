@@ -446,6 +446,7 @@
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       ctx.strokeStyle = rgba(colour, o.alpha == null ? 0.7 : o.alpha);
       ctx.lineWidth = o.width || 1.4;
+      if (o.dash) ctx.setLineDash(o.dash);
       ctx.beginPath();
       let pen = false;
       for (let i = 0; i < proj.length; i++) {
