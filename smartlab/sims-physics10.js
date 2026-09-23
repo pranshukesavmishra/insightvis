@@ -1338,19 +1338,204 @@
 
 
   /* =========================================================================
-     17 · CENTRE OF MASS AND COLLISIONS — momentum kept, energy audited
+     17 · COLLISIONS — an air track, real bumpers, real timing
 
-     One rule runs every arrangement on this bench: the total momentum of an
-     isolated system cannot change, so the centre of mass moves at a constant
-     velocity straight through the impact. Energy is a separate question, and
-     the coefficient of restitution answers it. Nothing here is a canned
-     outcome — the impulse along the line of centres is computed, applied, and
-     the momentum and energy books are then balanced on screen so that the
-     conserved quantity and the spent one can be told apart by eye.
+     A collision here is not an instant. Each glider carries a spring bumper,
+     and while the bumpers are pressed together they push with a spring-
+     and-damper force, F = kδ + cδ̇ (never pulling). The whole contact is
+     integrated with RK4 in steps of a tenth of a millisecond, so the force
+     rises, peaks and falls over a few hundredths of a second — and the
+     impulse is the area under that curve. The damping is calibrated so the
+     coefficient of restitution you set is the one the bumpers produce; the
+     lab then measures e from the velocities afterwards and shows both.
+
+     Velocities are not read from the model, either: photogates time a 10 cm
+     flag on each glider through the beam, v = L/Δt, exactly as in the
+     school practical, and the momentum book is kept from those readings.
      ========================================================================= */
 
-  /* radius a sphere of this mass gets on the bench: equal density, so the
-     bigger mass really does look bigger, by the cube root it deserves */
+  const FLAG = 0.10;                         // flag length on each glider, m
+  const KB = 1800;                           // bumper stiffness, N/m
+
+  /* damping ratio that gives restitution e for a linear spring-damper whose
+     force may not go negative — found by bisection on a short simulation,
+     because the no-pull rule changes the textbook ζ(e) relation */
+  function bounceE(zeta, mu) {
+    const k = KB, c = 2 * zeta * Math.sqrt(k * mu), h = 2e-5;
+    let d = 0, dd = 1;                        // compression and its rate (closing speed 1 m/s)
+    for (let i = 0; i < 400000; i++) {
+      const F = Math.max(0, k * d + c * dd);
+      const acc = -F / mu;
+      d += dd * h; dd += acc * h;
+      if (d <= 0 && i > 5) return Math.max(0, -dd);
+      /* the damper can cancel the spring before the bumper is fully out: the
+         force would have to pull, it cannot, so the gliders simply part here,
+         moving apart at the speed they have now */
+      if (F === 0 && dd < 0) return -dd;
+    }
+    return 0;
+  }
+  const ZCACHE = {};
+  function zetaFor(e, mu) {
+    if (e >= 0.999) return 0;
+    const key = e.toFixed(3) + '|' + mu.toFixed(4);
+    if (ZCACHE[key] != null) return ZCACHE[key];
+    let lo = 0, hi = 3;
+    for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (bounceE(mid, mu) > e) lo = mid; else hi = mid; }
+    return (ZCACHE[key] = (lo + hi) / 2);
+  }
+
+  /* the whole 1D experiment, run once and stored: positions, velocities,
+     the contact force, and every photogate transit */
+  function runTrack(p) {
+    const m1 = p.m1, m2 = p.m2, mu = m1 * m2 / (m1 + m2);
+    const L1 = 0.16, L2 = 0.16, bump = 0.02;              // glider bodies and bumper length
+    const sticky = p.mode === 'track' && p.e < 0.01;
+    const c = p.mode === 'track' ? 2 * zetaFor(Math.max(p.e, 0.01), mu) * Math.sqrt(KB * mu) : 0;
+    const gates = [-0.40, 0.52];
+    let x1 = p.mode === 'recoil' ? -0.10 - L1 / 2 : -0.78, x2 = p.mode === 'recoil' ? -0.10 + L2 / 2 : 0.12;
+    let v1 = p.mode === 'recoil' ? 0 : p.u1, v2 = p.mode === 'recoil' ? 0 : p.u2;
+    const out = { t: [], x1: [], x2: [], v1: [], v2: [], F: [], transits: [], L1: L1, L2: L2, gates: gates,
+                  stuck: false, tRelease: 0.6 };
+    const h = 1e-4, T = 7;
+    let joined = false, t = 0, released = false;
+    const block = gates.map(() => [null, null]);           // per gate, per glider: entry time
+    const rest = L1 / 2 + L2 / 2 + (p.mode === 'recoil' ? 0 : 2 * bump);
+    // recoil: a spring of stiffness ks compressed so it stores Es joules
+    const ks = 900, xc = p.mode === 'recoil' ? Math.sqrt(2 * p.Es / ks) : 0;
+    const force = (x1, x2, v1, v2) => {
+      const gap = (x2 - x1) - rest;
+      if (p.mode === 'recoil') {
+        if (!released) return 0;
+        const comp = xc - gap;                              // spring pushes while still compressed
+        return comp > 0 ? ks * comp : 0;
+      }
+      if (gap >= 0) return 0;
+      const d = -gap, dd = v1 - v2;
+      return Math.max(0, KB * d + c * dd);
+    };
+    const deriv = (s) => { const F = force(s[0], s[1], s[2], s[3]); return [s[2], s[3], -F / m1, F / m2]; };
+    let s = [x1, x2, v1, v2], k = 0, J = 0, Fprev = 0;
+    const contact = [];
+    while (t < T) {
+      if (p.mode === 'recoil' && !released && t >= out.tRelease) released = true;
+      if (joined) {
+        const vc = (m1 * s[2] + m2 * s[3]) / (m1 + m2);
+        s[2] = s[3] = vc; s[0] += vc * h; s[1] += vc * h;
+      } else {
+        const a = deriv(s), b = deriv(s.map((v, i) => v + a[i] * h / 2)),
+              cc = deriv(s.map((v, i) => v + b[i] * h / 2)), d = deriv(s.map((v, i) => v + cc[i] * h));
+        s = s.map((v, i) => v + h / 6 * (a[i] + 2 * b[i] + 2 * cc[i] + d[i]));
+        // velcro: once the bumpers have stopped closing, they hold together
+        if (sticky && (s[1] - s[0]) - rest < 0 && s[2] - s[3] <= 0) { joined = true; out.stuck = true; }
+      }
+      t += h;
+      const F = joined ? 0 : force(s[0], s[1], s[2], s[3]);
+      // the impulse, integrated at full resolution (trapezium rule on every step)
+      J += 0.5 * (F + Fprev) * h;
+      if (F > 0 || Fprev > 0) contact.push([t, F]);
+      Fprev = F;
+      // photogates: a flag of length FLAG centred on each glider
+      gates.forEach((gx, gi) => {
+        [s[0], s[1]].forEach((xc2, j) => {
+          const inside = Math.abs(xc2 - gx) < FLAG / 2;
+          if (inside && block[gi][j] == null) block[gi][j] = t;
+          if (!inside && block[gi][j] != null) {
+            const dt = t - block[gi][j];
+            out.transits.push({ gate: gi, glider: j, t0: block[gi][j], dt: dt, v: FLAG / dt * Math.sign(j ? s[3] : s[2]) });
+            block[gi][j] = null;
+          }
+        });
+      });
+      if (k % 20 === 0) {
+        out.t.push(t); out.x1.push(s[0]); out.x2.push(s[1]); out.v1.push(s[2]); out.v2.push(s[3]); out.F.push(F);
+      }
+      k++;
+      if (Math.min(s[0], s[1]) < -0.97 || Math.max(s[0], s[1]) > 0.97) break;
+    }
+    out.T = t;
+    out.contact = contact; out.impulse = J;
+    out.tc0 = contact.length ? contact[0][0] : null;
+    out.tc1 = contact.length ? contact[contact.length - 1][0] : null;
+    out.Fpk = contact.reduce((a, q) => Math.max(a, q[1]), 0);
+    out.u1 = out.v1[0]; out.u2 = out.v2[0];
+    out.w1 = out.v1[out.v1.length - 1]; out.w2 = out.v2[out.v2.length - 1];
+    return out;
+  }
+
+  /* the ideal (instantaneous) answer, for comparison */
+  function ideal1D(m1, m2, u1, u2, e) {
+    const M = m1 + m2;
+    return [((m1 - e * m2) * u1 + (1 + e) * m2 * u2) / M, ((m2 - e * m1) * u2 + (1 + e) * m1 * u1) / M];
+  }
+
+  /* ---- the air table: two pucks, a glancing hit, recorded by strobe ----
+     Same soft contact as the track, acting only along the line of centres
+     (the pucks are smooth), integrated in 2D. A strobe flash every 0.1 s
+     records where each puck was, as the classic multiflash photograph does. */
+  function runTable(p) {
+    const m1 = p.m1, m2 = p.m2, mu = m1 * m2 / (m1 + m2);
+    const r1 = 0.035 + 0.02 * Math.cbrt(m1), r2 = 0.035 + 0.02 * Math.cbrt(m2);
+    const d0 = r1 + r2, b = clamp(p.bImp, 0, 0.95) * d0;
+    const c = 2 * zetaFor(Math.max(p.e, 0.01), mu) * Math.sqrt(KB * mu);
+    let s = [-0.72, b, 0.10, 0, p.u1, 0, 0, 0];          // x1 y1 x2 y2 vx1 vy1 vx2 vy2
+    const force = (s) => {
+      const dx = s[2] - s[0], dy = s[3] - s[1], dist = Math.hypot(dx, dy), gap = dist - d0;
+      if (gap >= 0) return [0, 0, 0];
+      const nx = dx / dist, ny = dy / dist;
+      const closing = (s[4] - s[6]) * nx + (s[5] - s[7]) * ny;
+      const F = Math.max(0, KB * (-gap) + c * closing);
+      return [F * nx, F * ny, F];
+    };
+    const deriv = (s) => { const f = force(s); return [s[4], s[5], s[6], s[7], -f[0] / m1, -f[1] / m1, f[0] / m2, f[1] / m2]; };
+    const out = { r1: r1, r2: r2, b: b, t: [], P: [], strobe: [], F: [] };
+    const h = 1e-4;
+    let t = 0, k = 0, nextFlash = 0;
+    while (t < 6) {
+      const a = deriv(s), bb = deriv(s.map((v, i) => v + a[i] * h / 2)),
+            cc = deriv(s.map((v, i) => v + bb[i] * h / 2)), d = deriv(s.map((v, i) => v + cc[i] * h));
+      s = s.map((v, i) => v + h / 6 * (a[i] + 2 * bb[i] + 2 * cc[i] + d[i]));
+      t += h;
+      if (k % 20 === 0) { out.t.push(t); out.P.push(s.slice()); out.F.push(force(s)[2]); }
+      if (t >= nextFlash) { out.strobe.push(s.slice(0, 4)); nextFlash += 0.1; }
+      k++;
+      if (Math.abs(s[0]) > 0.86 || Math.abs(s[2]) > 0.86 || Math.abs(s[1]) > 0.56 || Math.abs(s[3]) > 0.56) break;
+    }
+    out.T = t;
+    const f = out.P[out.P.length - 1];
+    out.V1 = [f[4], f[5]]; out.V2 = [f[6], f[7]];
+    const s1 = Math.hypot(f[4], f[5]), s2 = Math.hypot(f[6], f[7]);
+    out.ang = s1 > 1e-4 && s2 > 1e-4 ? Math.acos(clamp((f[4] * f[6] + f[5] * f[7]) / (s1 * s2), -1, 1)) * 180 / Math.PI : null;
+    out.th1 = Math.atan2(f[5], f[4]) * 180 / Math.PI; out.th2 = Math.atan2(f[7], f[6]) * 180 / Math.PI;
+    out.px = m1 * f[4] + m2 * f[6]; out.py = m1 * f[5] + m2 * f[7];
+    out.K0 = 0.5 * m1 * p.u1 * p.u1; out.K1 = 0.5 * m1 * s1 * s1 + 0.5 * m2 * s2 * s2;
+    return out;
+  }
+
+  /* ---- the Blackwood ballistic pendulum: a spring gun fires a steel ball
+     into a catcher on a light rod; a pawl on the pendulum rides a toothed
+     arc and locks at the highest point, so the height can be read after ---- */
+  function runBallistic(p) {
+    const m = p.mBul, M = p.mBlk, L = p.Lstr, g = 9.81;
+    const v = m * p.uBul / (m + M);
+    let th = 0, om = v / L, t = 0;
+    const out = { v: v, th: [], t: [], thMax: 0 };
+    const h = 5e-4;
+    while (t < 3) {
+      const f = (a, b) => [b, -(g / L) * Math.sin(a)];
+      const k1 = f(th, om), k2 = f(th + k1[0] * h / 2, om + k1[1] * h / 2), k3 = f(th + k2[0] * h / 2, om + k2[1] * h / 2),
+            k4 = f(th + k3[0] * h, om + k3[1] * h);
+      const thN = th + h / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]), omN = om + h / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]);
+      t += h;
+      if (omN <= 0) { out.thMax = th; out.tMax = t; break; }       // the pawl catches it here
+      th = thN; om = omN;
+      out.t.push(t); out.th.push(th);
+      if (th > Math.PI * 0.98) { out.over = true; out.thMax = th; out.tMax = t; break; }
+    }
+    out.h = L * (1 - Math.cos(out.thMax));
+    return out;
+  }
+
   function ballR(m) { return 0.11 * Math.cbrt(Math.max(m, 0.05) / 2); }
 
   function collide(S) {
@@ -1514,85 +1699,87 @@
              tags: ['piece 1', 'piece 2'] };
   }
 
+
+  /* the air-track surface: brushed aluminium drilled with rows of air holes */
+  let TRACK_TEX = null;
+  function trackTex() {
+    if (TRACK_TEX || typeof document === 'undefined') return TRACK_TEX;
+    const base = window.BENCH.metal('#B7C2D2', 17), c = document.createElement('canvas');
+    c.width = base.width * 2; c.height = base.height;
+    const x = c.getContext('2d');
+    x.drawImage(base, 0, 0); x.drawImage(base, base.width, 0);
+    x.fillStyle = 'rgba(20,24,32,.75)';
+    for (let i = 0; i < 64; i++) for (let j = 0; j < 2; j++) {
+      x.beginPath(); x.arc(8 + i * (c.width - 16) / 63, c.height * (0.35 + j * 0.3), 2.2, 0, TAU); x.fill();
+    }
+    return (TRACK_TEX = c);
+  }
+
   L.register({
     id: 'collisions', subject: 'physics',
-    name: 'Collisions and the Centre of Mass',
+    name: 'Collisions — Air Track, Photogates and the Centre of Mass',
     chapter: 'System of Particles · Centre of Mass',
     exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
     weight: 'Very high yield',
     is3D: true,
-    stageHint: 'Drag the ringed handle to change the speed · the glowing yellow marker is the centre of mass',
-    lede: 'Every collision here is worked out, not played back. The lab finds the exact moment of ' +
-      'contact, applies an equal and opposite impulse <b>along the line joining the centres</b>, and ' +
-      'then checks both books. Momentum always balances, so the <b>centre of mass</b> (the glowing ' +
-      'marker) moves straight through the impact at the same speed. Kinetic energy balances only when ' +
-      '<i>e</i> = 1. The energy lost is exactly the energy of the motion <i>relative to</i> the centre of ' +
-      'mass along that line. No other energy is available to lose, which is why a head-on crash of ' +
-      'equal masses can use up all of it and a glancing one cannot.',
+    stageHint: 'Drag the ringed handle to change the speed · the glowing marker is the centre of mass',
+    lede: 'Gliders float on an <b>air track</b>, so there is no friction to argue about. Each carries a ' +
+      '<b>spring bumper</b>, and the collision is not an instant: the bumpers squeeze and spring back over ' +
+      'about 30 ms, and the lab integrates that force step by step. The <b>impulse</b> is the area under ' +
+      'the force–time curve, and it equals the change in momentum. <b>Photogates</b> time a 10 cm flag ' +
+      'through their beams, v = L/Δt, as in the practical, and the momentum book is kept from those ' +
+      'readings. The same bench fires two gliders apart with a spring (an explosion run backwards), ' +
+      'fires a ball into a ballistic pendulum, and records a glancing collision on an air table by strobe.',
 
-    params: { mode: 'head1d', m1: 2, m2: 4, u1: 6, u2: 0, e: 0.6, bImp: 0.5,
-              mBul: 0.02, mBlk: 2, uBul: 300, Lstr: 1.0,
+    params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 1, bImp: 0.5, Es: 0.3,
+              mBul: 0.066, mBlk: 0.25, uBul: 5, Lstr: 0.30,
               mProj: 2, u0: 20, alpha: 45, fSplit: 0.5, Q: 200, beta: 180,
               showCOM: true, run: true },
 
     presets: [
-      { name: 'Elastic · equal masses swap', params: { mode: 'head1d', m1: 2, m2: 2, u1: 5, u2: 0, e: 1 } },
-      { name: 'Perfectly inelastic · they stick', params: { mode: 'head1d', m1: 2, m2: 2, u1: 5, u2: 0, e: 0 } },
-      { name: 'Heavy hits light', params: { mode: 'head1d', m1: 10, m2: 1, u1: 4, u2: 0, e: 1 } },
-      { name: 'Light hits heavy · rebounds', params: { mode: 'head1d', m1: 1, m2: 10, u1: 4, u2: 0, e: 1 } },
-      { name: 'Head-on from both sides', params: { mode: 'head1d', m1: 3, m2: 2, u1: 4, u2: -3, e: 0.7 } },
-      { name: 'Glancing · equal masses, 90°', params: { mode: 'oblique', m1: 2, m2: 2, u1: 5, u2: 0, e: 1, bImp: 0.5 } },
-      { name: 'Glancing · inelastic', params: { mode: 'oblique', m1: 2, m2: 2, u1: 5, u2: 0, e: 0.5, bImp: 0.5 } },
-      { name: 'Ballistic pendulum', params: { mode: 'ballistic', mBul: 0.01, mBlk: 1.99, uBul: 400, Lstr: 1 } },
-      { name: 'Shell bursts · one piece drops', params: { mode: 'burst', mProj: 2, u0: 20, alpha: 45, fSplit: 0.5, Q: 200, beta: 180 } },
-      { name: 'Shell bursts · unequal pieces', params: { mode: 'burst', mProj: 2, u0: 20, alpha: 45, fSplit: 0.3, Q: 500, beta: 60 } }
+      { name: 'Elastic · equal gliders swap', params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 1 } },
+      { name: 'Bouncy · e = 0.5', params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 0.5 } },
+      { name: 'Velcro · they stick', params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 0 } },
+      { name: 'Light hits heavy', params: { mode: 'track', m1: 0.2, m2: 0.8, u1: 0.7, u2: 0, e: 1 } },
+      { name: 'Head-on, both moving', params: { mode: 'track', m1: 0.5, m2: 0.5, u1: 0.6, u2: -0.4, e: 0.7 } },
+      { name: 'Spring recoil (explosion)', params: { mode: 'recoil', m1: 0.4, m2: 0.8, Es: 0.3 } },
+      { name: 'Air table · 90° split', params: { mode: 'airtable', m1: 0.2, m2: 0.2, u1: 0.5, e: 1, bImp: 0.5 } },
+      { name: 'Air table · inelastic', params: { mode: 'airtable', m1: 0.2, m2: 0.2, u1: 0.5, e: 0.5, bImp: 0.5 } },
+      { name: 'Ballistic pendulum', params: { mode: 'ballistic', mBul: 0.066, mBlk: 0.25, uBul: 5, Lstr: 0.3 } },
+      { name: 'Shell bursts · one piece drops', params: { mode: 'burst', mProj: 2, u0: 20, alpha: 45, fSplit: 0.5, Q: 200, beta: 180 } }
     ],
 
     controls: [
       { group: 'Arrangement', items: [
-        { key: 'mode', type: 'select', label: 'What is set up', restructure: true, options: [
-          { value: 'head1d', label: 'Head-on' }, { value: 'oblique', label: 'Glancing' },
-          { value: 'ballistic', label: 'Ballistic' }, { value: 'burst', label: 'Explosion' }] }
+        { key: 'mode', type: 'select', label: 'What is on the bench', restructure: true, options: [
+          { value: 'track', label: 'Air track' }, { value: 'recoil', label: 'Recoil' },
+          { value: 'airtable', label: 'Air table' }, { value: 'ballistic', label: 'Ballistic' },
+          { value: 'burst', label: 'Explosion' }] }
       ] },
-      { group: 'The two balls', items: [
-        { key: 'm1', label: 'Mass <i>m</i>₁', min: 0.5, max: 20, step: 0.1, unit: 'kg',
-          fmt: v => v.toFixed(1), restructure: true },
-        { key: 'm2', label: 'Mass <i>m</i>₂', min: 0.5, max: 20, step: 0.1, unit: 'kg',
-          fmt: v => v.toFixed(1), restructure: true },
-        { key: 'u1', label: 'Velocity <i>u</i>₁', min: -10, max: 10, step: 0.1, unit: 'm/s',
-          fmt: v => v.toFixed(1), restructure: true },
-        { key: 'u2', label: 'Velocity <i>u</i>₂', min: -10, max: 10, step: 0.1, unit: 'm/s',
-          fmt: v => v.toFixed(1), restructure: true }
+      { group: 'The gliders', items: [
+        { key: 'm1', label: 'Mass <i>m</i>₁', min: 0.1, max: 2, step: 0.01, unit: 'kg', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'm2', label: 'Mass <i>m</i>₂', min: 0.1, max: 2, step: 0.01, unit: 'kg', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'u1', label: 'Velocity <i>u</i>₁', min: -1.2, max: 1.2, step: 0.01, unit: 'm/s', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'u2', label: 'Velocity <i>u</i>₂', min: -1.2, max: 1.2, step: 0.01, unit: 'm/s', fmt: v => v.toFixed(2), restructure: true }
       ] },
-      { group: 'The impact', items: [
-        { key: 'e', label: 'Restitution <i>e</i>', min: 0, max: 1, step: 0.01, unit: '',
-          fmt: v => v.toFixed(2), restructure: true },
-        { key: 'bImp', label: 'Offset <i>b</i> ÷ (<i>r</i>₁+<i>r</i>₂)', min: 0, max: 0.95, step: 0.01, unit: '',
-          fmt: v => v.toFixed(2), restructure: true }
+      { group: 'The bumpers', items: [
+        { key: 'e', label: 'Restitution <i>e</i> (0 = velcro)', min: 0, max: 1, step: 0.01, unit: '', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'bImp', label: 'Air table offset <i>b</i> ÷ (<i>r</i>₁+<i>r</i>₂)', min: 0, max: 0.9, step: 0.01, unit: '', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'Es', label: 'Recoil spring energy', min: 0.02, max: 1.5, step: 0.01, unit: 'J', fmt: v => v.toFixed(2), restructure: true }
       ] },
       { group: 'Ballistic pendulum', items: [
-        { key: 'mBul', label: 'Bullet mass', min: 0.002, max: 0.2, step: 0.001, unit: 'g',
-          fmt: v => (v * 1000).toFixed(0), restructure: true },
-        { key: 'mBlk', label: 'Block mass', min: 0.2, max: 10, step: 0.01, unit: 'kg',
-          fmt: v => v.toFixed(2), restructure: true },
-        { key: 'uBul', label: 'Bullet speed', min: 20, max: 1000, step: 1, unit: 'm/s',
-          fmt: v => v.toFixed(0), restructure: true },
-        { key: 'Lstr', label: 'String length', min: 0.3, max: 3, step: 0.01, unit: 'm',
-          fmt: v => v.toFixed(2), restructure: true }
+        { key: 'mBul', label: 'Steel ball', min: 0.01, max: 0.2, step: 0.001, unit: 'g', fmt: v => (v * 1000).toFixed(0), restructure: true },
+        { key: 'mBlk', label: 'Catcher', min: 0.05, max: 1.5, step: 0.005, unit: 'kg', fmt: v => v.toFixed(3), restructure: true },
+        { key: 'uBul', label: 'Launch speed', min: 1, max: 10, step: 0.05, unit: 'm/s', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'Lstr', label: 'Arm length', min: 0.15, max: 0.5, step: 0.01, unit: 'm', fmt: v => v.toFixed(2), restructure: true }
       ] },
       { group: 'Explosion in flight', items: [
-        { key: 'mProj', label: 'Shell mass', min: 0.5, max: 20, step: 0.1, unit: 'kg',
-          fmt: v => v.toFixed(1), restructure: true },
-        { key: 'u0', label: 'Launch speed', min: 5, max: 60, step: 0.5, unit: 'm/s',
-          fmt: v => v.toFixed(1), restructure: true },
-        { key: 'alpha', label: 'Launch angle', min: 10, max: 80, step: 0.5, unit: '°',
-          fmt: v => v.toFixed(1), restructure: true },
-        { key: 'fSplit', label: 'Piece 1 share of mass', min: 0.05, max: 0.95, step: 0.01, unit: '',
-          fmt: v => v.toFixed(2), restructure: true },
-        { key: 'Q', label: 'Energy released <i>Q</i>', min: 0, max: 3000, step: 1, unit: 'J',
-          fmt: v => v.toFixed(0), restructure: true },
-        { key: 'beta', label: 'Split direction', min: -180, max: 180, step: 1, unit: '°',
-          fmt: v => v.toFixed(0), restructure: true }
+        { key: 'mProj', label: 'Shell mass', min: 0.5, max: 20, step: 0.1, unit: 'kg', fmt: v => v.toFixed(1), restructure: true },
+        { key: 'u0', label: 'Launch speed', min: 5, max: 60, step: 0.5, unit: 'm/s', fmt: v => v.toFixed(1), restructure: true },
+        { key: 'alpha', label: 'Launch angle', min: 10, max: 80, step: 0.5, unit: '°', fmt: v => v.toFixed(1), restructure: true },
+        { key: 'fSplit', label: 'Piece 1 share of mass', min: 0.05, max: 0.95, step: 0.01, unit: '', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'Q', label: 'Energy released <i>Q</i>', min: 0, max: 3000, step: 1, unit: 'J', fmt: v => v.toFixed(0), restructure: true },
+        { key: 'beta', label: 'Split direction', min: -180, max: 180, step: 1, unit: '°', fmt: v => v.toFixed(0), restructure: true }
       ] },
       { group: 'Display', items: [
         { key: 'showCOM', type: 'toggle', label: 'Show the centre of mass' },
@@ -1602,268 +1789,282 @@
 
     setup(S) {
       const p = S.p;
-      S.R = collide(S);
-      const R = S.R;
-      S.t2 = 0; S.flash = -1;
-      if (p.mode === 'head1d' || p.mode === 'oblique') {
-        /* Ball 2 starts just right of centre, ball 1 on the left. The contact
-           instant is SOLVED: the gap along x closes at the relative speed,
-           and touching means the x-separation equals √(d² − b²). */
-        S.x20 = 0.28; S.x10 = -0.95;
-        const gapX = Math.sqrt(Math.max(R.d * R.d - R.b * R.b, 0));
-        const rel = R.U1[0] - R.U2[0];
-        S.tc = rel > 1e-9 ? ((S.x20 - S.x10) - gapX) / rel : Infinity;
-        if (isFinite(S.tc) && S.tc < 0) S.tc = 0;
-        S.hx1 = S.x10 + R.U1[0] * (isFinite(S.tc) ? S.tc : 0);
-        S.hx2 = S.x20 + R.U2[0] * (isFinite(S.tc) ? S.tc : 0);
-        const fast = Math.max(Math.abs(p.u1), Math.abs(p.u2), R.sp1 || 0, R.sp2 || 0, 0.4);
-        S.tEnd = (isFinite(S.tc) ? S.tc : 1.6 / fast) + clamp(1.5 / fast, 0.35, 3.0);
-        S.slow = 0.30;                               // shown at 0.3× real time
+      S.t2 = 0; S.flash = -1; S.slow = 1;
+      if (p.mode === 'track' || p.mode === 'recoil') {
+        const r = runTrack(p);
+        S.run = r; S.tEnd = r.T + 0.8;
+        const m1 = p.m1, m2 = p.m2;
+        // the book, from the photogate readings: first transit of each glider, and the last
+        const tr = r.transits;
+        const first = j => tr.find(q => q.glider === j), last = j => { const a = tr.filter(q => q.glider === j); return a[a.length - 1]; };
+        const ok = (q, t) => q && (t == null || q.t0 > t);
+        const tc = r.tc1 != null ? r.tc1 : (p.mode === 'recoil' ? r.tRelease : Infinity);
+        const g1 = first(0), g2 = first(1), h1 = last(0), h2 = last(1);
+        S.R = {
+          m1: m1, m2: m2, u1: r.u1, u2: r.u2, w1: r.w1, w2: r.w2,
+          gU1: ok(g1) && g1.t0 < tc ? g1.v : (p.mode === 'recoil' ? 0 : null), gU2: ok(g2) && g2.t0 < tc ? g2.v : (Math.abs(r.u2) < 1e-9 ? 0 : null),
+          gW1: ok(h1, tc) ? h1.v : (Math.abs(r.w1) < 0.005 ? 0 : null), gW2: ok(h2, tc) ? h2.v : null,
+          J: r.impulse, tcon: r.tc1 != null ? r.tc1 - r.tc0 : 0, Fpk: r.Fpk, stuck: r.stuck
+        };
+        const R = S.R;
+        R.p0 = m1 * r.u1 + m2 * r.u2; R.p1 = m1 * r.w1 + m2 * r.w2;
+        R.K0 = 0.5 * m1 * r.u1 * r.u1 + 0.5 * m2 * r.u2 * r.u2;
+        R.K1 = 0.5 * m1 * r.w1 * r.w1 + 0.5 * m2 * r.w2 * r.w2;
+        R.dK = p.mode === 'recoil' ? R.K1 - R.K0 : R.K0 - R.K1;
+        /* round away integrator residue (≈1e-7 J) so an elastic collision
+           reads 0, not −0.0000; likewise velocities that are really zero */
+        const fz = v => (Math.abs(v) < 5e-5 ? 0 : v);
+        R.dK = Math.abs(R.dK) < 1e-5 * Math.max(R.K0, 1e-9) + 1e-7 ? 0 : R.dK;
+        R.w1 = fz(R.w1); R.w2 = fz(R.w2); R.u1 = fz(R.u1); R.u2 = fz(R.u2);
+        ['gU1', 'gU2', 'gW1', 'gW2'].forEach(k => { if (R[k] != null) R[k] = fz(R[k]); });
+        R.eMeas = Math.abs(r.u1 - r.u2) > 1e-6 ? (r.w2 - r.w1) / (r.u1 - r.u2) : null;
+        R.vcom = (m1 * r.u1 + m2 * r.u2) / (m1 + m2);
+        R.ideal = ideal1D(m1, m2, r.u1, r.u2, p.e);
+      } else if (p.mode === 'airtable') {
+        const r = runTable(p);
+        S.run = r; S.tEnd = r.T + 0.8;
+        S.R = { m1: p.m1, m2: p.m2, ang: r.ang, px: r.px, py: r.py, p0: p.m1 * p.u1, p1: r.px, K0: r.K0, K1: r.K1,
+                dK: r.K0 - r.K1, V1: r.V1, V2: r.V2, th1: r.th1, th2: r.th2 };
       } else if (p.mode === 'ballistic') {
-        S.th = 0; S.om = 0; S.tImp = 0.55;             // bullet flight is shown slowed
-        const T0 = TAU * Math.sqrt(p.Lstr / G);
-        S.tEnd = S.tImp + (R.overTop ? 3.2 : T0 * (1 + Math.pow(R.theta * Math.PI / 180, 2) / 16) * 1.02);
-        S.slow = 1;
+        S.R = collide(S); S.bal = runBallistic(p);
+        S.tFly = 0.45; S.tEnd = S.tFly + (S.bal.tMax || 1) + 1.6;
       } else {
-        /* fit the whole flight on the bench: every landing point and the
-           highest point any piece reaches */
+        S.R = collide(S);
+        const R = S.R;
         const zTop = (V) => R.zA + (V[1] > 0 ? V[1] * V[1] / (2 * G) : 0);
         const xs = [0, R.range, R.x1, R.x2];
-        const xmin = Math.min.apply(null, xs), xmax = Math.max.apply(null, xs);
+        const xmin = Math.min(...xs), xmax = Math.max(...xs);
         const zmax = Math.max(R.zA, zTop(R.V1), zTop(R.V2), 1e-3);
         S.k = Math.min(2.7 / Math.max(xmax - xmin, 1e-3), 1.25 / zmax);
         S.xo = (xmin + xmax) / 2;
-        S.tEnd = R.tA + R.tEnd + 0.6;
-        S.slow = 0.9;
+        S.tEnd = R.tA + R.tEnd + 0.6; S.slow = 0.9;
       }
-      const view = p.mode === 'oblique' ? { theta: -1.52, phi: 0.80, dist: 2.75, target: [0, 0, -0.05] }
-                 : p.mode === 'ballistic' ? { theta: -1.02, phi: 0.20, dist: 2.45, target: [-0.35, 0, 0.40] }
-                 : p.mode === 'burst' ? { theta: -1.54, phi: 0.14, dist: 2.7, target: [0, 0, 0.30] }
-                 : { theta: -1.50, phi: 0.40, dist: 2.3, target: [0, 0, 0.0] };
+      const views = {
+        track: { theta: -1.42, phi: 0.26, dist: 1.55, target: [-0.02, 0, 0.12] },
+        recoil: { theta: -1.42, phi: 0.26, dist: 1.5, target: [-0.05, 0, 0.12] },
+        airtable: { theta: -1.54, phi: 0.98, dist: 1.55, target: [-0.05, 0, 0.66] },
+        ballistic: { theta: -1.30, phi: 0.18, dist: 1.6, target: [-0.1, 0, 0.26] },
+        burst: { theta: -1.54, phi: 0.14, dist: 2.7, target: [0, 0, 0.30] }
+      };
       if (!S.cam || S._viewMode !== p.mode) {
-        S.cam = Camera(view);
-        S.cam.minDist = 1.5; S.cam.maxDist = 12;
-        S._viewMode = p.mode;
+        S.cam = Camera(views[p.mode]); S.cam.minDist = 1.0; S.cam.maxDist = 12; S._viewMode = p.mode;
       }
-      /* the flight is rescaled to the bench, so its height changes with the
-         launch; keep the camera aimed at the middle of it */
-      if (p.mode === 'burst') S.cam.target[2] = -0.03 + 0.5 * S.k * Math.max(R.zA, 0.2 / S.k) - 0.08;
+      if (p.mode === 'burst') S.cam.target[2] = -0.03 + 0.5 * S.k * Math.max(S.R.zA, 0.2 / S.k) - 0.08;
     },
 
     step(S, dt) {
-      const p = S.p, R = S.R;
+      const p = S.p;
       if (!p.run) return;
-      const h = dt * S.slow;
       const was = S.t2;
-      S.t2 += h;
-      if (p.mode === 'ballistic' && S.t2 > S.tImp) {
-        /* The swing is integrated, not assumed to be simple-harmonic: at 40°
-           the small-angle period is already 3% short, and a bullet that sends
-           the block over the top would break it outright. RK4 on
-           θ'' = −(g/L) sin θ, from ω₀ = v/L at the instant of embedding. */
-        if (was <= S.tImp) { S.th = 0; S.om = R.omega0; S.flash = S.t2; }
-        let left = S.t2 - Math.max(was, S.tImp);
-        const k = G / p.Lstr;
-        const f = (th, om) => [om, -k * Math.sin(th)];
-        while (left > 1e-9) {
-          const hh = Math.min(left, 0.004);
-          const a = f(S.th, S.om);
-          const b = f(S.th + a[0] * hh / 2, S.om + a[1] * hh / 2);
-          const c = f(S.th + b[0] * hh / 2, S.om + b[1] * hh / 2);
-          const d = f(S.th + c[0] * hh, S.om + c[1] * hh);
-          S.th += hh / 6 * (a[0] + 2 * b[0] + 2 * c[0] + d[0]);
-          S.om += hh / 6 * (a[1] + 2 * b[1] + 2 * c[1] + d[1]);
-          left -= hh;
-        }
-      }
-      if ((p.mode === 'head1d' || p.mode === 'oblique') && isFinite(S.tc) && was < S.tc && S.t2 >= S.tc)
-        S.flash = S.t2;
-      if (p.mode === 'burst' && was < R.tA && S.t2 >= R.tA) S.flash = S.t2;
-      if (S.t2 > S.tEnd) { S.t2 = 0; S.th = 0; S.om = 0; S.flash = -1; }
+      S.t2 += dt * S.slow;
+      if ((p.mode === 'track' || p.mode === 'recoil') && S.run.tc0 != null && was < S.run.tc0 && S.t2 >= S.run.tc0) S.flash = S.t2;
+      if (p.mode === 'recoil' && was < S.run.tRelease && S.t2 >= S.run.tRelease) S.flash = S.t2;
+      if (p.mode === 'ballistic' && was < S.tFly && S.t2 >= S.tFly) S.flash = S.t2;
+      if (p.mode === 'burst' && was < S.R.tA && S.t2 >= S.R.tA) S.flash = S.t2;
+      if (S.t2 > S.tEnd) { S.t2 = 0; S.flash = -1; }
     },
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, R = S.R;
-      const cam = S.cam;
+      const cam = S.cam, B = window.BENCH, acc = th.phys;
       const benchTop = -0.03;
-      const F = R3.Frame(ctx, cam, { ambient: 0.26, floorZ: benchTop });
-      const acc = th.phys;
+      const F = R3.Frame(ctx, cam, { ambient: 0.28, floorZ: null });
       const col1 = '#F29A4A', col2 = '#4A9AF2', comCol = '#F5E663';
       const t = S.t2;
       const flashOn = S.flash >= 0 && t - S.flash < 0.18 && t >= S.flash;
       let flashAt = null, hdl = null;
-      /* DEPTH POLICY (§14.6): the bench and the ground carry F.GROUND; balls,
-         block and shell sort on true depth; arrows take a few hundredths. */
-
+      const idx = (arr) => Math.min(arr.length - 1, Math.max(0, Math.round(t / 0.002)));
       const vArrow = (from, v, colour, tag, k) => {
         const L0 = Math.hypot(v[0], v[1]);
-        if (L0 < 0.02) {
-          R3.label(F, [from[0], from[1], from[2] + 0.07], tag + ' = 0', colour, { size: 9.5 });
-          return;
-        }
-        const s = (k || 0.065);
+        if (L0 < 0.005) return;
+        const s = k || 0.25;
         const to = [from[0] + v[0] * s, from[1] + v[1] * s, from[2]];
-        R3.arrow(F, from, to, 0.010, colour, { head: 0.045, shadow: false, ambient: 0.85, bias: -0.04 });
-        R3.label(F, [to[0] + (v[0] >= 0 ? 0.05 : -0.05), to[1], to[2] + 0.06],
-                 tag + ' = ' + L0.toFixed(2) + ' m/s', colour, { size: 9.5 });
+        R3.arrow(F, from, to, 0.006, colour, { head: 0.03, shadow: false, ambient: 0.85, bias: -0.04 });
+        R3.label(F, [to[0] + (v[0] >= 0 ? 0.04 : -0.04), to[1], to[2] + 0.04], tag + ' = ' + L0.toFixed(2) + ' m/s', colour, { size: 9.5 });
       };
 
-      if (p.mode === 'head1d' || p.mode === 'oblique') {
-        const obl = p.mode === 'oblique';
-        const P = posAt(S, t);
-        // the bench, and for the glancing case a grid so the angles read
-        R3.box(F, [0, 0, benchTop - 0.035], [3.1, obl ? 1.9 : 0.62, 0.07], '#232C44',
-               { shadow: false, ambient: 0.16, bias: F.GROUND });
-        if (obl) {
-          R3.plane(F, [-1.5, -0.9, benchTop + 0.0005], [3.0, 0, 0], [0, 1.8, 0], '#262F4A',
-                   { grid: 15, gridAlpha: 0.14, bias: F.GROUND });
+      if (p.mode === 'track' || p.mode === 'recoil') {
+        const r = S.run, i = idx(r.t), zT = 0.135;
+        B.table(F, -1.15, 1.15, -0.42, 0.42, 0, { legH: 0.69 });
+        // the track on its two stands, with the blower hose at the left end
+        [-0.72, 0.72].forEach(x => R3.box(F, [x, 0, 0.05], [0.08, 0.16, 0.10], '#3A4458', { shadow: false, ambient: 0.35 }));
+        B.texBox(F, [0, 0, zT - 0.035], [2.0, 0.09, 0.07], trackTex() || B.metal('#B7C2D2', 17), { ambient: 0.5 });
+        [-1.0, 1.0].forEach(x => R3.box(F, [x, 0, zT + 0.01], [0.02, 0.1, 0.06], '#1E2230', { shadow: false }));
+        R3.tube(F, [[-1.0, 0, zT - 0.03], [-1.08, 0, zT - 0.05], [-1.1, 0.2, 0.02]], 0.018, '#2A2F3A', { segments: 10 });
+        R3.box(F, [-1.05, 0.30, 0.07], [0.16, 0.14, 0.14], '#4A5570', { shadow: false, ambient: 0.35 });
+        B.rule(F, [-0.95, -0.075, zT - 0.066], [1, 0, 0], 1.9, { width: 0.035 });
+        // photogates, each with its beam, blocked when a flag is in it
+        const x1 = r.x1[i], x2 = r.x2[i];
+        r.gates.forEach((gx, gi) => {
+          const blocked = Math.abs(x1 - gx) < FLAG / 2 || Math.abs(x2 - gx) < FLAG / 2;
+          B.photogate(F, [gx, 0, zT + 0.005], [0, 1, 0], 0.20, { blocked: blocked, height: 0.20, beamZ: 0.105 });
+          R3.label(F, [gx, 0.14, zT + 0.24], 'gate ' + 'AB'[gi], '#FF8B8B', { size: 9 });
+        });
+        // the gliders: an anodised body, a flag on top, and a bumper or velcro on the facing ends
+        const glider = (x, colour, tag, m, face) => {
+          const zc = zT + 0.018 + 0.025;
+          R3.box(F, [x, 0, zc], [r.L1, 0.11, 0.05], colour, { shadow: false, ambient: 0.45 });
+          R3.box(F, [x, 0, zc + 0.065], [FLAG, 0.004, 0.08], '#15181F', { shadow: false, ambient: 0.35 });
+          const nDisc = Math.max(0, Math.min(6, Math.round((m - 0.2) / 0.1)));
+          for (let k = 0; k < nDisc; k++)
+            [-1, 1].forEach(sd => R3.cylinder(F, [x, sd * 0.07, zc - 0.01 + k * 0.012], [x, sd * (0.07 + 0.004), zc - 0.01 + k * 0.012],
+                                             0.018, '#B8903F', { segments: 14, shadow: false, caps: true }));
+          R3.label(F, [x, -0.07, zc + 0.14], tag + ' = ' + m.toFixed(2) + ' kg', colour, { size: 9.5 });
+          return zc;
+        };
+        const zc = glider(x1, col1, 'm₁', p.m1, 1);
+        glider(x2, col2, 'm₂', p.m2, -1);
+        const gapNow = (x2 - x1) - (r.L1 / 2 + r.L2 / 2);
+        if (p.mode === 'track') {
+          if (p.e < 0.01) {
+            // velcro pads
+            R3.box(F, [x1 + r.L1 / 2 + 0.006, 0, zc], [0.012, 0.08, 0.04], '#2D3A28', { shadow: false });
+            R3.box(F, [x2 - r.L2 / 2 - 0.006, 0, zc], [0.012, 0.08, 0.04], '#2D3A28', { shadow: false });
+          } else {
+            // spring bumpers, compressed by exactly the overlap the physics computed
+            const half = Math.max(0.004, Math.min(0.02, gapNow / 2));
+            B.spring(F, [x1 + r.L1 / 2, 0, zc], [x1 + r.L1 / 2 + half, 0, zc], 0.012, 5, { wire: 0.0022 });
+            B.spring(F, [x2 - r.L2 / 2 - half, 0, zc], [x2 - r.L2 / 2, 0, zc], 0.012, 5, { wire: 0.0022 });
+          }
         } else {
-          [-1, 1].forEach(sg => R3.box(F, [0, sg * 0.14, benchTop + 0.012], [3.0, 0.018, 0.024],
-                                       '#56657F', { shadow: false, ambient: 0.3 }));
+          // recoil: one spring between them, held compressed by a thread until it is burned
+          const released = t >= r.tRelease;
+          const len = Math.max(0.01, gapNow);
+          if (!released || len < 0.2) B.spring(F, [x1 + r.L1 / 2, 0, zc], [x1 + r.L1 / 2 + Math.min(len, 0.2), 0, zc], 0.014, 7, { wire: 0.0025 });
+          if (!released) R3.polyline(F, [[x1, 0.056, zc + 0.02], [x2, 0.056, zc + 0.02]], '#FF5A5A', { alpha: .95, width: 1.6, bias: -0.02 });
+          if (flashOn) flashAt = [(x1 + x2) / 2, 0.06, zc + 0.02];
+          R3.label(F, [(x1 + x2) / 2, 0.1, zc + 0.2], released ? 'thread burned — spring released' : 'thread holds the spring compressed',
+                   released ? th.warn : th['text-2'], { size: 9.5 });
         }
-        const z1 = benchTop + R.r1, z2 = benchTop + R.r2;
-        const on = (q) => Math.abs(q[0]) < 1.55 && Math.abs(q[1]) < 0.95;
-        // the paths so far, which is where a glancing collision shows its angle
-        if (obl) {
-          const tr = (x0, y0, U, hx, V, z, c) => {
-            const pts = [[x0, y0, benchTop + 0.002]];
-            if (P.hit) {
-              pts.push([hx, y0, benchTop + 0.002]);
-              const dt = t - S.tc;
-              pts.push([hx + V[0] * dt, y0 + V[1] * dt, benchTop + 0.002]);
-            } else pts.push([x0 + U[0] * t, y0, benchTop + 0.002]);
-            R3.polyline(F, pts.map(q => [clamp(q[0], -1.5, 1.5), clamp(q[1], -0.9, 0.9), q[2]]),
-                        c, { alpha: .75, width: 1.6, bias: -0.02 });
-          };
-          tr(S.x10, R.b, R.U1, S.hx1, R.V1, z1, col1);
-          tr(S.x20, 0, R.U2, S.hx2, R.V2, z2, col2);
-          if (P.hit) {
-            // the line of centres at the instant of contact: the only line the impulse can act along
-            R3.polyline(F, [[S.hx1 - R.n[0] * 0.25, R.b - R.n[1] * 0.25, benchTop + 0.004],
-                            [S.hx2 + R.n[0] * 0.55, R.n[1] * 0.55, benchTop + 0.004]],
-                        th.text, { alpha: .55, width: 1.2, dash: [5, 4], bias: -0.02 });
-            R3.label(F, [S.hx2 + R.n[0] * 0.68, R.n[1] * 0.68, benchTop + 0.03],
-                     'line of centres', th['text-2'], { size: 9 });
-            if (R.ang != null)
-              R3.label(F, [S.hx2 - 0.05, 0.02, benchTop + 0.30], 'paths ' + R.ang.toFixed(1) + '° apart',
-                       '#F5E663', { size: 10.5 });
-          }
+        if (flashOn && p.mode === 'track') flashAt = [(x1 + x2) / 2, 0, zc];
+        const V1 = r.v1[i], V2 = r.v2[i];
+        vArrow([x1, 0, zc + 0.17], [V1, 0], col1, 'v₁');
+        vArrow([x2, 0, zc + 0.23], [V2, 0], col2, 'v₂');
+        if (p.showCOM) {
+          const xc = (p.m1 * x1 + p.m2 * x2) / (p.m1 + p.m2), x0c = (p.m1 * r.x1[0] + p.m2 * r.x2[0]) / (p.m1 + p.m2);
+          R3.polyline(F, [[x0c, 0, zT + 0.30], [xc, 0, zT + 0.30]], comCol, { alpha: .85, width: 1.6, dash: [6, 4], bias: -0.02 });
+          R3.sphere(F, [xc, 0, zT + 0.30], 0.014, comCol, { shadow: false, vivid: true });
+          R3.label(F, [xc, 0, zT + 0.35], 'CM ' + R.vcom.toFixed(3) + ' m/s', comCol, { size: 9 });
         }
-        if (on(P.P1)) R3.sphere(F, [P.P1[0], P.P1[1], z1], R.r1, col1, { label: 'm₁', shadowK: 0.5 });
-        if (on(P.P2)) R3.sphere(F, [P.P2[0], P.P2[1], z2], R.r2, col2, { label: 'm₂', shadowK: 0.5 });
-        if (flashOn) flashAt = [(S.hx1 * R.r2 + S.hx2 * R.r1) / R.d, R.b * R.r2 / R.d, (z1 + z2) / 2];
-        // velocity arrows ride above the balls
-        const V1 = P.hit ? R.V1 : R.U1, V2 = P.hit ? R.V2 : R.U2;
-        if (on(P.P1)) vArrow([P.P1[0], P.P1[1], z1 + R.r1 + 0.06], V1, col1, P.hit ? 'v₁' : 'u₁');
-        if (on(P.P2)) vArrow([P.P2[0], P.P2[1], z2 + R.r2 + 0.06 + (obl ? 0 : 0.10)], V2, col2,
-                             P.hit ? 'v₂' : 'u₂');
-        if (p.showCOM && on(P.C)) {
-          /* the centre of mass: a lamp on a thin stalk, and the straight line
-             it has drawn so far — straight because no external force acts */
-          const cz = benchTop + 0.02;
-          const C0 = [(R.m1 * S.x10 + R.m2 * S.x20) / R.M, R.m1 * R.b / R.M];
-          R3.polyline(F, [[clamp(C0[0], -1.5, 1.5), C0[1], cz], [P.C[0], P.C[1], cz]], comCol,
-                      { alpha: .85, width: 1.8, dash: [6, 4], bias: -0.02 });
-          R3.sphere(F, [P.C[0], P.C[1], cz + 0.03], 0.028, comCol, { shadow: false, vivid: true });
-          R3.label(F, [P.C[0], P.C[1] - (obl ? 0.14 : 0.24), cz + 0.02],
-                   'CM · ' + Math.hypot(R.vcom[0], R.vcom[1]).toFixed(2) + ' m/s, never changes',
-                   comCol, { size: 9 });
-        }
-        if (!R.willHit)
-          R3.label(F, [0, 0, 0.42], 'they never meet — m₁ is not catching m₂', th.warn, { size: 11 });
-        // the drag handle on ball 1
-        const q1 = cam.project([P.P1[0], P.P1[1], z1]);
-        if (q1.ok && on(P.P1)) {
-          hdl = { x: q1.x, y: q1.y, r: Math.max(14, R.r1 * q1.s + 5), tip: null };
-          const qa = cam.project([P.P1[0], P.P1[1], z1]), qb = cam.project([P.P1[0] + 1, P.P1[1], z1]);
-          if (qa.ok && qb.ok) {
-            const dx = qb.x - qa.x, dy = qb.y - qa.y, Lp = Math.hypot(dx, dy) || 1;
-            S._axU = { ux: dx / Lp, uy: dy / Lp, perPx: 1 / Lp };
-          }
+        // the timer box: the last transit at each gate
+        const lastAt = (gi) => { const a = r.transits.filter(q => q.gate === gi && q.t0 + q.dt <= t); return a[a.length - 1]; };
+        [0, 1].forEach(gi => {
+          const q = lastAt(gi);
+          B.meter(F, [r.gates[gi], 0.30, 0.16], [0, -1, 0], 0.28, 0.13,
+                  { title: 'GATE ' + 'AB'[gi] + (q ? ' · glider ' + (q.glider + 1) : ''), value: q ? q.dt.toFixed(4) : '—.————', unit: 's',
+                    colour: q ? (q.glider ? '#9AD0FF' : '#FFC08A') : '#7CF0B0' });
+          R3.box(F, [r.gates[gi], 0.32, 0.05], [0.03, 0.03, 0.1], '#3A4458', { shadow: false });
+        });
+        const qh = cam.project([x1, 0, zc]);
+        if (qh.ok && p.mode === 'track') {
+          hdl = { x: qh.x, y: qh.y, r: 14, tip: 'drag for u₁' };
+          const qb = cam.project([x1 + 1, 0, zc]);
+          if (qb.ok) { const dx = qb.x - qh.x, dy = qb.y - qh.y, Lp = Math.hypot(dx, dy) || 1; S._axU = { ux: dx / Lp, uy: dy / Lp }; }
         }
       }
 
-      else if (p.mode === 'ballistic') {
-        const Ld = 0.74, pz = 1.02;                  // drawn length, pivot height
-        R3.box(F, [0, 0, benchTop - 0.035], [3.0, 0.9, 0.07], '#232C44',
-               { shadow: false, ambient: 0.16, bias: F.GROUND });
-        // the frame: two posts and a crossbar
-        [-1, 1].forEach(sg => R3.cylinder(F, [0.05, sg * 0.30, benchTop], [0.05, sg * 0.30, pz],
-                                          0.018, '#55658C', { segments: 12, shadow: false, ambient: 0.3 }));
-        R3.cylinder(F, [0.05, -0.32, pz], [0.05, 0.32, pz], 0.02, '#6F80A6',
-                    { segments: 12, shadow: false, ambient: 0.34 });
-        const thn = t > S.tImp ? S.th : 0;
-        const bs = 0.10 + 0.05 * Math.cbrt(p.mBlk);
-        const sx = Math.sin(thn), cz = Math.cos(thn);
-        const ctr = [0.05 + Ld * sx, 0, pz - Ld * cz];
-        const axes = [[cz, 0, sx], [0, 1, 0], [-sx, 0, cz]];
-        R3.box(F, ctr, [bs, bs * 1.4, bs], '#A8794A', { shadow: false, ambient: 0.40, axes: axes });
-        // bifilar strings keep the block from twisting, as in the real apparatus
-        [-1, 1].forEach(sg => {
-          const top = [ctr[0] + axes[2][0] * bs / 2, sg * bs * 0.55, ctr[2] + axes[2][2] * bs / 2];
-          R3.polyline(F, [[0.05, sg * 0.18, pz], top], '#D8E2F5', { alpha: .9, width: 1.4, bias: -0.02 });
-        });
-        R3.label(F, [ctr[0] + 0.02, 0, ctr[2] - bs / 2 - 0.13], 'M = ' + p.mBlk.toFixed(2) + ' kg',
-                 '#F0E4D0', { size: 9.5 });
-        // the arc it will reach, and the rise h
-        const thM = Math.min(R.theta, 179) * Math.PI / 180;
-        const arc = [];
-        for (let i = 0; i <= 30; i++) {
-          const a = thM * i / 30;
-          arc.push([0.05 + Ld * Math.sin(a), 0, pz - Ld * Math.cos(a)]);
+      else if (p.mode === 'airtable') {
+        const r = S.run, i = idx(r.t), P = r.P[i], zT = 0.72;
+        // a glass-topped air table on a frame
+        R3.box(F, [0, 0, zT - 0.05], [1.9, 1.3, 0.08], '#2B3448', { shadow: false, ambient: 0.3, bias: F.GROUND });
+        [[-0.85, -0.55], [0.85, -0.55], [-0.85, 0.55], [0.85, 0.55]].forEach(q =>
+          R3.box(F, [q[0], q[1], (zT - 0.09) / 2], [0.06, 0.06, zT - 0.09], '#3A4458', { shadow: false, ambient: 0.3, bias: F.GROUND }));
+        R3.plane(F, [-0.9, -0.6, zT - 0.008], [1.8, 0, 0], [0, 1.2, 0], '#2E4A66', { grid: 18, gridAlpha: 0.18, bias: F.GROUND });
+        // the strobe record so far: faint rings where each puck was at each flash
+        const flashes = r.strobe.filter((q, k) => k * 0.1 <= t);
+        F.push([0, 0, zT], () => {
+          ctx.save();
+          flashes.forEach(q => {
+            [[q[0], q[1], r.r1, col1], [q[2], q[3], r.r2, col2]].forEach(d => {
+              ctx.strokeStyle = g.alpha(d[3], 0.5); ctx.lineWidth = 1.2;
+              ctx.beginPath();
+              for (let k = 0; k <= 24; k++) {
+                const a = k / 24 * TAU, qq = cam.project([d[0] + Math.cos(a) * d[2], d[1] + Math.sin(a) * d[2], zT]);
+                k ? ctx.lineTo(qq.x, qq.y) : ctx.moveTo(qq.x, qq.y);
+              }
+              ctx.stroke();
+              const c = cam.project([d[0], d[1], zT]);
+              ctx.fillStyle = g.alpha(d[3], 0.8); ctx.beginPath(); ctx.arc(c.x, c.y, 1.8, 0, TAU); ctx.fill();
+            });
+          });
+          ctx.restore();
+        }, -0.01);
+        // the pucks
+        R3.cylinder(F, [P[0], P[1], zT], [P[0], P[1], zT + 0.022], r.r1, col1, { segments: 30, shadow: false, ambient: 0.45 });
+        R3.cylinder(F, [P[2], P[3], zT], [P[2], P[3], zT + 0.022], r.r2, col2, { segments: 30, shadow: false, ambient: 0.45 });
+        R3.label(F, [P[0], P[1], zT + 0.07], 'm₁', col1, { size: 10 });
+        R3.label(F, [P[2], P[3], zT + 0.07], 'm₂', col2, { size: 10 });
+        const fAt = r.F.findIndex(v => v > 0);
+        if (fAt >= 0 && i >= fAt) {
+          const q = r.P[fAt], nx = q[2] - q[0], ny = q[3] - q[1], nl = Math.hypot(nx, ny);
+          R3.polyline(F, [[q[0] - nx / nl * 0.1, q[1] - ny / nl * 0.1, zT + 0.002], [q[2] + nx / nl * 0.4, q[3] + ny / nl * 0.4, zT + 0.002]],
+                      th.text, { alpha: .5, width: 1.1, dash: [5, 4], bias: -0.02 });
+          if (flashOn || (r.t[i] - r.t[fAt] < 0.12 && r.t[i] >= r.t[fAt])) flashAt = [(q[0] + q[2]) / 2, (q[1] + q[3]) / 2, zT + 0.02];
+          if (R.ang != null && i > fAt + 30)
+            R3.label(F, [q[2] + 0.05, q[3] + 0.12, zT + 0.05], 'paths ' + R.ang.toFixed(1) + '° apart', comCol, { size: 10.5 });
         }
-        R3.polyline(F, arc, acc, { alpha: .6, width: 1.4, dash: [4, 4], bias: -0.02 });
-        const hD = Ld * (1 - Math.cos(thM));
-        if (hD > 0.01 && !R.overTop) {
-          const xr = 0.05 + Ld * Math.sin(thM) + 0.16;
-          R3.polyline(F, [[xr, 0, pz - Ld], [xr, 0, pz - Ld + hD]], th.ok,
-                      { alpha: .9, width: 1.8, bias: -0.03 });
-          [0, hD].forEach(z => R3.polyline(F, [[xr - 0.04, 0, pz - Ld + z], [xr + 0.04, 0, pz - Ld + z]],
-                                           th.ok, { alpha: .9, width: 1.8, bias: -0.03 }));
-          R3.label(F, [xr + 0.07, 0, pz - Ld + hD / 2], 'h = ' + (R.h * 100).toFixed(1) + ' cm',
-                   th.ok, { size: 10, align: 'left' });
-        }
-        R3.label(F, [0.05, 0, pz + 0.12],
-                 R.overTop ? 'goes right over the top' : 'swings to θ = ' + R.theta.toFixed(1) + '°',
-                 R.overTop ? th.warn : acc, { size: 10 });
-        // the bullet: in flight before impact, a dark mark on the face after
-        const face = [ctr[0] - axes[0][0] * bs / 2, 0, ctr[2] - axes[0][2] * bs / 2];
-        if (t < S.tImp) {
-          const bx = -1.35 + (face[0] - 0.02 + 1.35) * (t / S.tImp);
-          R3.cylinder(F, [bx - 0.07, 0, face[2]], [bx, 0, face[2]], 0.012, '#D8B06A',
-                      { segments: 10, shadow: false, ambient: 0.5 });
-          vArrow([bx - 0.03, 0, face[2] + 0.09], [p.uBul, 0], '#D8B06A', 'u', 0.35 / 400);
-        } else {
-          R3.sphere(F, face, 0.014, '#20242C', { shadow: false });
-          const vNow = S.om * p.Lstr;
-          if (Math.abs(vNow) > 0.02)
-            vArrow([ctr[0], 0, ctr[2] + bs / 2 + 0.07], [vNow * Math.cos(thn), 0], acc, 'v', 0.12);
-        }
-        if (flashOn) flashAt = face;
-        // the gun, so the bullet comes from somewhere and the handle is on something
-        R3.cylinder(F, [-1.62, 0, face[2]], [-1.38, 0, face[2]], 0.022, '#6F80A6',
-                    { segments: 14, shadow: false, ambient: 0.35 });
-        R3.box(F, [-1.56, 0, face[2] - 0.07], [0.08, 0.05, 0.12], '#4A5878', { shadow: false, ambient: 0.3 });
-        R3.label(F, [-1.50, 0, face[2] - 0.17],
-                 'bullet m = ' + (p.mBul * 1000).toFixed(0) + ' g at ' + p.uBul.toFixed(0) + ' m/s',
-                 '#D8B06A', { size: 9.5 });
-        R3.label(F, [-1.50, 0, face[2] - 0.28], 'flight shown slowed; the swing is real time',
-                 th['text-3'], { size: 8.5 });
         if (p.showCOM) {
-          const bxNow = t < S.tImp ? -1.35 + (face[0] + 1.33) * (t / S.tImp) : face[0];
-          const cx = (p.mBul * bxNow + p.mBlk * ctr[0]) / (p.mBul + p.mBlk);
-          const czz = (p.mBul * face[2] + p.mBlk * ctr[2]) / (p.mBul + p.mBlk);
-          R3.sphere(F, [cx, -0.02, czz], 0.024, comCol, { shadow: false, vivid: true });
+          const cx = (p.m1 * P[0] + p.m2 * P[2]) / (p.m1 + p.m2), cy = (p.m1 * P[1] + p.m2 * P[3]) / (p.m1 + p.m2);
+          const c0 = r.P[0], x0 = (p.m1 * c0[0] + p.m2 * c0[2]) / (p.m1 + p.m2), y0 = (p.m1 * c0[1] + p.m2 * c0[3]) / (p.m1 + p.m2);
+          R3.polyline(F, [[x0, y0, zT + 0.004], [cx, cy, zT + 0.004]], comCol, { alpha: .85, width: 1.6, dash: [6, 4], bias: -0.02 });
+          R3.sphere(F, [cx, cy, zT + 0.02], 0.013, comCol, { shadow: false, vivid: true });
         }
-        // the handle is on the bullet's launch point: drag sideways for speed
-        const qh = cam.project([-1.35, 0, face[2]]);
+        R3.label(F, [-0.35, 0.64, zT + 0.02], 'strobe: one flash every 0.1 s', th['text-2'], { size: 9.5 });
+      }
+
+      else if (p.mode === 'ballistic') {
+        const bl = S.bal, L = p.Lstr, pivH = 0.52;
+        B.table(F, -0.9, 0.9, -0.4, 0.4, 0, { legH: 0.69 });
+        B.texBox(F, [0, 0, 0.012], [1.3, 0.3, 0.024], B.wood('#6E4A2A', 13), { ambient: 0.45 });
+        const zGun = pivH - L;
+        // the post and the pivot
+        R3.box(F, [0, 0.10, pivH / 2 + 0.012], [0.04, 0.04, pivH], '#3A4458', { shadow: false, ambient: 0.35 });
+        R3.cylinder(F, [0, 0.10, pivH], [0, -0.02, pivH], 0.007, '#D0D8E4', { segments: 10, shadow: false });
+        // the ratchet: a toothed arc the pawl rides along
+        const rr = L * 0.82, teeth = [];
+        for (let k = 0; k <= 60; k++) {
+          const a = k / 60 * 1.3, rad = rr + (k % 2 ? 0.008 : 0);
+          teeth.push([Math.sin(a) * rad, 0.05, pivH - Math.cos(a) * rad]);
+        }
+        R3.polyline(F, teeth, '#B8C2D0', { alpha: .95, width: 2, bias: -0.01 });
+        const scaleArc = [];
+        for (let k = 0; k <= 30; k++) { const a = k / 30 * 1.3; scaleArc.push([Math.sin(a) * (rr - 0.02), 0.05, pivH - Math.cos(a) * (rr - 0.02)]); }
+        R3.polyline(F, scaleArc, '#6B7890', { alpha: .8, width: 1, bias: -0.01 });
+        // the pendulum's angle now: at rest, swinging, or held by the pawl
+        let thn = 0;
+        const ts = t - S.tFly;
+        if (ts > 0) {
+          if (ts >= (bl.tMax || 0)) thn = bl.thMax;
+          else { const k = Math.min(bl.th.length - 1, Math.floor(ts / 5e-4)); thn = bl.th[k] || 0; }
+        }
+        const tip = [Math.sin(thn) * L, 0, pivH - Math.cos(thn) * L];
+        R3.cylinder(F, [0, 0, pivH], tip, 0.005, '#C8D0DC', { segments: 8, shadow: false });
+        const cAx = [[Math.cos(thn), 0, Math.sin(thn)], [0, 1, 0], [-Math.sin(thn), 0, Math.cos(thn)]];
+        const cs = 0.06 + 0.03 * Math.cbrt(p.mBlk / 0.25);
+        B.texBox(F, tip, [cs, cs * 0.9, cs * 0.9], B.metal('#8A94A8', 5), { axes: cAx, ambient: 0.45 });
+        // the pawl on the arm, at the ratchet's radius
+        R3.sphere(F, [Math.sin(thn) * rr, 0.05, pivH - Math.cos(thn) * rr], 0.009, '#FFD36B', { shadow: false });
+        if (ts >= (bl.tMax || 0) && ts > 0)
+          R3.label(F, [Math.sin(bl.thMax) * rr + 0.1, 0.05, pivH - Math.cos(bl.thMax) * rr + 0.04],
+                   'pawl locks at θ = ' + (bl.thMax * 180 / Math.PI).toFixed(1) + '°  ·  h = ' + (bl.h * 100).toFixed(2) + ' cm', comCol, { size: 10, align: 'left' });
+        // the spring gun and the steel ball
+        const gx0 = -0.62, gx1 = -0.40;
+        R3.box(F, [(gx0 + gx1) / 2, 0, zGun - 0.05], [0.26, 0.08, 0.05], '#3A4458', { shadow: false });
+        R3.cylinder(F, [gx0, 0, zGun], [gx1, 0, zGun], 0.02, '#8A96AA', { segments: 16, shadow: false, ambient: 0.45, inner: 0.013 });
+        const face = -cs / 2;
+        if (t < S.tFly) {
+          const bx = gx1 + (face - gx1) * Math.max(0, t / S.tFly);
+          R3.sphere(F, [bx, 0, zGun], 0.013, '#D8DEE8', { shadow: false });
+        }
+        if (flashOn) flashAt = [face, 0, zGun];
+        R3.label(F, [gx0, -0.08, zGun + 0.1], 'spring gun · ' + p.uBul.toFixed(2) + ' m/s', th['text-2'], { size: 9.5, align: 'left' });
+        R3.label(F, [0.02, -0.1, pivH + 0.06], 'catcher ' + (p.mBlk * 1000).toFixed(0) + ' g on a ' + (L * 100).toFixed(0) + ' cm arm',
+                 th['text-2'], { size: 9.5 });
+        const qh = cam.project([gx0, 0, zGun]);
         if (qh.ok) {
           hdl = { x: qh.x, y: qh.y, r: 13, tip: 'drag for speed' };
-          const qb = cam.project([-0.35, 0, face[2]]);
-          if (qb.ok) {
-            const dx = qb.x - qh.x, dy = qb.y - qh.y, Lp = Math.hypot(dx, dy) || 1;
-            S._axU = { ux: dx / Lp, uy: dy / Lp, perPx: 1 / Lp };
-          }
+          const qb = cam.project([gx0 + 1, 0, zGun]);
+          if (qb.ok) { const dx = qb.x - qh.x, dy = qb.y - qh.y, Lp = Math.hypot(dx, dy) || 1; S._axU = { ux: dx / Lp, uy: dy / Lp }; }
         }
       }
 
@@ -1946,26 +2147,22 @@
 
       F.render();
 
-      // the drag handle, drawn over the scene so it can always be found
       if (hdl) {
         const onD = g.dragging === 'u1';
         ctx.save();
         ctx.strokeStyle = onD ? th.text : g.alpha(acc, .75); ctx.lineWidth = onD ? 2.2 : 1.6;
         ctx.beginPath(); ctx.arc(hdl.x, hdl.y, hdl.r, 0, TAU); ctx.stroke(); ctx.restore();
-        if (hdl.tip) PA.lbl(ctx, hdl.x, hdl.y + hdl.r + 12, hdl.tip,
-                            onD ? th.text : g.alpha(th['text-3'], .95), 'center', 9);
+        PA.lbl(ctx, hdl.x, hdl.y + hdl.r + 11, hdl.tip, onD ? th.text : g.alpha(th['text-3'], .95), 'center', 9);
         g.handle(hdl.x, hdl.y, hdl.r + 3, 'u1');
       }
-
-      // the moment of impact, as a brief starburst
       if (flashAt) {
         const q = cam.project(flashAt);
         if (q.ok) {
           const age = (t - S.flash) / 0.18;
           ctx.save();
-          ctx.strokeStyle = g.alpha('#FFF4C2', 0.9 * (1 - age)); ctx.lineWidth = 2;
-          for (let i = 0; i < 10; i++) {
-            const an = i / 10 * TAU, r0 = 6 + age * 10, r1 = 14 + age * 22;
+          ctx.strokeStyle = g.alpha('#FFF4C2', 0.9 * (1 - Math.max(0, age))); ctx.lineWidth = 2;
+          for (let i2 = 0; i2 < 10; i2++) {
+            const an = i2 / 10 * TAU, r0 = 6 + age * 10, r1 = 14 + age * 22;
             ctx.beginPath(); ctx.moveTo(q.x + Math.cos(an) * r0, q.y + Math.sin(an) * r0);
             ctx.lineTo(q.x + Math.cos(an) * r1, q.y + Math.sin(an) * r1); ctx.stroke();
           }
@@ -1973,199 +2170,164 @@
         }
       }
 
-      /* ---------------- the two books ----------------
-         Momentum and kinetic energy, before and after, side by side. One
-         column always balances; the other balances only when e = 1. */
+      /* ---------------- instrument panels ---------------- */
       const narrow = W < 660;
-      S._panelTop = null;
-      {
-        const bw = narrow ? Math.min(W - 24, 300) : Math.min(W * 0.36, 300);
-        const bh = 116, bx = 12, by = H - bh - 30;
-        S._panelTop = by;
+      const panel = (bx, by, bw, bh, title) => {
         ctx.fillStyle = g.alpha('#0B1020', .92);
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
-        PA.lbl(ctx, bx + 10, by + 13, 'THE TWO BOOKS', th['text-3'], 'left', 8.5);
-        PA.lbl(ctx, bx + bw * 0.60, by + 13, 'before', th['text-3'], 'right', 8.5);
+        PA.lbl(ctx, bx + 10, by + 13, title, th['text-3'], 'left', 8.5);
+      };
+      const f3 = v => v == null ? '—' : v.toFixed(3);
+      {
+        const bw = narrow ? W - 24 : Math.min(W * 0.38, 318), bh = 116, bx = 12, by = H - bh - 30;
+        panel(bx, by, bw, bh, p.mode === 'track' || p.mode === 'recoil' ? 'BOOKS · from gates' : 'THE TWO BOOKS');
+        PA.lbl(ctx, bx + bw * 0.62, by + 13, 'before', th['text-3'], 'right', 8.5);
         PA.lbl(ctx, bx + bw - 10, by + 13, 'after', th['text-3'], 'right', 8.5);
         const row = (i, k, a, b, c) => {
           PA.lbl(ctx, bx + 10, by + 31 + i * 15, k, th['text-3'], 'left', 9);
-          PA.lbl(ctx, bx + bw * 0.60, by + 31 + i * 15, a, th['text-2'], 'right', 9.5);
+          PA.lbl(ctx, bx + bw * 0.62, by + 31 + i * 15, a, th['text-2'], 'right', 9.5);
           PA.lbl(ctx, bx + bw - 10, by + 31 + i * 15, b, c || th['text-2'], 'right', 9.5);
         };
-        const same = Math.abs(R.p1 - R.p0) < 1e-6 * Math.max(1, Math.abs(R.p0));
-        const pLab = p.mode === 'ballistic' ? 'momentum (at impact)' : p.mode === 'burst' ? 'horizontal momentum' : 'momentum Σmv';
-        row(0, pLab, R.p0.toFixed(3), R.p1.toFixed(3), same ? th.ok : th.crit);
-        row(1, 'kinetic energy (J)', R.K0.toFixed(p.mode === 'ballistic' ? 1 : 2),
-            R.K1.toFixed(p.mode === 'ballistic' ? 2 : 2),
-            Math.abs(R.K1 - R.K0) < 1e-6 * Math.max(1, R.K0) ? th.ok : th.warn);
-        let dK = R.dK;
-        if (Math.abs(dK) < 5e-10 * Math.max(1, R.K0)) dK = 0;
-        row(2, p.mode === 'burst' ? 'energy added by the charge' : 'energy lost to heat, sound',
-            '', dK.toFixed(2) + ' J', dK > 1e-6 ? th.warn : th.ok);
-        let last;
-        if (p.mode === 'head1d' || p.mode === 'oblique')
-          last = ['e measured = separate ÷ approach', R.willHit ? (R.separate / R.approach).toFixed(3) : '—'];
-        else if (p.mode === 'ballistic')
-          last = ['share of KE that survives', (100 * R.kept).toFixed(2) + ' %'];
-        else last = ['pieces land together?', R.together ? 'yes' : 'no'];
-        row(3, last[0], '', last[1], acc);
-        PA.lbl(ctx, bx + 10, by + bh - 10,
-               same ? 'momentum balances to the last digit — it always will'
-                    : 'momentum changed: an external force acted', same ? th.ok : th.crit, 'left', 8.5);
+        if (p.mode === 'track' || p.mode === 'recoil') {
+          const pg0 = R.gU1 != null && R.gU2 != null ? p.m1 * R.gU1 + p.m2 * R.gU2 : null;
+          const pg1 = R.gW1 != null && R.gW2 != null ? p.m1 * R.gW1 + p.m2 * R.gW2 : null;
+          const done = t > (S.run.tc1 != null ? S.run.tc1 : S.run.tRelease) + 0.9;
+          row(0, 'Σmv, kg·m/s (gates)', f3(pg0), done ? f3(pg1) : 'timing…', done && pg0 != null && pg1 != null && Math.abs(pg1 - pg0) < 0.01 ? th.ok : th['text-2']);
+          row(1, 'kinetic energy, J', R.K0.toFixed(4), done ? R.K1.toFixed(4) : '…');
+          row(2, p.mode === 'recoil' ? 'energy from the spring' : 'lost in the bumpers', '', done ? R.dK.toFixed(4) + ' J' : '…', th.warn);
+          row(3, p.mode === 'recoil' ? 'impulse each way ∫F dt' : 'impulse on m₂ = ∫F dt', '', R.J.toFixed(4) + ' N·s', acc);
+          PA.lbl(ctx, bx + 10, by + bh - 10, p.mode === 'recoil' ? 'total momentum: zero before, zero after' :
+                 'e from the gates = ' + (R.gW1 != null && R.gW2 != null && R.gU1 != null && R.gU2 != null && Math.abs(R.gU1 - R.gU2) > 1e-6 ? ((R.gW2 - R.gW1) / (R.gU1 - R.gU2)).toFixed(3) : '—'),
+                 th.ok, 'left', 8.5);
+        } else if (p.mode === 'airtable') {
+          row(0, 'x-momentum Σmvₓ', R.p0.toFixed(4), R.px.toFixed(4), Math.abs(R.px - R.p0) < 1e-3 ? th.ok : th.crit);
+          row(1, 'y-momentum Σmvᵧ', '0.0000', Math.abs(R.py) < 5e-5 ? '0.0000' : R.py.toFixed(4), th.ok);
+          row(2, 'kinetic energy, J', R.K0.toFixed(4), R.K1.toFixed(4));
+          row(3, 'angle between paths', '', R.ang == null ? '—' : R.ang.toFixed(2) + '°', comCol);
+          PA.lbl(ctx, bx + 10, by + bh - 10, 'momentum is a vector: both components balance', th.ok, 'left', 8.5);
+        } else {
+          row(0, p.mode === 'ballistic' ? 'momentum, at impact' : 'horizontal momentum', R.p0.toFixed(3), R.p1.toFixed(3), th.ok);
+          row(1, 'kinetic energy, J', R.K0.toFixed(3), R.K1.toFixed(3));
+          row(2, p.mode === 'burst' ? 'added by the charge' : 'lost in the catcher', '', Math.abs(R.dK).toFixed(3) + ' J', th.warn);
+          row(3, p.mode === 'ballistic' ? 'share of KE that survives' : 'pieces land together?', '',
+              p.mode === 'ballistic' ? (100 * R.kept).toFixed(1) + ' %' : (R.together ? 'yes' : 'no'), acc);
+          PA.lbl(ctx, bx + 10, by + bh - 10, 'momentum balances across the event — energy need not', th.ok, 'left', 8.5);
+        }
+        S._leftTop = by;
       }
-
-      /* ---------------- the view from the centre of mass ----------------
-         Step onto the CM and every collision looks the same: two momenta,
-         equal and opposite, before and after. Only their size (set by e) and
-         their direction (set by the line of centres) change. */
-      if (p.showCOM) {
-        const cf = comFrame(S);
-        /* On a phone the two panels cannot both sit at the bottom without
-           burying the bench, so this one goes to the top, short and wide,
-           and the balls run in the gap between them. */
-        const bw = narrow ? W - 24 : 214, bh = narrow ? 84 : 116;
-        const bx = narrow ? 12 : W - bw - 14;
-        const by = narrow ? 40 : H - bh - 30;
-        ctx.fillStyle = g.alpha('#0B1020', .92);
-        ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
-        PA.lbl(ctx, bx + 10, by + 13, 'SEEN FROM THE CM', th['text-3'], 'left', 8.5);
-        let mx = 1e-9;
-        cf.pre.concat(cf.post).forEach(v => { mx = Math.max(mx, Math.hypot(v[0], v[1])); });
-        const sc = Math.min(bw / 4 - 12, bh / 2 - 16) / mx;
-        [['before', cf.pre, bx + bw * 0.27], ['after', cf.post, bx + bw * 0.73]].forEach(col => {
-          const cx = col[2], cy = by + bh / 2 + 6;
-          PA.lbl(ctx, cx, by + bh - 10, col[0], th['text-3'], 'center', 8.5);
-          ctx.fillStyle = comCol;
-          ctx.beginPath(); ctx.arc(cx, cy, 3.2, 0, TAU); ctx.fill();
-          col[1].forEach((v, i) => {
-            const L0 = Math.hypot(v[0], v[1]) * sc;
-            if (L0 < 2) return;
-            const x1 = cx + v[0] * sc, y1 = cy - v[1] * sc, an = Math.atan2(y1 - cy, x1 - cx);
-            const c = i === 0 ? col1 : col2;
-            ctx.strokeStyle = c; ctx.fillStyle = c; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x1, y1); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x1, y1);
-            ctx.lineTo(x1 - 6 * Math.cos(an - 0.45), y1 - 6 * Math.sin(an - 0.45));
-            ctx.lineTo(x1 - 6 * Math.cos(an + 0.45), y1 - 6 * Math.sin(an + 0.45));
-            ctx.closePath(); ctx.fill();
+      if (!narrow || p.mode === 'track' || p.mode === 'recoil') {
+        const bw = narrow ? W - 24 : 250, bh = narrow ? 78 : 116;
+        const bx = narrow ? 12 : W - bw - 14, by = narrow ? 40 : H - bh - 30;
+        if (p.mode === 'track' || p.mode === 'recoil') {
+          panel(bx, by, bw, bh, 'PHOTOGATE TIMER · flag 10.0 cm');
+          const done = S.run.transits.filter(q => q.t0 + q.dt <= t);
+          done.slice(-(narrow ? 3 : 5)).forEach((q, k) => {
+            PA.lbl(ctx, bx + 10, by + 30 + k * 15, 'gate ' + 'AB'[q.gate] + ' · glider ' + (q.glider + 1), q.glider ? '#9AD0FF' : '#FFC08A', 'left', 9);
+            PA.lbl(ctx, bx + bw - 10, by + 30 + k * 15, q.dt.toFixed(4) + ' s → ' + Math.abs(q.v).toFixed(3) + ' m/s', th['text-2'], 'right', 9);
           });
-          const zero = col[1].every(v => Math.hypot(v[0], v[1]) * sc < 2);
-          if (zero) PA.lbl(ctx, cx, cy - 14, 'both at rest', th['text-2'], 'center', 8.5);
-        });
+          if (!done.length) PA.lbl(ctx, bx + 10, by + 30, 'waiting for a flag…', th['text-3'], 'left', 9);
+        } else if (p.showCOM) {
+          panel(bx, by, bw, bh, 'SEEN FROM THE CM');
+          let pre, post;
+          if (p.mode === 'airtable') {
+            const vc = p.m1 * p.u1 / (p.m1 + p.m2);
+            pre = [[p.m1 * (p.u1 - vc), 0], [-p.m2 * vc, 0]];
+            post = [[p.m1 * (R.V1[0] - vc), p.m1 * R.V1[1]], [p.m2 * (R.V2[0] - vc), p.m2 * R.V2[1]]];
+          } else { const cf = comFrame(S); pre = cf.pre; post = cf.post; }
+          let mx = 1e-9;
+          pre.concat(post).forEach(v => { mx = Math.max(mx, Math.hypot(v[0], v[1])); });
+          const sc = (bw / 4 - 12) / mx;
+          [['before', pre, bx + bw * 0.27], ['after', post, bx + bw * 0.73]].forEach(cc => {
+            const cx = cc[2], cy = by + bh / 2 + 6;
+            PA.lbl(ctx, cx, by + bh - 10, cc[0], th['text-3'], 'center', 8.5);
+            ctx.fillStyle = comCol; ctx.beginPath(); ctx.arc(cx, cy, 3.2, 0, TAU); ctx.fill();
+            cc[1].forEach((v, k) => {
+              if (Math.hypot(v[0], v[1]) * sc < 2) return;
+              const x1 = cx + v[0] * sc, y1 = cy - v[1] * sc, an = Math.atan2(y1 - cy, x1 - cx), c = k ? col2 : col1;
+              ctx.strokeStyle = c; ctx.fillStyle = c; ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x1, y1); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(x1, y1);
+              ctx.lineTo(x1 - 6 * Math.cos(an - 0.45), y1 - 6 * Math.sin(an - 0.45));
+              ctx.lineTo(x1 - 6 * Math.cos(an + 0.45), y1 - 6 * Math.sin(an + 0.45)); ctx.closePath(); ctx.fill();
+            });
+            if (cc[1].every(v => Math.hypot(v[0], v[1]) * sc < 2)) PA.lbl(ctx, cx, cy - 14, 'both at rest', th['text-2'], 'center', 8.5);
+          });
+        }
       }
 
       ctx.fillStyle = g.alpha(th['text-3'], .95);
       ctx.font = '10px "IBM Plex Mono",monospace'; ctx.textAlign = 'left';
-      ctx.fillText(p.mode === 'ballistic'
-        ? 'momentum for the impact, energy for the swing — never the other way round'
-        : p.mode === 'burst'
-        ? 'internal forces only: the centre of mass never learns the shell exploded'
-        : 'm₁ = ' + p.m1.toFixed(1) + ' kg, m₂ = ' + p.m2.toFixed(1) + ' kg · e = ' + p.e.toFixed(2) +
-          ' · shown at 0.3× speed', 14, 31);
+      ctx.fillText(p.mode === 'track' ? 'm₁ ' + p.m1.toFixed(2) + ' kg, m₂ ' + p.m2.toFixed(2) + ' kg · e = ' + p.e.toFixed(2) +
+                   ' · contact lasts ' + (R.tcon * 1000).toFixed(1) + ' ms, peak force ' + R.Fpk.toFixed(1) + ' N'
+        : p.mode === 'recoil' ? 'spring stores ' + p.Es.toFixed(2) + ' J · burn the thread and it all becomes kinetic energy'
+        : p.mode === 'airtable' ? 'smooth pucks on an air cushion · e = ' + p.e.toFixed(2)
+        : p.mode === 'ballistic' ? 'momentum for the catch, energy for the swing — never the other way round'
+        : 'internal forces only: the centre of mass never learns the shell exploded', 14, 20);
     },
 
     onDrag(S, e) {
       if (e.id !== 'u1' || !S._axU) return;
-      const along = e.dx * S._axU.ux + e.dy * S._axU.uy;
-      const p = S.p;
-      /* A fixed gain per screen pixel, not per metre of bench: the bench axis
-         is foreshortened by the camera (§2.13), and a per-metre gain made a
-         50 px drag worth 0.07 m/s. Here 50 px is about 1.25 m/s, 100 m/s of
-         bullet or 5 m/s of launch speed — a full slider in one sweep. */
-      if (p.mode === 'ballistic') p.uBul = clamp(p.uBul + along * 2.0, 20, 1000);
+      const along = e.dx * S._axU.ux + e.dy * S._axU.uy, p = S.p;
+      if (p.mode === 'ballistic') p.uBul = clamp(p.uBul + along * 0.03, 1, 10);
       else if (p.mode === 'burst') p.u0 = clamp(p.u0 + along * 0.10, 5, 60);
-      else p.u1 = clamp(p.u1 + along * 0.025, -10, 10);
+      else p.u1 = clamp(p.u1 + along * 0.004, -1.2, 1.2);
       this.setup(S);
     },
 
     plots: [
-      { title: 'Sweep one knob and hold the rest — what the outcome depends on',
-        legend: [{ c: '#F29A4A', label: 'ball / piece 1' }, { c: '#4A9AF2', label: 'ball / piece 2' },
-                 { c: '#F5E663', label: 'centre of mass · or the total' }],
+      { title: 'The collision, in slow motion — force against time',
+        legend: [{ c: '#FFB454', label: 'force between them' }, { c: '#4ADE80', label: 'swept quantity' },
+                 { c: '#9AA8C0', label: 'reference' }],
         draw(S, g) {
-          const p = S.p, R = S.R, c1 = '#F29A4A', c2 = '#4A9AF2', cc = '#F5E663';
-          if (p.mode === 'head1d') {
-            /* final velocities against e: two straight lines that cross the CM
-               velocity at e = 0, where the balls move together */
-            const a = [], b = [];
-            const M = p.m1 + p.m2;
-            for (let i = 0; i <= 100; i++) {
-              const e = i / 100;
-              a.push([e, ((p.m1 - e * p.m2) * p.u1 + (1 + e) * p.m2 * p.u2) / M]);
-              b.push([e, ((p.m2 - e * p.m1) * p.u2 + (1 + e) * p.m1 * p.u1) / M]);
+          const p = S.p, R = S.R, th = g.theme, c1 = '#FFB454', c2 = '#4ADE80', cr = '#9AA8C0';
+          if (p.mode === 'track' || p.mode === 'recoil') {
+            const ct = S.run.contact;
+            if (!ct.length) {
+              const P = g.Plot({ xmin: 0, xmax: 1, ymin: 0, ymax: 1, xlabel: 'time (ms)', ylabel: 'force (N)' }).frame();
+              P.tag(0.05, 0.5, 'they never touch — m₁ does not catch m₂', th.warn, 'left', 0);
+              return;
             }
-            const all = a.concat(b).map(q => q[1]).concat([R.vcom[0], 0]);
-            let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
-            const pad = Math.max(0.5, (hi - lo) * 0.12); lo -= pad; hi += pad;
-            const P = g.Plot({ xmin: 0, xmax: 1, ymin: lo, ymax: hi,
-              xlabel: 'coefficient of restitution e', ylabel: 'velocity after (m/s)',
-              xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) }).frame();
-            P.clip(() => {
-              P.line([[0, R.vcom[0]], [1, R.vcom[0]]], g.alpha(cc, .9), 1.5, [5, 4]);
-              P.line([[0, 0], [1, 0]], g.alpha(g.theme['text-3'], .5), 1);
-              P.line(a, c1, 2.2); P.line(b, c2, 2.2);
-              P.vline(p.e, g.alpha(g.theme.text, .5), [3, 3]);
-              P.dot(p.e, R.V1[0], 4.5, c1, g.theme['ink-950']);
-              P.dot(p.e, R.V2[0], 4.5, c2, g.theme['ink-950']);
-            });
-            P.tag(0.02, R.vcom[0], 'e = 0: they move off together at the CM speed', cc, 'left', -9);
+            const t0 = ct[0][0], pts = ct.map(q => [(q[0] - t0) * 1000, q[1]]);
+            const xmax = pts[pts.length - 1][0] * 1.08 || 1, ymax = Math.max(...pts.map(q => q[1])) * 1.15 || 1;
+            const P = g.Plot({ xmin: 0, xmax: xmax, ymin: 0, ymax: ymax, xlabel: 'time into the contact (ms)',
+              ylabel: 'force (N)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => { P.area(pts, 0, g.alpha(c1, .22)); P.line(pts, c1, 2.4); });
+            P.tag(xmax * 0.5, ymax * 0.93, 'area = impulse = ' + R.J.toFixed(4) + ' N·s', c1, 'center', 0);
+            if (p.mode === 'track') P.tag(xmax * 0.5, ymax * 0.80, 'Δp of m₂ = ' + (p.m2 * (R.w2 - R.u2)).toFixed(4) + ' N·s', c2, 'center', 0);
             return;
           }
-          if (p.mode === 'oblique') {
-            /* deflection of each ball, and the angle between them, against the
-               offset. With equal masses and e = 1 the total is 90° for EVERY
-               offset — the flat line is the whole theorem. */
-            const a = [], b = [], s = [];
-            const M = p.m1 + p.m2, e = p.e;
-            for (let i = 0; i <= 120; i++) {
-              const f = 0.95 * i / 120, nx = Math.sqrt(1 - f * f), ny = -f;
-              const u1n = p.u1 * nx, u2n = p.u2 * nx;
-              const v1n = ((p.m1 - e * p.m2) * u1n + (1 + e) * p.m2 * u2n) / M;
-              const v2n = ((p.m2 - e * p.m1) * u2n + (1 + e) * p.m1 * u1n) / M;
-              const V1 = [p.u1 + (v1n - u1n) * nx, (v1n - u1n) * ny];
-              const V2 = [p.u2 + (v2n - u2n) * nx, (v2n - u2n) * ny];
-              const d1 = Math.abs(Math.atan2(V1[1], V1[0])) * 180 / Math.PI;
-              const d2 = Math.abs(Math.atan2(V2[1], V2[0])) * 180 / Math.PI;
+          if (p.mode === 'airtable') {
+            const pts = [], ref = [];
+            const e = p.e, M = p.m1 + p.m2;
+            for (let i = 0; i <= 90; i++) {
+              const f = 0.9 * i / 90, nx = Math.sqrt(1 - f * f), ny = -f;
+              const u1n = p.u1 * nx;
+              const v1n = ((p.m1 - e * p.m2) * u1n) / M, v2n = ((1 + e) * p.m1 * u1n) / M;
+              const V1 = [p.u1 + (v1n - u1n) * nx, (v1n - u1n) * ny], V2 = [v2n * nx, v2n * ny];
               const s1 = Math.hypot(V1[0], V1[1]), s2 = Math.hypot(V2[0], V2[1]);
-              a.push([f, s1 > 1e-6 ? d1 : NaN]); b.push([f, d2]);
-              s.push([f, (s1 > 1e-6 && s2 > 1e-6)
-                ? Math.acos(clamp((V1[0] * V2[0] + V1[1] * V2[1]) / (s1 * s2), -1, 1)) * 180 / Math.PI : NaN]);
+              if (s1 > 1e-6 && s2 > 1e-6) pts.push([f, Math.acos(clamp((V1[0] * V2[0] + V1[1] * V2[1]) / (s1 * s2), -1, 1)) * 180 / Math.PI]);
+              ref.push([f, 90]);
             }
-            const P = g.Plot({ xmin: 0, xmax: 0.95, ymin: 0, ymax: 180,
-              xlabel: 'offset b ÷ (r₁ + r₂)', ylabel: 'angle (°)',
+            const P = g.Plot({ xmin: 0, xmax: 0.9, ymin: 0, ymax: 180, xlabel: 'offset b ÷ (r₁ + r₂)', ylabel: 'angle between paths (°)',
               xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) }).frame();
-            const seg = (pts) => pts.filter(q => isFinite(q[1]));
-            P.clip(() => {
-              P.line([[0, 90], [0.95, 90]], g.alpha(g.theme['text-3'], .7), 1, [4, 3]);
-              P.line(seg(a), c1, 2); P.line(seg(b), c2, 2); P.line(seg(s), cc, 2.4);
-              P.vline(clamp(p.bImp, 0, 0.95), g.alpha(g.theme.text, .5), [3, 3]);
-              if (R.ang != null) P.dot(clamp(p.bImp, 0, 0.95), R.ang, 4.5, cc, g.theme['ink-950']);
-            });
-            P.tag(0.02, 90, '90°', g.theme['text-3'], 'left', -8);
+            P.clip(() => { P.line(ref, cr, 1.2, [4, 3]); P.line(pts, c2, 2.2);
+                           if (R.ang != null) P.dot(p.bImp, R.ang, 5, c1, th['ink-950']); });
+            P.tag(0.02, 90, 'instant-collision theory (line) · the dot is the integrated collision', cr, 'left', -9);
             return;
           }
           if (p.mode === 'ballistic') {
             const a = [];
-            const M = p.mBul + p.mBlk;
             for (let i = 0; i <= 160; i++) {
-              const u = 20 + 980 * i / 160, v = p.mBul * u / M, h = v * v / (2 * G);
+              const u = 1 + 9 * i / 160, v = p.mBul * u / (p.mBul + p.mBlk), h = v * v / (2 * G);
               a.push([u, h > 2 * p.Lstr ? 180 : Math.acos(clamp(1 - h / p.Lstr, -1, 1)) * 180 / Math.PI]);
             }
-            const P = g.Plot({ xmin: 20, xmax: 1000, ymin: 0, ymax: 180,
-              xlabel: 'bullet speed (m/s)', ylabel: 'swing angle θ (°)',
+            const P = g.Plot({ xmin: 1, xmax: 10, ymin: 0, ymax: 180, xlabel: 'launch speed (m/s)', ylabel: 'angle the pawl locks at (°)',
               xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
-            P.clip(() => {
-              P.line([[20, 90], [1000, 90]], g.alpha(g.theme['text-3'], .6), 1, [4, 3]);
-              P.line(a, c2, 2.2);
-              P.vline(p.uBul, g.alpha(g.theme.text, .5), [3, 3]);
-              P.dot(p.uBul, R.overTop ? 180 : R.theta, 4.5, c2, g.theme['ink-950']);
-            });
-            P.tag(30, 90, 'string horizontal', g.theme['text-3'], 'left', -8);
+            P.clip(() => { P.line([[1, 90], [10, 90]], cr, 1, [4, 3]); P.line(a, c2, 2.2);
+                           P.dot(p.uBul, S.bal.thMax * 180 / Math.PI, 5, c1, th['ink-950']); });
             return;
           }
-          /* burst: where each piece lands as the mass is shared differently */
           const a = [], b = [], c = [];
           const al = p.alpha * Math.PI / 180, vx = p.u0 * Math.cos(al), vy = p.u0 * Math.sin(al);
           const tA = vy / G, xA = vx * tA, zA = vy * vy / (2 * G), bt = p.beta * Math.PI / 180;
@@ -2179,337 +2341,270 @@
             a.push([f, x1]); b.push([f, x2]); c.push([f, f * x1 + (1 - f) * x2]);
           }
           const all = a.concat(b, c).map(q => q[1]).concat([0, R.range]);
-          let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+          let lo = Math.min(...all), hi = Math.max(...all);
           const pad = Math.max(1, (hi - lo) * 0.08); lo -= pad; hi += pad;
-          const P = g.Plot({ xmin: 0.05, xmax: 0.95, ymin: lo, ymax: hi,
-            xlabel: 'piece 1 share of the mass', ylabel: 'landing distance (m)',
+          const P = g.Plot({ xmin: 0.05, xmax: 0.95, ymin: lo, ymax: hi, xlabel: 'piece 1 share of the mass', ylabel: 'landing distance (m)',
             xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) }).frame();
-          P.clip(() => {
-            P.line([[0.05, R.range], [0.95, R.range]], g.alpha(g.theme['text-3'], .7), 1, [4, 3]);
-            P.line(a, c1, 2); P.line(b, c2, 2); P.line(c, cc, 2.2);
-            P.vline(p.fSplit, g.alpha(g.theme.text, .5), [3, 3]);
-            P.dot(p.fSplit, R.x1, 4.5, c1, g.theme['ink-950']);
-            P.dot(p.fSplit, R.x2, 4.5, c2, g.theme['ink-950']);
-          });
-          P.tag(0.06, R.range, 'range if it had not burst', g.theme['text-3'], 'left', -8);
-        },
-        hover(S, x) {
-          const p = S.p;
-          if (p.mode !== 'head1d') return null;
-          const M = p.m1 + p.m2, e = clamp(x, 0, 1);
-          const v1 = ((p.m1 - e * p.m2) * p.u1 + (1 + e) * p.m2 * p.u2) / M;
-          const v2 = ((p.m2 - e * p.m1) * p.u2 + (1 + e) * p.m1 * p.u1) / M;
-          const mu = p.m1 * p.m2 / M;
-          return [{ label: 'e', value: e.toFixed(2) },
-                  { label: 'v₁', value: v1.toFixed(3) + ' m/s', color: '#F29A4A' },
-                  { label: 'v₂', value: v2.toFixed(3) + ' m/s', color: '#4A9AF2' },
-                  { label: 'KE lost', value: (0.5 * mu * (1 - e * e) * Math.pow(p.u1 - p.u2, 2)).toFixed(2) + ' J' }];
+          P.clip(() => { P.line([[0.05, R.range], [0.95, R.range]], cr, 1, [4, 3]); P.line(a, c1, 2); P.line(b, c2, 2);
+                         P.vline(p.fSplit, g.alpha(th.text, .5), [3, 3]); });
+          P.tag(0.06, R.range, 'range if it had not burst', cr, 'left', -8);
         } },
 
       { title: 'Momentum through the event — traded between the parts, kept by the whole',
-        legend: [{ c: '#F29A4A', label: 'part 1' }, { c: '#4A9AF2', label: 'part 2' },
-                 { c: '#F5E663', label: 'total' }],
+        legend: [{ c: '#F29A4A', label: 'body 1' }, { c: '#4A9AF2', label: 'body 2' }, { c: '#F5E663', label: 'total' }],
         draw(S, g) {
-          const p = S.p, R = S.R, c1 = '#F29A4A', c2 = '#4A9AF2', cc = '#F5E663';
-          const T = S.tEnd, n = 240;
-          const A = [], B = [], C = [];
-          if (p.mode === 'head1d' || p.mode === 'oblique') {
-            for (let i = 0; i <= n; i++) {
-              const t = T * i / n, hit = isFinite(S.tc) && t >= S.tc;
-              const a = R.m1 * (hit ? R.V1 : R.U1)[0], b = R.m2 * (hit ? R.V2 : R.U2)[0];
-              A.push([t, a]); B.push([t, b]); C.push([t, a + b]);
+          const p = S.p, R = S.R, th = g.theme;
+          const A = [], Bq = [], C = [];
+          let T = S.tEnd;
+          if (p.mode === 'track' || p.mode === 'recoil' || p.mode === 'airtable') {
+            const r = S.run;
+            for (let i = 0; i < r.t.length; i += 3) {
+              const a = p.mode === 'airtable' ? p.m1 * r.P[i][4] : p.m1 * r.v1[i];
+              const b = p.mode === 'airtable' ? p.m2 * r.P[i][6] : p.m2 * r.v2[i];
+              A.push([r.t[i], a]); Bq.push([r.t[i], b]); C.push([r.t[i], a + b]);
             }
+            T = r.t[r.t.length - 1];
           } else if (p.mode === 'ballistic') {
-            /* After the impact the string and gravity are external forces, so
-               the horizontal momentum is no longer conserved. Integrate the
-               same pendulum the bench uses and show it. */
-            let thh = 0, om = R.omega0;
-            const k = G / p.Lstr, h = T / n, Mt = p.mBul + p.mBlk;
-            for (let i = 0; i <= n; i++) {
-              const t = T * i / n;
-              if (t < S.tImp) { A.push([t, p.mBul * p.uBul]); B.push([t, 0]); C.push([t, p.mBul * p.uBul]); continue; }
-              const px = Mt * p.Lstr * om * Math.cos(thh);
-              C.push([t, px]); A.push([t, NaN]); B.push([t, NaN]);
-              const f = (a, b) => [b, -k * Math.sin(a)];
-              const s1 = f(thh, om), s2 = f(thh + s1[0] * h / 2, om + s1[1] * h / 2),
-                    s3 = f(thh + s2[0] * h / 2, om + s2[1] * h / 2), s4 = f(thh + s3[0] * h, om + s3[1] * h);
-              thh += h / 6 * (s1[0] + 2 * s2[0] + 2 * s3[0] + s4[0]);
-              om += h / 6 * (s1[1] + 2 * s2[1] + 2 * s3[1] + s4[1]);
+            const bl = S.bal, Mt = p.mBul + p.mBlk;
+            A.push([0, R.p0], [S.tFly, R.p0]); C.push([0, R.p0], [S.tFly, R.p0]); Bq.push([0, 0], [S.tFly, 0]);
+            for (let i = 1; i < bl.th.length; i += 20) {
+              const om = (bl.th[i] - bl.th[i - 1]) / 5e-4;
+              C.push([S.tFly + bl.t[i], Mt * p.Lstr * om * Math.cos(bl.th[i])]);
             }
+            C.push([S.tFly + (bl.tMax || 0), 0], [T, 0]);
           } else {
+            const n = 200;
             for (let i = 0; i <= n; i++) {
               const t = T * i / n;
-              if (t < R.tA) { A.push([t, NaN]); B.push([t, NaN]); C.push([t, R.m * R.vx]); continue; }
-              const s = t - R.tA;
-              // a landed piece stops: the ground has taken its momentum
-              const a = s < R.t1 ? R.m1 * R.V1[0] : 0, b = s < R.t2f ? R.m2 * R.V2[0] : 0;
-              A.push([t, a]); B.push([t, b]); C.push([t, a + b]);
+              if (t < R.tA) { C.push([t, R.m * R.vx]); continue; }
+              const s = t - R.tA, a = s < R.t1 ? R.m1 * R.V1[0] : 0, b = s < R.t2f ? R.m2 * R.V2[0] : 0;
+              A.push([t, a]); Bq.push([t, b]); C.push([t, a + b]);
             }
           }
-          const vals = A.concat(B, C).map(q => q[1]).filter(isFinite).concat([0]);
-          let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-          const pad = Math.max(0.2, (hi - lo) * 0.12); lo -= pad; hi += pad;
-          const P = g.Plot({ xmin: 0, xmax: T, ymin: lo, ymax: hi,
-            xlabel: p.mode === 'head1d' || p.mode === 'oblique' ? 'time (s, real)' : 'time (s)',
-            ylabel: 'horizontal momentum (kg·m/s)',
-            xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(1) }).frame();
-          const seg = (pts) => {
-            const out = []; let cur = [];
-            pts.forEach(q => { if (isFinite(q[1])) cur.push(q); else if (cur.length) { out.push(cur); cur = []; } });
-            if (cur.length) out.push(cur);
-            return out;
-          };
+          const vals = A.concat(Bq, C).map(q => q[1]).concat([0]);
+          let lo = Math.min(...vals), hi = Math.max(...vals);
+          const pad = Math.max(0.02, (hi - lo) * 0.12); lo -= pad; hi += pad;
+          const P = g.Plot({ xmin: 0, xmax: T, ymin: lo, ymax: hi, xlabel: 'time (s)', ylabel: 'momentum (kg·m/s)',
+            xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(2) }).frame();
           P.clip(() => {
-            P.line([[0, 0], [T, 0]], g.alpha(g.theme['text-3'], .45), 1);
-            seg(A).forEach(s => P.line(s, c1, 1.8));
-            seg(B).forEach(s => P.line(s, c2, 1.8));
-            seg(C).forEach(s => P.line(s, cc, 2.6));
-            P.vline(S.t2, g.alpha(g.theme.text, .5), [3, 3]);
+            P.line([[0, 0], [T, 0]], g.alpha(th['text-3'], .45), 1);
+            if (A.length > 1) P.line(A, '#F29A4A', 1.8);
+            if (Bq.length > 1) P.line(Bq, '#4A9AF2', 1.8);
+            P.line(C, '#F5E663', 2.6);
+            P.vline(S.t2, g.alpha(th.text, .5), [3, 3]);
           });
-          const lab = p.mode === 'ballistic' ? 'kept through the impact, not through the swing'
-                    : p.mode === 'burst' ? 'kept until a piece hits the ground'
-                    : 'total: flat straight through the impact';
-          P.tag(T * 0.02, C[0][1], lab, cc, 'left', -9);
+          P.tag(T * 0.02, C[0][1], p.mode === 'ballistic' ? 'kept through the catch, not through the swing'
+                : p.mode === 'burst' ? 'kept until a piece lands' : 'total: flat straight through the collision', '#F5E663', 'left', -9);
         } }
     ],
 
     readouts(S) {
       const p = S.p, R = S.R;
-      if (p.mode === 'ballistic') {
-        return [
-          { label: 'Speed just after impact', value: R.v.toFixed(3), unit: 'm/s', flag: 'accent',
-            hint: 'mu/(m+M), from momentum' },
-          { label: 'Rise of the block', value: (R.h * 100).toFixed(2), unit: 'cm', hint: 'v²/2g, from energy' },
-          { label: 'Swing angle', value: R.overTop ? 'over the top' : R.theta.toFixed(2), unit: R.overTop ? '' : '°',
-            flag: R.overTop ? 'warn' : 'accent' },
-          { label: 'KE of the bullet', value: R.K0.toFixed(1), unit: 'J' },
-          { label: 'KE after embedding', value: R.K1.toFixed(3), unit: 'J',
-            hint: (100 * R.kept).toFixed(2) + '% survives' },
-          { label: 'Lost in the block', value: R.dK.toFixed(1), unit: 'J', flag: 'warn',
-            hint: 'heat, sound, torn wood' },
-          { label: 'Bullet speed read from θ', value: R.overTop ? '—' : R.uFromAngle.toFixed(1), unit: 'm/s',
-            flag: 'ok', hint: 'what the experiment measures' },
-          { label: 'Wrong: energy all the way', value: Math.sqrt(2 * G * R.h * (p.mBul + p.mBlk) / p.mBul).toFixed(1),
-            unit: 'm/s', flag: 'crit', hint: 'the trap: too low' }
+      if (p.mode === 'track' || p.mode === 'recoil') {
+        const out = [
+          { label: 'v₁ after (gate)', value: R.gW1 == null ? '—' : R.gW1.toFixed(3), unit: 'm/s', flag: 'accent', hint: 'model ' + R.w1.toFixed(3) },
+          { label: 'v₂ after (gate)', value: R.gW2 == null ? '—' : R.gW2.toFixed(3), unit: 'm/s', flag: 'accent', hint: 'model ' + R.w2.toFixed(3) },
+          { label: 'Impulse ∫F dt', value: R.J.toFixed(4), unit: 'N·s', hint: 'area under the force curve' },
+          { label: 'Contact time', value: (R.tcon * 1000).toFixed(1), unit: 'ms', hint: 'peak force ' + R.Fpk.toFixed(1) + ' N' },
+          { label: 'Total momentum', value: R.p0.toFixed(4), unit: 'kg·m/s', flag: 'ok', hint: 'after: ' + R.p1.toFixed(4) },
+          { label: p.mode === 'recoil' ? 'KE given by the spring' : 'KE lost', value: R.dK.toFixed(4), unit: 'J', flag: 'warn' }
         ];
+        if (p.mode === 'track') {
+          out.push({ label: 'Restitution, measured', value: R.eMeas == null ? '—' : R.eMeas.toFixed(3), unit: '', hint: 'set to ' + p.e.toFixed(2) });
+          out.push({ label: 'Ideal-collision answer', value: R.ideal[0].toFixed(3) + ', ' + R.ideal[1].toFixed(3), unit: 'm/s', hint: 'instantaneous theory' });
+        }
+        return out;
       }
-      if (p.mode === 'burst') {
-        return [
-          { label: 'Piece 1 lands at', value: R.x1.toFixed(2), unit: 'm', flag: 'accent' },
-          { label: 'Piece 2 lands at', value: R.x2.toFixed(2), unit: 'm', flag: 'accent' },
-          { label: 'Range with no burst', value: R.range.toFixed(2), unit: 'm', hint: 'u² sin 2α / g' },
-          { label: 'Mass-weighted landing', value: R.xMean.toFixed(2), unit: 'm',
-            flag: R.together ? 'ok' : 'warn',
-            hint: R.together ? 'equals R: they land together' : 'not R: different flight times' },
-          { label: 'Burst height', value: R.zA.toFixed(2), unit: 'm' },
-          { label: 'Relative speed of the pieces', value: R.w.toFixed(2), unit: 'm/s', hint: '√(2Q/μ)' },
-          { label: 'Piece 1 velocity', value: Math.hypot(R.V1[0], R.V1[1]).toFixed(2), unit: 'm/s',
-            hint: Math.hypot(R.V1[0], R.V1[1]) < 0.01 ? 'at rest after the burst'
-            : 'at ' + (Math.round(Math.atan2(R.V1[1], R.V1[0]) * 180 / Math.PI) + 0) + '°' },
-          { label: 'Piece 2 velocity', value: Math.hypot(R.V2[0], R.V2[1]).toFixed(2), unit: 'm/s',
-            hint: Math.hypot(R.V2[0], R.V2[1]) < 0.01 ? 'at rest after the burst'
-            : 'at ' + (Math.round(Math.atan2(R.V2[1], R.V2[0]) * 180 / Math.PI) + 0) + '°' }
-        ];
-      }
-      const out = [
-        { label: 'v₁ after', value: R.V1[0].toFixed(3), unit: 'm/s', flag: 'accent',
-          hint: p.mode === 'oblique' ? 'x-part · ' + R.sp1.toFixed(2) + ' m/s at ' + R.th1.toFixed(1) + '°' : 'sign = direction' },
-        { label: 'v₂ after', value: R.V2[0].toFixed(3), unit: 'm/s', flag: 'accent',
-          hint: p.mode === 'oblique' ? 'x-part · ' + R.sp2.toFixed(2) + ' m/s at ' + R.th2.toFixed(1) + '°' : 'sign = direction' },
-        { label: 'Centre-of-mass velocity', value: R.vcom[0].toFixed(3), unit: 'm/s',
-          hint: 'the same before and after' },
-        { label: 'Total momentum', value: R.p0.toFixed(3), unit: 'kg·m/s', flag: 'ok',
-          hint: 'after: ' + R.p1.toFixed(3) },
-        { label: 'KE lost', value: R.dK.toFixed(3), unit: 'J', flag: R.dK > 1e-9 ? 'warn' : 'ok',
-          hint: R.K0 > 0 ? (100 * R.dK / R.K0).toFixed(1) + '% of the total' : '' },
-        { label: 'Most it could lose', value: R.Krel.toFixed(3), unit: 'J',
-          hint: 'KE relative to the CM' },
-        { label: 'Impulse on each ball', value: R.J.toFixed(3), unit: 'N·s', hint: '(1+e)μ × closing speed' },
-        { label: 'Restitution, measured', value: R.willHit ? (R.separate / R.approach).toFixed(3) : '—', unit: '',
-          hint: 'separating ÷ closing speed' }
+      if (p.mode === 'airtable') return [
+        { label: 'Angle between the paths', value: R.ang == null ? '—' : R.ang.toFixed(2), unit: '°', flag: 'accent', hint: 'equal m, e = 1 → 90°' },
+        { label: 'Puck 1 leaves at', value: R.th1.toFixed(1), unit: '°', hint: Math.hypot(R.V1[0], R.V1[1]).toFixed(3) + ' m/s' },
+        { label: 'Puck 2 leaves at', value: R.th2.toFixed(1), unit: '°', hint: Math.hypot(R.V2[0], R.V2[1]).toFixed(3) + ' m/s' },
+        { label: 'x-momentum', value: R.px.toFixed(4), unit: 'kg·m/s', flag: 'ok', hint: 'before: ' + R.p0.toFixed(4) },
+        { label: 'y-momentum', value: Math.abs(R.py) < 5e-5 ? '0.0000' : R.py.toFixed(4), unit: 'kg·m/s', flag: 'ok', hint: 'before: 0' },
+        { label: 'KE kept', value: (100 * R.K1 / R.K0).toFixed(1), unit: '%' }
       ];
-      if (p.mode === 'oblique')
-        out.push({ label: 'Angle between the paths', value: R.ang == null ? '—' : R.ang.toFixed(2), unit: '°',
-          flag: 'accent', hint: 'equal m, e = 1 → 90°' });
-      return out;
+      if (p.mode === 'ballistic') return [
+        { label: 'Speed just after the catch', value: R.v.toFixed(3), unit: 'm/s', flag: 'accent', hint: 'mu/(m + M)' },
+        { label: 'Rise, where the pawl locks', value: (S.bal.h * 100).toFixed(2), unit: 'cm', hint: 'v²/2g' },
+        { label: 'Angle held by the ratchet', value: (S.bal.thMax * 180 / Math.PI).toFixed(1), unit: '°', flag: 'accent' },
+        { label: 'KE kept', value: (100 * R.kept).toFixed(1), unit: '%', hint: 'm/(m + M)' },
+        { label: 'Launch speed from the rise', value: ((1 + p.mBlk / p.mBul) * Math.sqrt(2 * G * S.bal.h)).toFixed(3), unit: 'm/s', flag: 'ok' },
+        { label: 'Wrong: energy all the way', value: Math.sqrt(2 * G * S.bal.h * (p.mBul + p.mBlk) / p.mBul).toFixed(3), unit: 'm/s', flag: 'crit' }
+      ];
+      return [
+        { label: 'Piece 1 lands at', value: R.x1.toFixed(2), unit: 'm', flag: 'accent' },
+        { label: 'Piece 2 lands at', value: R.x2.toFixed(2), unit: 'm', flag: 'accent' },
+        { label: 'Range with no burst', value: R.range.toFixed(2), unit: 'm' },
+        { label: 'Mass-weighted landing', value: R.xMean.toFixed(2), unit: 'm', flag: R.together ? 'ok' : 'warn',
+          hint: R.together ? 'equals R: they land together' : 'not R: different flight times' }
+      ];
     },
 
     equation(S) {
       const p = S.p, R = S.R;
+      if (p.mode === 'track')
+        return E.v('J') + ' ' + E.op('=') + ' ∫' + E.v('F') + ' d' + E.v('t') + ' ' + E.op('=') + ' ' + E.n(R.J, 'N·s') + ' ' +
+          E.op('=') + ' Δ' + E.v('p') + '₂' + E.op('·') + ' ' + E.v('m') + '₁' + E.v('u') + '₁ ' + E.op('+') + ' ' + E.v('m') + '₂' +
+          E.v('u') + '₂ ' + E.op('=') + ' ' + E.v('m') + '₁' + E.v('v') + '₁ ' + E.op('+') + ' ' + E.v('m') + '₂' + E.v('v') + '₂' +
+          '<br>' + E.v('e') + ' ' + E.op('=') + ' ' + E.frac(E.v('v') + '₂' + E.op('−') + E.v('v') + '₁', E.v('u') + '₁' + E.op('−') + E.v('u') + '₂') +
+          ' ' + E.op('=') + ' ' + E.n(R.eMeas == null ? 0 : R.eMeas, '') + E.op('·') + ' Δ' + E.v('K') + ' ' + E.op('=') + ' ½' + E.v('μ') +
+          '(1' + E.op('−') + E.v('e') + '²)' + E.v('u') + E.sub('rel') + '² ' + E.op('=') + ' ' + E.n(R.dK, 'J');
+      if (p.mode === 'recoil')
+        return '0 ' + E.op('=') + ' ' + E.v('m') + '₁' + E.v('v') + '₁ ' + E.op('+') + ' ' + E.v('m') + '₂' + E.v('v') + '₂' + E.op('·') + ' ' +
+          E.v('E') + E.sub('spring') + ' ' + E.op('=') + ' ½' + E.v('m') + '₁' + E.v('v') + '₁² ' + E.op('+') + ' ½' + E.v('m') + '₂' + E.v('v') + '₂²' +
+          '<br>' + E.v('v') + '₂ ' + E.op('=') + ' √' + E.frac('2' + E.v('E') + E.v('m') + '₁', E.v('m') + '₂(' + E.v('m') + '₁' + E.op('+') + E.v('m') + '₂)') +
+          ' ' + E.op('=') + ' ' + E.n(R.w2, 'm/s');
+      if (p.mode === 'airtable')
+        return E.v('m') + '₁' + E.v('u') + ' ' + E.op('=') + ' ' + E.v('m') + '₁' + E.v('v') + '₁ ' + E.op('+') + ' ' + E.v('m') + '₂' + E.v('v') + '₂ (vectors)' +
+          '<br>equal masses, ' + E.v('e') + ' ' + E.op('=') + ' 1 ' + E.op('⇒') + ' ' + E.v('v') + '₁' + E.op('·') + E.v('v') + '₂ ' + E.op('=') + ' 0 ' +
+          E.op('⇒') + ' 90° apart ' + E.op('·') + ' measured: ' + E.n(R.ang == null ? 0 : R.ang, '°');
       if (p.mode === 'ballistic')
-        return E.v('v') + ' ' + E.op('=') + ' ' + E.frac(E.v('m') + E.v('u'), E.v('m') + E.op('+') + E.v('M')) +
-          ' ' + E.op('=') + ' ' + E.n(R.v, 'm/s') + E.op('·') + ' ' + E.v('h') + ' ' + E.op('=') + ' ' +
-          E.frac(E.v('v') + '²', '2' + E.v('g')) + ' ' + E.op('=') + ' ' + E.n(R.h * 100, 'cm') +
-          '<br>' + E.frac('KE after', 'KE before') + ' ' + E.op('=') + ' ' +
-          E.frac(E.v('m'), E.v('m') + E.op('+') + E.v('M')) + ' ' + E.op('=') + ' ' + E.n(100 * R.kept, '%');
-      if (p.mode === 'burst')
-        return E.v('m') + E.v('v') + E.sub('top') + ' ' + E.op('=') + ' ' + E.v('m') + '₁' + E.v('v') + '₁ ' +
-          E.op('+') + ' ' + E.v('m') + '₂' + E.v('v') + '₂' + E.op('·') + ' ' + E.v('Q') + ' ' + E.op('=') + ' ½' +
-          E.v('μ') + E.v('w') + '² ' + E.op('=') + ' ' + E.n(p.Q, 'J') +
-          '<br>' + E.v('x') + E.sub('cm') + ' ' + E.op('=') + ' ' +
-          E.frac(E.v('m') + '₁' + E.v('x') + '₁' + E.op('+') + E.v('m') + '₂' + E.v('x') + '₂', E.v('m')) + ' ' +
-          E.op('=') + ' ' + E.n(R.xMean, 'm') + (R.together ? ' = R' : ' ≠ R ' + E.op('(') + 'they land apart in time)');
-      return E.v('v') + '₁ ' + E.op('=') + ' ' +
-        E.frac('(' + E.v('m') + '₁' + E.op('−') + E.v('em') + '₂)' + E.v('u') + '₁' + E.op('+') + '(1' + E.op('+') +
-          E.v('e') + ')' + E.v('m') + '₂' + E.v('u') + '₂', E.v('m') + '₁' + E.op('+') + E.v('m') + '₂') +
-        ' ' + E.op('=') + ' ' + E.n(p.mode === 'oblique' ? R.V1[0] * R.n[0] + R.V1[1] * R.n[1] : R.V1[0], 'm/s') +
-        (p.mode === 'oblique' ? ' along n; the part across n is untouched' : '') +
-        '<br>' + E.v('v') + '₂ ' + E.op('−') + ' ' + E.v('v') + '₁ ' + E.op('=') + ' ' + E.v('e') + '(' +
-        E.v('u') + '₁' + E.op('−') + E.v('u') + '₂)' + E.sub(p.mode === 'oblique' ? 'along n' : '') + E.op('·') +
-        ' Δ' + E.v('K') + ' ' + E.op('=') + ' ½' + E.v('μ') + '(1' + E.op('−') + E.v('e') + '²)' +
-        E.v('u') + E.sub('rel') + '² ' + E.op('=') + ' ' + E.n(R.dK, 'J');
+        return E.v('v') + ' ' + E.op('=') + ' ' + E.frac(E.v('m') + E.v('u'), E.v('m') + E.op('+') + E.v('M')) + ' ' + E.op('=') + ' ' + E.n(R.v, 'm/s') +
+          E.op('·') + ' ' + E.v('h') + ' ' + E.op('=') + ' ' + E.frac(E.v('v') + '²', '2' + E.v('g')) + ' ' + E.op('=') + ' ' + E.n(S.bal.h * 100, 'cm');
+      return E.v('m') + E.v('v') + E.sub('top') + ' ' + E.op('=') + ' ' + E.v('m') + '₁' + E.v('v') + '₁ ' + E.op('+') + ' ' + E.v('m') + '₂' + E.v('v') + '₂' +
+        '<br>' + E.v('x') + E.sub('cm') + ' ' + E.op('=') + ' ' + E.n(R.xMean, 'm') + (R.together ? ' = R' : ' ≠ R');
     },
 
-    eqNote: '<b>Momentum is always conserved in a collision; kinetic energy almost never is.</b> ' +
-      'The coefficient of restitution says how much of the closing speed along the line of centres ' +
-      'comes back as separating speed. The energy lost is ½μ(1 − e²)u<sub>rel</sub>², where μ = ' +
-      'm₁m₂/(m₁+m₂) is the reduced mass. That expression holds the whole chapter: the loss is largest ' +
-      'for a head-on hit (all of u<sub>rel</sub> lies along the line of centres), zero for e = 1, and ' +
-      'can never exceed the KE seen from the centre of mass. That limit is why two cars that stick ' +
-      'together still keep moving.',
+    eqNote: '<b>Momentum is kept in every collision; kinetic energy almost never is.</b> The bumpers show why. ' +
+      'While they are squeezed, each glider pushes the other with the same force for the same time, so the ' +
+      'impulses are equal and opposite and the total momentum cannot change. Whether the energy comes back ' +
+      'depends on the bumper. A perfect spring returns it all (e = 1). A damped one turns some into heat. ' +
+      'Velcro keeps the gliders together, and loses the most that can be lost: the kinetic energy of the ' +
+      'motion relative to the centre of mass, ½μu²ᵣₑₗ.',
 
     problems: [
-      { source: 'JEE Main pattern · restitution in one dimension',
-        q: 'A 2.00 kg ball moving at 6.00 m/s hits a 4.00 kg ball at rest, head-on, with e = 0.500. Find the speed of the 4.00 kg ball after the collision, in m/s.',
-        params: { mode: 'head1d', m1: 2, m2: 4, u1: 6, u2: 0, e: 0.5 },
-        predict: { label: 'v₂ after', unit: 'm/s', tol: 0.02 },
-        measure: S => S.R.V2[0],
-        working: 'Momentum: 2(6) = 2v₁ + 4v₂. Restitution: v₂ − v₁ = 0.5 × 6 = 3. Solve the pair: ' +
-          '12 = 2(v₂ − 3) + 4v₂, so 6v₂ = 18 and <b>v₂ = 3.00 m/s</b>, with v₁ = 0. The first ball stops ' +
-          'dead. That is a coincidence of these numbers (m₁ = e·m₂), not a rule, and it makes a good check: ' +
-          'KE falls from 36 J to 18 J, so half is lost, which matches ½μ(1 − e²)u² = ½(4/3)(0.75)(36) = 18 J.' },
-      { source: 'NEET pattern · energy lost when they stick',
-        q: 'A 3.00 kg trolley at 4.00 m/s runs into a 1.00 kg trolley at rest and they couple together. How much kinetic energy is lost, in joules?',
-        params: { mode: 'head1d', m1: 3, m2: 1, u1: 4, u2: 0, e: 0 },
-        predict: { label: 'KE lost', unit: 'J', tol: 0.02 },
+      { source: 'NEET pattern · equal gliders, elastic',
+        q: 'A 0.40 kg glider moving at 0.60 m/s hits an identical glider at rest on an air track. The bumpers are perfectly elastic. What is the speed of the second glider afterwards, in m/s?',
+        params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 1 },
+        predict: { label: 'v₂', unit: 'm/s', tol: 0.02 },
+        measure: S => S.R.w2,
+        working: 'Equal masses with e = 1 swap velocities: the first glider stops and the second leaves at ' +
+          '<b>0.600 m/s</b>. Gate B confirms it: the 10.0 cm flag takes 0.167 s to pass, and 0.100/0.1667 = 0.600 m/s.' },
+      { source: 'JEE Main pattern · restitution',
+        q: 'The same two 0.40 kg gliders, 0.60 m/s onto one at rest, but now the bumpers have e = 0.50. Find the speed of the struck glider afterwards, in m/s.',
+        params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 0.5 },
+        predict: { label: 'v₂', unit: 'm/s', tol: 0.02 },
+        measure: S => S.R.w2,
+        working: 'Momentum: 0.4(0.6) = 0.4v₁ + 0.4v₂. Restitution: v₂ − v₁ = 0.5 × 0.6. Adding: 2v₂ = 0.9, so ' +
+          '<b>v₂ = 0.450 m/s</b> and v₁ = 0.150 m/s. The damped bumper turns 0.0270 J into heat, a quarter of the energy.' },
+      { source: 'NEET pattern · velcro',
+        q: 'A 0.40 kg glider at 0.60 m/s hits an identical glider at rest, and velcro pads make them stick. How much kinetic energy is lost, in joules?',
+        params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 0 },
+        predict: { label: 'KE lost', unit: 'J', tol: 0.03 },
         measure: S => S.R.dK,
-        working: 'They share the CM velocity: v = 3 × 4 / 4 = 3 m/s. KE goes from ½·3·16 = 24 J to ' +
-          '½·4·9 = 18 J, so <b>6.00 J</b> is lost. The quick route is ½μu² with μ = 3·1/4 = 0.75 kg: ' +
-          '½ × 0.75 × 16 = 6 J. Note that 18 J survives: a perfectly inelastic collision destroys only ' +
-          'the energy of the motion <i>relative to</i> the CM, never the CM\'s own kinetic energy.' },
-      { source: 'JEE Advanced pattern · the glancing elastic collision',
-        q: 'A 2.00 kg ball at 5.00 m/s strikes an identical ball at rest, off-centre, with offset b = 0.5(r₁ + r₂). The collision is elastic. Find the angle between their paths afterwards, in degrees.',
-        params: { mode: 'oblique', m1: 2, m2: 2, u1: 5, u2: 0, e: 1, bImp: 0.5 },
+        working: 'They move off together at 0.30 m/s. KE goes from ½(0.4)(0.36) = 0.0720 J to ½(0.8)(0.09) = 0.0360 J: ' +
+          '<b>0.0360 J</b> lost, exactly half. That is ½μu² with μ = 0.20 kg — all the energy of the relative motion.' },
+      { source: 'JEE Main pattern · recoil',
+        q: 'Gliders of 0.40 kg and 0.80 kg are held against a compressed spring storing 0.30 J. The thread is burned. How fast does the 0.80 kg glider move off, in m/s?',
+        params: { mode: 'recoil', m1: 0.4, m2: 0.8, Es: 0.3 },
+        predict: { label: 'speed of the heavier glider', unit: 'm/s', tol: 0.02 },
+        measure: S => Math.abs(S.R.w2),
+        working: 'Momentum stays zero: 0.4v₁ = 0.8v₂, so v₁ = 2v₂. Energy: ½(0.4)(2v₂)² + ½(0.8)v₂² = 0.30, so ' +
+          '1.2v₂² = 0.30 and <b>v₂ = 0.500 m/s</b> (the light one goes at 1.00 m/s). The lighter body takes two thirds ' +
+          'of the energy: kinetic energy is shared in inverse proportion to mass.' },
+      { source: 'JEE Advanced pattern · glancing, equal masses',
+        q: 'On the air table a 0.20 kg puck at 0.50 m/s strikes an identical puck at rest, off-centre, elastically. What is the angle between their paths afterwards, in degrees?',
+        params: { mode: 'airtable', m1: 0.2, m2: 0.2, u1: 0.5, e: 1, bImp: 0.5 },
         predict: { label: 'angle between paths', unit: '°', tol: 0.01 },
         measure: S => S.R.ang,
-        working: 'Momentum as vectors: u = v₁ + v₂ (the masses cancel). Energy: u² = v₁² + v₂². ' +
-          'Square the first: u² = v₁² + v₂² + 2v₁·v₂. Comparing the two gives v₁·v₂ = 0, so the paths ' +
-          'are <b>90.0°</b> apart. The offset does not matter; it only decides how the 90° is shared ' +
-          '(here 30° and 60°). This is why snooker players can predict where the cue ball goes.' },
+        working: 'Momentum as vectors, u = v₁ + v₂; energy, u² = v₁² + v₂². Together v₁·v₂ = 0: <b>90.0°</b>. The lab ' +
+          'does not assume it: it integrates the contact force and the strobe record comes out square.' },
       { source: 'JEE Main pattern · the ballistic pendulum',
-        q: 'A 10.0 g bullet at 400 m/s embeds itself in a 1.99 kg block hanging on a light string. How high does the block rise, in centimetres? Take g = 9.81 m/s².',
-        params: { mode: 'ballistic', mBul: 0.01, mBlk: 1.99, uBul: 400, Lstr: 1 },
+        q: 'A 66 g steel ball leaves the spring gun at 5.00 m/s and is caught by a 250 g catcher on a light arm. How high does the catcher rise, in cm? (g = 9.81 m/s²)',
+        params: { mode: 'ballistic', mBul: 0.066, mBlk: 0.25, uBul: 5, Lstr: 0.3 },
         predict: { label: 'rise h', unit: 'cm', tol: 0.02 },
-        measure: S => S.R.h * 100,
-        working: 'Two stages, two laws. The impact is fast, so momentum: v = 0.010 × 400 / 2.00 = 2.00 m/s. ' +
-          'The swing is smooth, so energy: h = v²/2g = 4.00/19.62 = <b>20.4 cm</b>. Using energy for the ' +
-          'whole thing gives ½(0.01)(400²)/(2.00 × 9.81) = 40.8 m, two hundred times too high. Only 0.5% of ' +
-          'the bullet\'s energy survives the impact; the rest heats the block.' },
+        measure: S => S.bal.h * 100,
+        working: 'Catch (momentum): v = 0.066 × 5.00/0.316 = 1.044 m/s. Swing (energy): h = v²/2g = 1.091/19.62 = ' +
+          '<b>5.56 cm</b>. Only 21% of the ball\'s energy survives the catch, so using energy for the whole thing would ' +
+          'put the answer at 26.6 cm — five times too high.' },
       { source: 'JEE Advanced pattern · the shell that bursts at the top',
-        q: 'A 2.00 kg shell is fired at 20.0 m/s at 45°. At the top it bursts into two equal halves; one falls straight down from rest. How far from the gun does the other land, in metres? Take g = 9.81 m/s².',
+        q: 'A 2.00 kg shell is fired at 20.0 m/s at 45°. At the top it bursts into two equal halves; one falls straight down from rest. How far from the gun does the other land, in metres? (g = 9.81 m/s²)',
         params: { mode: 'burst', mProj: 2, u0: 20, alpha: 45, fSplit: 0.5, Q: 200, beta: 180 },
         predict: { label: 'landing distance', unit: 'm', tol: 0.02 },
         measure: S => S.R.x2,
-        working: 'The range is R = u² sin 90° / g = 40.8 m, and the burst is internal, so the CM still ' +
-          'lands at R. Both halves leave the top moving horizontally, so they are in the air for the same ' +
-          'time and land together. The one that drops lands at R/2, so the other must land at x where ' +
-          '(R/2 + x)/2 = R, which gives x = 3R/2 = <b>61.2 m</b>. If the halves did <i>not</i> land ' +
-          'together this shortcut would fail: once the first piece hits the ground, the ground is an ' +
-          'external force.' }
+        working: 'R = u² sin 90°/g = 40.8 m, and the burst is internal, so the CM still lands at R. Both halves leave ' +
+          'the top horizontally, so they land together; one lands at R/2, so the other lands at 3R/2 = <b>61.2 m</b>.' }
     ],
 
     walkthrough: [
-      { title: '1 · The centre of mass does not notice the collision',
-        body: 'Two balls, 2 kg and 4 kg, head-on at e = 0.6. Watch the yellow marker between them.',
-        ask: 'What happens to the centre of mass at the moment of impact?',
-        reveal: '<b>Nothing.</b> It moves at the same velocity straight through the impact. The forces ' +
-          'between the balls are internal: equal, opposite, and acting for the same time, so they cancel ' +
-          'in the total. The second graph shows it directly: the two coloured momenta jump, and the yellow ' +
-          'total does not move by a single digit.',
-        params: { mode: 'head1d', m1: 2, m2: 4, u1: 6, u2: 0, e: 0.6 } },
-      { title: '2 · Equal masses, elastic: they swap',
-        body: 'Set equal masses and e = 1.',
-        ask: 'After the impact, what is the first ball doing?',
-        reveal: '<b>Standing still</b>, and the second ball leaves at exactly the first one\'s speed. The ' +
-          'balls swap velocities, which is how a Newton\'s cradle works. The COM panel shows why: seen ' +
-          'from the CM, each momentum simply reverses.',
-        params: { mode: 'head1d', m1: 2, m2: 2, u1: 5, u2: 0, e: 1 } },
-      { title: '3 · Light on heavy: it bounces back',
-        body: 'Now a 1 kg ball hits a 10 kg ball at rest, elastically.',
-        ask: 'Which way does the light ball go afterwards?',
-        reveal: '<b>Backwards</b>, at nearly its original speed, while the heavy ball creeps forward. In ' +
-          'the limit of an infinitely heavy target it rebounds at exactly −u, which is why a ball bouncing ' +
-          'off a wall reverses. Reverse the roles (heavy hits light) and the light ball flies off at ' +
-          'nearly <b>2u</b>, not u. That factor of two is a common exam question.',
-        params: { mode: 'head1d', m1: 1, m2: 10, u1: 4, u2: 0, e: 1 } },
-      { title: '4 · They stick: the most energy that can go',
-        body: 'Set e = 0 and read the two books.',
-        ask: 'Is all the kinetic energy lost when they stick?',
-        reveal: '<b>No.</b> Only the energy of the motion relative to the CM can go. The CM still carries ' +
-          '½Mv<sub>cm</sub>², and nothing internal can touch it. All the energy is lost only when the CM ' +
-          'is at rest, as in two equal cars meeting head-on at equal speeds.',
-        params: { mode: 'head1d', m1: 2, m2: 4, u1: 6, u2: 0, e: 0 } },
-      { title: '5 · Glancing, equal masses: always 90°',
-        body: 'Switch to the glancing collision, equal masses, e = 1, and move the offset.',
-        ask: 'Does the angle between the two paths change as you change the offset?',
-        reveal: '<b>No — it stays at 90° for any offset.</b> The first graph shows the yellow line flat at ' +
-          '90° while the two deflections trade off. Lower e or change a mass and the line leaves 90°. ' +
-          'The impulse acts only along the dashed line of centres, so ball 2 always leaves along that line.',
-        params: { mode: 'oblique', m1: 2, m2: 2, u1: 5, u2: 0, e: 1, bImp: 0.5 } },
-      { title: '6 · Ballistic pendulum: two laws, two stages',
-        body: 'A 10 g bullet at 400 m/s into a 1.99 kg block.',
-        ask: 'Can you get the bullet speed from the rise h using energy conservation alone?',
-        reveal: '<b>No — the red readout shows what that gives.</b> Kinetic energy is not conserved in the ' +
-          'embedding; only 0.5% survives. Use momentum across the impact and energy for the swing. The ' +
-          'second graph shows the other half: once it swings, horizontal momentum is not conserved either, ' +
-          'because the string pulls.',
-        params: { mode: 'ballistic', mBul: 0.01, mBlk: 1.99, uBul: 400, Lstr: 1 } },
-      { title: '7 · An explosion is a collision run backwards',
-        body: 'The shell bursts at the top. Drag the split direction and the energy released.',
-        ask: 'Does the centre of mass still follow the original parabola?',
-        reveal: '<b>Yes, while both pieces are in the air.</b> The explosion is internal, so it cannot move ' +
-          'the CM. Kinetic energy goes <i>up</i> by exactly Q, the mirror image of a collision. The moment ' +
-          'one piece lands, the ground pushes on it, and the marker turns orange and leaves the parabola.',
+      { title: '1 · A collision takes time',
+        body: 'Run the elastic preset and look at the first graph: the force between the gliders during the collision.',
+        ask: 'How long does the collision last, and what is the area under the curve?',
+        reveal: 'About <b>30 ms</b>, rising to a peak and falling away as the bumpers squeeze and spring back. The ' +
+          'area is the <b>impulse</b>, and it equals the change in momentum of each glider. The other glider feels ' +
+          'the same force pointing the other way for the same time, so the two changes cancel.',
+        params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 1 } },
+      { title: '2 · Measuring speed with a photogate',
+        body: 'Watch the photogate timer as each glider passes through a beam.',
+        ask: 'Gate B reads 0.1667 s. What speed is that?',
+        reveal: 'The flag is 10.0 cm long, so v = 0.100/0.1667 = <b>0.600 m/s</b>. A photogate measures a time, not ' +
+          'a speed. The shorter the flag, the closer this average comes to the instantaneous speed.',
+        params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 1 } },
+      { title: '3 · Restitution lives in the bumper',
+        body: 'Lower e to 0.5, then to 0 (velcro).',
+        ask: 'Does the total momentum change? Does the energy?',
+        reveal: '<b>Momentum: never.</b> Energy: yes. The damped bumper turns part of the relative motion into heat, ' +
+          'and velcro keeps the gliders together, losing exactly half here. The centre of mass keeps its speed ' +
+          'in every case.',
+        params: { mode: 'track', m1: 0.4, m2: 0.4, u1: 0.6, u2: 0, e: 0.5 } },
+      { title: '4 · An explosion is a collision run backwards',
+        body: 'Load the spring recoil: two gliders held against a compressed spring, then the thread is burned.',
+        ask: 'Which glider moves faster, and which gets more of the energy?',
+        reveal: 'The <b>lighter</b> one, on both counts. Momenta are equal and opposite, so speed goes as 1/m, and ' +
+          'kinetic energy p²/2m also goes as 1/m. A gun and its bullet share the energy of the charge in the same way.',
+        params: { mode: 'recoil', m1: 0.4, m2: 0.8, Es: 0.3 } },
+      { title: '5 · Glancing, equal masses: 90°',
+        body: 'Switch to the air table. The strobe records a flash every 0.1 s.',
+        ask: 'Change the offset. Does the 90° survive?',
+        reveal: '<b>Yes, for any offset</b>, as long as the masses are equal and the collision is elastic. Lower e ' +
+          'and the angle closes. The pucks are smooth, so the force acts only along the line of centres; puck 2 ' +
+          'always leaves along that line.',
+        params: { mode: 'airtable', m1: 0.2, m2: 0.2, u1: 0.5, e: 1, bImp: 0.5 } },
+      { title: '6 · The ballistic pendulum',
+        body: 'The spring gun fires into the catcher. The pawl rides the toothed arc and locks at the top of the swing.',
+        ask: 'Can you get the launch speed from the height using energy conservation alone?',
+        reveal: '<b>No.</b> The catch is perfectly inelastic, and only m/(m + M) of the ball\'s energy survives it. Use ' +
+          'momentum for the catch and energy for the swing. The red readout shows what energy alone would give.',
+        params: { mode: 'ballistic', mBul: 0.066, mBlk: 0.25, uBul: 5, Lstr: 0.3 } },
+      { title: '7 · A shell that bursts in flight',
+        body: 'The shell bursts at the top of its flight.',
+        ask: 'Does the centre of mass keep to the original parabola?',
+        reveal: '<b>Yes, while both pieces are in the air.</b> The burst is internal. Once a piece lands, the ground ' +
+          'pushes on it, and the CM leaves the parabola.',
         params: { mode: 'burst', mProj: 2, u0: 20, alpha: 45, fSplit: 0.3, Q: 500, beta: 60 } }
     ],
 
     quiz: [
+      { q: 'The area under a force–time graph for a collision equals:',
+        options: ['the work done', 'the change in kinetic energy', 'the impulse, equal to the change in momentum', 'the average force'], answer: 2,
+        why: 'J = ∫F dt = Δp. Work is the area under force against distance, not time.' },
+      { q: 'A softer bumper makes the same collision last longer. The impulse is:',
+        options: ['larger', 'smaller', 'the same, with a lower peak force', 'zero'], answer: 2,
+        why: 'The momentum change is fixed by the velocities, so the impulse is fixed; spreading it over a longer time lowers the peak force. This is why airbags and crumple zones work.' },
       { q: 'In a perfectly inelastic collision between two bodies:',
-        options: ['all the kinetic energy is lost', 'momentum is lost',
-                  'the kinetic energy relative to the CM is lost', 'no energy is lost'], answer: 2,
-        why: 'Internal forces cannot change the CM velocity, so ½Mv²ₘ always survives. Only the relative-motion energy ½μu²ᵣₑₗ can be dissipated.' },
-      { q: 'A ball hits an identical ball at rest in an elastic, head-on collision. Afterwards:',
-        options: ['both move at u/2', 'the first stops, the second moves at u',
-                  'the first rebounds at u', 'both stop'], answer: 1,
-        why: 'Equal masses with e = 1 exchange velocities. This is the Newton\'s cradle.' },
-      { q: 'Two identical smooth balls collide elastically, one initially at rest, off-centre. The angle between their final paths is:',
+        options: ['all the kinetic energy is lost', 'momentum is lost', 'the kinetic energy relative to the CM is lost', 'no energy is lost'], answer: 2,
+        why: 'The CM velocity cannot change, so ½Mv²ₘ always survives. Only ½μu²ᵣₑₗ can be dissipated.' },
+      { q: 'Two gliders at rest are pushed apart by a spring. The lighter one:',
+        options: ['moves slower and gets less energy', 'moves faster and gets more energy', 'moves faster but gets less energy', 'moves at the same speed'], answer: 1,
+        why: 'Equal and opposite momenta give v ∝ 1/m, and KE = p²/2m also goes as 1/m.' },
+      { q: 'A photogate records a 5.0 cm flag blocking the beam for 0.040 s. The speed is:',
+        options: ['0.20 m/s', '1.25 m/s', '2.0 m/s', '12.5 m/s'], answer: 1,
+        why: 'v = L/Δt = 0.050/0.040 = 1.25 m/s.' },
+      { q: 'Two identical smooth balls collide elastically, one at rest, off-centre. The angle between their final paths is:',
         options: ['0°', '45°', '90°', 'depends on the offset'], answer: 2,
-        why: 'Vector momentum gives u = v₁ + v₂; energy gives u² = v₁² + v₂². Together v₁·v₂ = 0, whatever the offset.' },
-      { q: 'In a ballistic pendulum, the correct method is:',
-        options: ['energy conservation throughout', 'momentum conservation throughout',
-                  'momentum for the impact, energy for the swing', 'energy for the impact, momentum for the swing'], answer: 2,
-        why: 'The embedding is inelastic, so KE is not conserved there. During the swing the string and gravity act, so momentum is not conserved there, but mechanical energy is.' },
-      { q: 'A projectile explodes in mid-air into two pieces. Until either piece lands, its centre of mass:',
-        options: ['stops', 'falls vertically', 'follows the original parabola', 'moves in a straight line'], answer: 2,
-        why: 'The explosion forces are internal. Only gravity acts on the system, so the CM keeps the path of the unexploded shell.' }
+        why: 'u = v₁ + v₂ and u² = v₁² + v₂² together give v₁·v₂ = 0.' }
     ],
 
     notes: '<b>Where this shows up in the paper.</b>' +
-      '<ul><li>One-dimensional collisions: momentum plus Newton\'s restitution law, v₂ − v₁ = e(u₁ − u₂).</li>' +
-      '<li>The special cases worth knowing without algebra: equal masses swap (e = 1), a heavy body ' +
-      'barely changes speed, a light body rebounds, and a light target leaves at nearly 2u.</li>' +
-      '<li>Energy lost: ΔK = ½μ(1 − e²)(u₁ − u₂)², with μ the reduced mass.</li>' +
-      '<li>Oblique collisions of smooth spheres: the impulse acts along the line of centres only, and ' +
-      'the tangential components are unchanged.</li>' +
-      '<li>The ballistic pendulum, and bullet-in-block problems generally.</li>' +
-      '<li>Explosions and recoil (guns, shells, a man walking on a boat): the CM stays fixed, or keeps ' +
-      'its path, if no external force acts.</li></ul>' +
-      '<div class="pyq"><em>Trap to avoid</em>Newton\'s restitution law uses the components ' +
-      '<b>along the line of centres</b>, not the full speeds. In a glancing collision, applying ' +
-      'e to the speeds gives a wrong answer that still looks reasonable.</div>' +
-      '<div class="pyq"><em>Trap to avoid</em>"Momentum is conserved" means the momentum of the ' +
-      '<b>whole isolated system</b>, over the <b>short time of the impact</b>. It does not hold for one ' +
-      'ball by itself, for a pendulum that is swinging, or once a piece of a shell has hit the ground.</div>'
+      '<ul><li>One-dimensional collisions: momentum plus v₂ − v₁ = e(u₁ − u₂).</li>' +
+      '<li>Impulse as the area under F–t, and why a longer contact time lowers the peak force.</li>' +
+      '<li>Energy lost: ½μ(1 − e²)u²ᵣₑₗ, with μ the reduced mass.</li>' +
+      '<li>Recoil and explosions: momenta equal and opposite, kinetic energy shared as 1/m.</li>' +
+      '<li>Oblique collisions of smooth spheres: impulse along the line of centres only.</li>' +
+      '<li>The ballistic pendulum, and the centre of mass of an exploding projectile.</li></ul>' +
+      '<div class="pyq"><em>Trap to avoid</em>"Momentum is conserved" applies to the whole isolated system over ' +
+      'the short time of the impact. It does not hold for one body alone, for a pendulum while it swings, or ' +
+      'once a piece of a shell has hit the ground.</div>'
   });
 
   /* =========================================================================
