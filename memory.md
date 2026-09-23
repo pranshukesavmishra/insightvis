@@ -742,6 +742,22 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-23 (b)** — **Client: labels overlap too much, give a tick box to hide them; and the Cardiac
+  Cycle lab is only "10–20%" liked, upgrade it very much.** Added a global **Labels** switch to the
+  transport bar in `lab-core.js`, remembered per viewer in localStorage. It gates `R3.label`,
+  `R3.callout`, `g.label`, and the `labels`/`leaders` defaults in `art-bio.js` and `art-zoo.js`
+  (read `window.__LABELS`); instrument panels stay. New labs must route scene annotations through
+  those, or check `g.labels`, so the switch keeps working. **Rebuilt `cardiac` from scratch**: a closed
+  eight-compartment circulation with all four valves computed (the old lab faked the right-heart
+  valves by copying the left ones), exponential passive LV stiffness so Frank–Starling bends over,
+  ECG-driven timing with a 35 ms electromechanical delay, a live Wiggers sweep sampled every
+  2.5 ms inside the integration (one sample per frame missed the QRS entirely), seven phases
+  classified from the valve states, real murmurs, audible S1/S2 via WebAudio, and blood-flow
+  particles pushed by the computed flows. The stage is laid out in fixed zones so nothing can
+  overlap. **Lessons:** sample fast traces inside the integrator, not per frame; classify phases
+  from state ("has this beat ejected yet"), never from a time cut-off; check event order against
+  physiology (MC must follow the QRS) — a sharper picture exposed the missing delay.
+
 - **2026-09-23** — **Batch 2 of ten syllabus labs: Laws of Motion, Collisions, Capacitance**
   (`sims-physics10.js`, artifact v20). *newton*: one linear solve for five rigs, friction settled by
   a three-step test (assume static, read the friction needed, compare with μₛN), and the block

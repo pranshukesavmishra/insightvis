@@ -491,395 +491,881 @@
   });
 
   /* =========================================================================
-     6 · CARDIAC CYCLE — time-varying elastance, PV loop and ECG
+     THE CIRCULATION — a closed loop, both sides of the heart
+     Eight compartments in a ring: RA → RV → pulmonary arteries → pulmonary
+     veins → LA → LV → systemic arteries → systemic veins → back to RA. Each
+     heart chamber is a time-varying elastance, P = E(t)(V − V₀); each vessel
+     bed is a compliance, P = (V − V₀)/C; flow between them is ΔP/R; and each
+     of the four valves is a diode that conducts only forward — unless it is
+     diseased. Blood is only ever moved, never made, so the total volume is
+     conserved to the last millilitre, and that is checked on screen.
      ========================================================================= */
-  function elastance(tn, a1, a2, n1, n2) {
-    const t = Math.max(tn, 1e-6);
+  const CV = {
+    // chambers: Emin, V0 (mL); ventricular Emax is the contractility control
+    lv: { Emin: 0.07, V0: 10, A: 0.55, B: 0.024 }, rv: { Emin: 0.035, V0: 10, Emax: 0.62 },
+    la: { Emin: 0.16, Emax: 0.30, V0: 10 }, ra: { Emin: 0.10, Emax: 0.22, V0: 10 },
+    // vessel beds: compliance (mL/mmHg) and unstressed volume (mL)
+    sa: { C: 1.05, V0: 700 }, sv: { C: 100, V0: 2714 },
+    pa: { C: 4.2, V0: 110 }, pv: { C: 11, V0: 260 },
+    // resistances (mmHg·s/mL)
+    Rsv: 0.030, Rpul: 0.075, Rpv: 0.012,
+    Rmv: 0.0055, Rav: 0.0045, Rtv: 0.0045, Rpvl: 0.0035,
+    PR: 0.16
+  };
+  function actHill(x, a1, a2, n1, n2) {
+    const t = Math.max(x, 1e-6);
     const g1 = Math.pow(t / a1, n1), g2 = Math.pow(t / a2, n2);
     return (g1 / (1 + g1)) * (1 / (1 + g2));
   }
-  const E_PEAK = (function () {
-    let mx = 0; for (let i = 0; i <= 400; i++) mx = Math.max(mx, elastance(i / 400, 0.303, 0.508, 1.32, 21.9));
-    return mx;
-  })();
-  const LA_PEAK = (function () {
-    let mx = 0; for (let i = 0; i <= 400; i++) mx = Math.max(mx, elastance(i / 400, 0.10, 0.20, 1.4, 18));
-    return mx;
-  })();
-  const gauss = (x, c, w) => Math.exp(-Math.pow((x - c) / w, 2));
+  const V_PK = (function () { let m = 0; for (let i = 0; i <= 800; i++) m = Math.max(m, actHill(i / 800, 0.303, 0.508, 1.32, 21.9)); return m; })();
+  const A_PK = (function () { let m = 0; for (let i = 0; i <= 800; i++) m = Math.max(m, actHill(i / 800, 0.10, 0.20, 1.4, 18)); return m; })();
 
-  function ecgAt(tn) {
-    return 0.14 * gauss(tn, 0.80, 0.030)
-      - 0.09 * gauss(tn, 0.013, 0.006)
-      + 1.00 * gauss(tn, 0.035, 0.008)
-      - 0.22 * gauss(tn, 0.058, 0.009)
-      + 0.27 * gauss(tn, 0.330, 0.045);
+  function cvNew(p) {
+    // a first guess; the warm-up beats settle it
+    const s = { lv: 120, la: 55, rv: 125, ra: 70, sa: 830, pa: 190, pv: 360, t: 0, beat: 0 };
+    s.sv = p.vol - (s.lv + s.la + s.rv + s.ra + s.sa + s.pa + s.pv);
+    return s;
+  }
+  /* activation of ventricles and atria at time t after the QRS. Systole
+     shortens with the square root of the cycle length (Bazett), so at high
+     heart rates it is diastole that is squeezed — as in a real heart. */
+  function cvAct(t, RR) {
+    const Ts = Math.sqrt(0.833 * RR);
+    /* electromechanical delay: the ventricles begin to squeeze about 35 ms
+       after the QRS starts, and the atria about 30 ms after the P wave */
+    const ev = actHill((t - 0.035) / Ts, 0.303, 0.508, 1.32, 21.9) / V_PK;
+    let ta = t - (RR - CV.PR + 0.03);
+    if (ta < 0) ta += RR;
+    const ea = actHill(ta / 0.833, 0.10, 0.20, 1.4, 18) / A_PK;
+    return { ev: ev, ea: ea, Ts: Ts };
+  }
+  function cvPress(s, p, a) {
+    const Elv = CV.lv.Emin + (p.emax - CV.lv.Emin) * a.ev;
+    const Erv = CV.rv.Emin + (CV.rv.Emax * p.emax / 2.6 - CV.rv.Emin) * a.ev;
+    const Ela = CV.la.Emin + (CV.la.Emax - CV.la.Emin) * a.ea;
+    const Era = CV.ra.Emin + (CV.ra.Emax - CV.ra.Emin) * a.ea;
+    /* The relaxed ventricle is not a linear spring: its wall stiffens
+       exponentially as it stretches, which is what makes the Frank–Starling
+       curve bend over instead of rising forever. Contraction blends in the
+       linear active stiffness on top. */
+    const dV = s.lv - CV.lv.V0;
+    const Plv = a.ev * p.emax * dV + (1 - a.ev) * CV.lv.A * (Math.exp(CV.lv.B * dV) - 1);
+    return {
+      lv: Plv, rv: Erv * (s.rv - CV.rv.V0),
+      la: Ela * (s.la - CV.la.V0), ra: Era * (s.ra - CV.ra.V0),
+      sa: (s.sa - CV.sa.V0) / CV.sa.C, sv: (s.sv - CV.sv.V0) / CV.sv.C,
+      pa: (s.pa - CV.pa.V0) / CV.pa.C, pv: (s.pv - CV.pv.V0) / CV.pv.C,
+      Elv: Elv
+    };
+  }
+  /* flows, positive forward. A valve is a diode: forward flow through its
+     resistance, nothing backwards — except a leaking mitral valve, which
+     lets blood back into the atrium through the regurgitant orifice. */
+  function cvFlow(P, p) {
+    const f = {};
+    f.tv = P.ra > P.rv ? (P.ra - P.rv) / CV.Rtv : 0;
+    f.pvl = P.rv > P.pa ? (P.rv - P.pa) / CV.Rpvl : 0;
+    f.pul = (P.pa - P.pv) / CV.Rpul;
+    f.pvn = (P.pv - P.la) / CV.Rpv;
+    f.mv = P.la > P.lv ? (P.la - P.lv) / CV.Rmv : 0;
+    f.mr = P.lv > P.la ? p.mr * (P.lv - P.la) / 0.6 : 0;          // back-leak, only when shut
+    f.av = P.lv > P.sa ? (P.lv - P.sa) / (CV.Rav * p.as) : 0;
+    f.sys = (P.sa - P.sv) / p.afterload;
+    f.ven = (P.sv - P.ra) / CV.Rsv;
+    return f;
+  }
+  function cvStep(s, p, h) {
+    const RR = 60 / p.hr;
+    const a = cvAct(s.t, RR), P = cvPress(s, p, a), f = cvFlow(P, p);
+    s.ra += h * (f.ven - f.tv);
+    s.rv += h * (f.tv - f.pvl);
+    s.pa += h * (f.pvl - f.pul);
+    s.pv += h * (f.pul - f.pvn);
+    s.la += h * (f.pvn - f.mv + f.mr);
+    s.lv += h * (f.mv - f.av - f.mr);
+    s.sa += h * (f.av - f.sys);
+    s.sv += h * (f.sys - f.ven);
+    s.t += h;
+    let wrapped = false;
+    if (s.t >= RR) { s.t -= RR; s.beat++; wrapped = true; }
+    return { a: a, P: P, f: f, wrapped: wrapped };
+  }
+  /* run whole beats and collect what a cardiologist would measure */
+  function cvBeat(s, p, h) {
+    const RR = 60 / p.hr, n = Math.round(RR / h);
+    const m = { edv: 0, esv: 1e9, sysA: 0, diaA: 1e9, sysPA: 0, diaPA: 1e9, laSum: 0, raSum: 0,
+                lvPk: 0, rvPk: 0, fwd: 0, regurg: 0, rvIn: 0, avGrad: 0, n: 0 };
+    let mvWas = null;
+    for (let i = 0; i < n; i++) {
+      const r = cvStep(s, p, h);
+      const P = r.P, f = r.f;
+      if (mvWas === true && f.mv <= 0) m.edv = s.lv;      // end-diastolic: the instant the mitral valve shuts
+      mvWas = f.mv > 0;
+      m.esv = Math.min(m.esv, s.lv);
+      m.sysA = Math.max(m.sysA, P.sa); m.diaA = Math.min(m.diaA, P.sa);
+      m.sysPA = Math.max(m.sysPA, P.pa); m.diaPA = Math.min(m.diaPA, P.pa);
+      m.lvPk = Math.max(m.lvPk, P.lv); m.rvPk = Math.max(m.rvPk, P.rv);
+      m.laSum += P.la; m.raSum += P.ra; m.n++;
+      m.fwd += f.av * h; m.regurg += f.mr * h; m.rvIn += f.pvl * h;
+      if (f.av > 0) m.avGrad = Math.max(m.avGrad, P.lv - P.sa);
+    }
+    if (!m.edv) m.edv = s.lv;
+    m.la = m.laSum / m.n; m.ra = m.raSum / m.n;
+    m.sv = m.fwd + m.regurg;              // total ejected by the ventricle
+    m.fsv = m.fwd;                        // what actually reaches the aorta
+    m.ef = m.sv / m.edv;
+    m.co = m.fwd * p.hr / 1000;
+    m.map = m.diaA + (m.sysA - m.diaA) / 3;
+    m.total = s.lv + s.la + s.rv + s.ra + s.sa + s.sv + s.pa + s.pv;
+    return m;
+  }
+  function cvSettle(p, beats) {
+    const s = cvNew(p), h = 0.00025;
+    let m = null;
+    for (let b = 0; b < beats; b++) { s.t = 0; m = cvBeat(s, p, h); }
+    return { s: s, m: m };
+  }
+
+  /* the ECG, from time since the QRS in seconds: a P wave one PR interval
+     before, QRS at zero, and a T wave that ends with ventricular relaxation */
+  const gss = (x, c, w) => Math.exp(-Math.pow((x - c) / w, 2));
+  function ecgAt(t, RR, Ts) {
+    const qt = 0.46 * Ts;
+    let v = 0;
+    [t, t - RR].forEach(u => {
+      v += 0.15 * gss(u, -CV.PR + 0.045, 0.028);
+      v += -0.10 * gss(u, -0.012, 0.007) + 1.00 * gss(u, 0.010, 0.009) - 0.24 * gss(u, 0.032, 0.009);
+      v += 0.30 * gss(u, qt - 0.07, 0.048);
+    });
+    return v;
+  }
+
+  const PH = {
+    as:   { n: 'Atrial systole', ncert: 'atrial systole', c: '#B98CFF', k: 'AS' },
+    ivc:  { n: 'Isovolumetric contraction', ncert: 'ventricular systole begins', c: '#FF6B9D', k: 'IVC' },
+    rej:  { n: 'Rapid ejection', ncert: 'ventricular systole', c: '#FF8F5A', k: 'RE' },
+    redj: { n: 'Reduced ejection', ncert: 'ventricular systole', c: '#FFC24B', k: 'rE' },
+    ivr:  { n: 'Isovolumetric relaxation', ncert: 'ventricular diastole begins', c: '#5AD1FF', k: 'IVR' },
+    rf:   { n: 'Rapid filling', ncert: 'joint diastole', c: '#4ADE80', k: 'RF' },
+    ds:   { n: 'Slow filling (diastasis)', ncert: 'joint diastole', c: '#7FA3C8', k: 'SF' }
+  };
+  const PH_ORDER = ['as', 'ivc', 'rej', 'redj', 'ivr', 'rf', 'ds'];
+
+  /* a heart sound is a short, damped low-frequency burst */
+  function heartThump(S, freq, amp) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ac = S._ac || (S._ac = new AC());
+      if (ac.state === 'suspended') ac.resume();
+      const o = ac.createOscillator(), gn = ac.createGain(), t0 = ac.currentTime;
+      o.type = 'sine'; o.frequency.setValueAtTime(freq, t0);
+      o.frequency.exponentialRampToValueAtTime(freq * 0.6, t0 + 0.09);
+      gn.gain.setValueAtTime(0.0001, t0);
+      gn.gain.exponentialRampToValueAtTime(0.5 * amp, t0 + 0.008);
+      gn.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+      o.connect(gn); gn.connect(ac.destination); o.start(t0); o.stop(t0 + 0.14);
+    } catch (e) { /* audio unavailable: the trace still shows the sound */ }
+  }
+
+  /* the Frank–Starling relation, measured: settle the loop at several
+     blood volumes and record stroke volume against end-diastolic volume */
+  function starling(p) {
+    const out = [];
+    for (let v = 4200; v <= 6400; v += 275) {
+      const q = Object.assign({}, p, { vol: v });
+      const s = cvNew(q);
+      let m = null;
+      for (let b = 0; b < 8; b++) { s.t = 0; m = cvBeat(s, q, 0.0005); }
+      out.push([m.la, m.sv, m.fsv, m.edv]);
+    }
+    return out;
+  }
+  let STARLING_REF = null;
+
+  /* blood-flow paths through the heart, in the heart figure's own units */
+  const FLOW_R = [[-0.46, -1.34], [-0.45, -0.86], [-0.42, -0.46], [-0.35, -0.14], [-0.30, 0.18],
+                  [-0.22, 0.40], [-0.10, 0.12], [-0.10, -0.36], [-0.11, -0.78], [-0.26, -1.02], [-0.48, -1.14]];
+  const FLOW_R_SEG = ['ven', 'ven', 'tv', 'tv', 'tv', 'pvl', 'pvl', 'pvl', 'pvl', 'pvl'];
+  const FLOW_L = [[0.98, -0.62], [0.62, -0.50], [0.38, -0.44], [0.32, -0.14], [0.30, 0.18],
+                  [0.22, 0.42], [0.10, 0.14], [0.08, -0.34], [0.08, -0.82], [0.04, -1.20], [-0.10, -1.44]];
+  const FLOW_L_SEG = ['pvn', 'pvn', 'mv', 'mv', 'mv', 'av', 'av', 'av', 'av', 'av'];
+
+  function cardiacReset(S) {
+    const p = S.p;
+    const r = cvSettle(p, 12);
+    S.s = r.s; S.m = r.m; S.s.t = 0;
+    S.T = 0; S.hist = []; S.events = []; S.loop = []; S.loopPrev = []; S.phases = []; S.phasesPrev = [];
+    S.valve = { mv: false, av: false, tv: false, pvl: false };
+    S.acc = null; S.qmvPk = 300; S.lastPh = null; S.lvPrev = 0;
+    S.particles = [];
+    for (let i = 0; i < 26; i++) S.particles.push({ side: 0, u: i / 26 * 10 });
+    for (let i = 0; i < 26; i++) S.particles.push({ side: 1, u: i / 26 * 10 });
+    S._fsKey = null;
+    S.phase = 'ds'; S.volNow = r.m.total;
   }
 
   L.register({
     id: 'cardiac', subject: 'biology',
-    name: 'The Cardiac Cycle — Pressure, Volume and the ECG',
+    name: 'The Cardiac Cycle — Pressure, Volume, Valves and the ECG',
     chapter: 'Body Fluids & Circulation',
     exams: ['NEET UG'],
     weight: 'Very high yield',
     is3D: false,
-    stageHint: 'Valves open and close purely from the pressure difference across them — nothing is scripted',
-    lede: 'Every valve click, every heart sound and every deflection of the ECG comes down to one thing: ' +
-      '<b>which side of a valve has the higher pressure right now.</b> This lab runs a time-varying elastance ' +
-      'model of the left heart with a Windkessel aorta, so the pressure curves, the volume curve, the ' +
-      '<b>pressure–volume loop</b> and the derived stroke volume and ejection fraction all emerge from the ' +
-      'physics rather than being drawn in by hand.',
+    stageHint: 'Valves move on pressure alone · Labels switch is below',
+    lede: 'This is a <b>whole circulation</b>, not a heart on its own: right atrium, right ventricle, lungs, ' +
+      'left atrium, left ventricle, the arteries and veins of the body, joined in one closed loop. Each ' +
+      'chamber squeezes on the timing the ECG sets. Each of the <b>four valves</b> opens only when the pressure ' +
+      'behind it is higher than the pressure in front, and nothing about when they open is scripted. The ' +
+      'pressures, the volume curve, the heart sounds and the pressure–volume loop all come out of the ' +
+      'simulation, and they line up the way the textbook Wiggers diagram says they must. Blood is never ' +
+      'created or lost, and the lab checks that it all adds up.',
 
-    params: { hr: 72, emax: 1.85, preload: 10, afterload: 1.0, showECG: true },
+    params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0, flow: true, sound: false },
 
     presets: [
-      { name: 'Resting adult (72 bpm)', params: { hr: 72, emax: 2.0, preload: 10, afterload: 1.0 } },
-      { name: 'Exercise', params: { hr: 140, emax: 3.4, preload: 14, afterload: 0.75 } },
-      { name: 'Raised afterload', params: { hr: 72, emax: 2.0, preload: 10, afterload: 1.8 } },
-      { name: 'Weak contractility', params: { hr: 72, emax: 1.1, preload: 12, afterload: 1.1 } },
-      { name: 'Bradycardia (45 bpm)', params: { hr: 45, emax: 2.0, preload: 10, afterload: 1.0 } }
+      { name: 'Resting adult', params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 } },
+      { name: 'Exercise', params: { hr: 140, emax: 4.2, afterload: 0.55, vol: 5900, as: 1, mr: 0 } },
+      { name: 'Hypertension', params: { hr: 72, emax: 2.6, afterload: 1.7, vol: 5000, as: 1, mr: 0 } },
+      { name: 'Heart failure', params: { hr: 90, emax: 1.2, afterload: 1.2, vol: 5200, as: 1, mr: 0 } },
+      { name: 'Blood loss (500 mL)', params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 4500, as: 1, mr: 0 } },
+      { name: 'Aortic stenosis', params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 25, mr: 0 } },
+      { name: 'Mitral regurgitation', params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 1.2 } },
+      { name: 'Slow heart (45 bpm)', params: { hr: 45, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 } }
     ],
 
     controls: [
-      { group: 'Heart', items: [
+      { group: 'The heart', items: [
         { key: 'hr', label: 'Heart rate', min: 40, max: 180, step: 1, unit: 'bpm', fmt: v => v.toFixed(0) },
-        { key: 'emax', label: 'Contractility <i>E</i><sub>max</sub>', min: 0.8, max: 4, step: 0.05,
+        { key: 'emax', label: 'Contractility <i>E</i><sub>max</sub>', min: 0.8, max: 5, step: 0.05,
           unit: 'mmHg/mL', fmt: v => v.toFixed(2) }
       ] },
-      { group: 'Loading conditions', items: [
-        { key: 'preload', label: 'Preload (filling pressure)', min: 2, max: 20, step: 0.5, unit: 'mmHg',
+      { group: 'The circulation', items: [
+        { key: 'afterload', label: 'Resistance of the body\'s arteries', min: 0.5, max: 2.5, step: 0.05,
+          unit: 'mmHg·s/mL', fmt: v => v.toFixed(2) },
+        { key: 'vol', label: 'Blood volume', min: 4000, max: 6000, step: 10, unit: 'mL', fmt: v => v.toFixed(0) }
+      ] },
+      { group: 'Valve disease', items: [
+        { key: 'as', label: 'Aortic valve narrowing', min: 1, max: 40, step: 0.5, unit: '× resistance',
           fmt: v => v.toFixed(1) },
-        { key: 'afterload', label: 'Afterload (systemic resistance)', min: 0.4, max: 2.2, step: 0.05,
-          unit: 'mmHg·s/mL', fmt: v => v.toFixed(2) }
+        { key: 'mr', label: 'Mitral valve leak', min: 0, max: 2, step: 0.05, unit: '', fmt: v => v.toFixed(2) }
       ] },
       { group: 'Display', items: [
-        { key: 'showECG', type: 'toggle', label: 'Show ECG trace' }
+        { key: 'flow', type: 'toggle', label: 'Show blood moving through the heart' },
+        { key: 'sound', type: 'toggle', label: 'Play the heart sounds (lub-dub)' }
       ] }
     ],
 
     setup(S) {
-      S.Vlv = 120; S.Vla = 45; S.Pao = 80;
-      S.tc = 0; S.hist = []; S.loop = []; S.loopPrev = [];
-      S.edv = 120; S.esv = 50; S.sysP = 120; S.diaP = 80;
-      S._maxV = 0; S._minV = 999; S._maxP = 0; S._minP = 999;
+      cardiacReset(S);
+      S.fs = starling(S.p);
+      S._fsKey = [S.p.hr, S.p.emax, S.p.afterload, S.p.as, S.p.mr].join('|');
+      if (!STARLING_REF) STARLING_REF = starling({ hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 });
+      /* run one full sweep silently, so the Wiggers diagram and the PV loop
+         are already drawn when the lab opens instead of starting blank */
+      S._quiet = true;
+      const sweep = Math.max(2 * 60 / S.p.hr, 1.7) + 0.05;
+      for (let k = 0; k < Math.ceil(sweep * 60); k++) this.step(S, 1 / 60);
+      S._quiet = false;
     },
 
     step(S, dt) {
-      const p = S.p;
-      const T = 60 / p.hr;
-      const Rmv = 0.006, Rav = 0.005, Rpv = 0.015, Pven = 4;
-      const Cao = 1.45, V0 = 10, V0la = 12;
-      const EminLV = 0.05, EmaxLA = 0.28, EminLA = 0.09;
-
-      const h = 0.0004;
-      let steps = Math.ceil(dt / h);
-      steps = clamp(steps, 1, 200);
-      const hs = dt / steps;
-
-      for (let s = 0; s < steps; s++) {
-        const tn = S.tc / T;
-        const eLV = elastance(tn, 0.303, 0.508, 1.32, 21.9) / E_PEAK;
-        // atrial systole occurs late in the cycle, just before the next ventricular beat
-        const tnA = (tn + 0.14) % 1;
-        const eLA = elastance(tnA, 0.10, 0.20, 1.4, 18) / LA_PEAK;
-
-        const Elv = EminLV + (p.emax - EminLV) * eLV;
-        const Ela = EminLA + (EmaxLA - EminLA) * eLA;
-
-        const Plv = Elv * (S.Vlv - V0);
-        const Pla = Ela * (S.Vla - V0la);
-
-        const Qmv = Pla > Plv ? (Pla - Plv) / Rmv : 0;
-        const Qav = Plv > S.Pao ? (Plv - S.Pao) / Rav : 0;
-        const Qpv = (p.preload - Pla) / Rpv;
-        const Qsys = (S.Pao - Pven) / p.afterload;
-
-        S.Vlv += hs * (Qmv - Qav);
-        S.Vla += hs * (Qpv - Qmv);
-        S.Pao += hs * (Qav - Qsys) / Cao;
-
-        S.Vlv = Math.max(S.Vlv, 5); S.Vla = Math.max(S.Vla, 5);
-        S.Pao = Math.max(S.Pao, 5);
-
-        S.Plv = Plv; S.Pla = Pla;
-        S.mvOpen = Qmv > 0.1; S.avOpen = Qav > 0.1; S.eLV = eLV;
-
-        S._maxV = Math.max(S._maxV, S.Vlv); S._minV = Math.min(S._minV, S.Vlv);
-        S._maxP = Math.max(S._maxP, S.Pao); S._minP = Math.min(S._minP, S.Pao);
-
-        S.tc += hs;
-        if (S.tc >= T) {
-          S.tc -= T;
-          S.edv = S._maxV; S.esv = S._minV;
-          S.sysP = S._maxP; S.diaP = S._minP;
-          S._maxV = 0; S._minV = 999; S._maxP = 0; S._minP = 999;
-          S.loopPrev = S.loop; S.loop = [];
+      const p = S.p, RR = 60 / p.hr, s = S.s;
+      /* the blood-volume slider adds or removes real blood, at the veins,
+         as a transfusion or a bleed would; the heart then adapts beat by beat */
+      const tot = s.lv + s.la + s.rv + s.ra + s.sa + s.sv + s.pa + s.pv;
+      if (Math.abs(p.vol - tot) > 0.01) s.sv += p.vol - tot;
+      dt = Math.min(dt, 0.12);
+      const n = Math.max(1, Math.ceil(dt / 0.00025)), hs = dt / n;
+      let last = null;
+      const ev = (k, P) => {
+        const e = { T: S.T, k: k, V: s.lv, P: P.lv };
+        S.events.push(e);
+        if (S.acc) {
+          if (k === 'MC') S.acc.tS1 = s.t;
+          if (k === 'AC') S.acc.tS2 = s.t;
+          if (k === 'MC' || k === 'AO' || k === 'AC' || k === 'MO') S.acc.loopEv.push(e);
         }
+        if (p.sound && !S._quiet && (k === 'MC' || k === 'AC')) heartThump(S, k === 'MC' ? 52 : 74, k === 'MC' ? 1 : 0.75);
+      };
+      for (let i = 0; i < n; i++) {
+        const r = cvStep(s, p, hs), P = r.P, f = r.f, a = r.a;
+        S.T += hs;
+        if (!S.acc) S.acc = { edv: 0, esv: 1e9, sysA: 0, diaA: 1e9, sysPA: 0, diaPA: 1e9, laSum: 0, raSum: 0,
+                              lvPk: 0, rvPk: 0, fwd: 0, regurg: 0, avGrad: 0, n: 0, loopEv: [], tS1: null, tS2: null,
+                              qmvPk: 0 };
+        const A = S.acc;
+        /* valve events, debounced so a valve sitting at equal pressures does
+           not chatter: a change counts only after the old state lasted 20 ms */
+        const vo = { mv: f.mv > 0, av: f.av > 0, tv: f.tv > 0, pvl: f.pvl > 0 };
+        S.vt = S.vt || { mv: -1, av: -1, tv: -1, pvl: -1 };
+        [['mv', 'MO', 'MC'], ['av', 'AO', 'AC'], ['tv', 'TO', 'TC'], ['pvl', 'PO', 'PC']].forEach(q => {
+          if (vo[q[0]] !== S.valve[q[0]]) {
+            if (S.T - S.vt[q[0]] > 0.02) ev(vo[q[0]] ? q[1] : q[2], P);
+            S.vt[q[0]] = S.T;
+          }
+        });
+        if (S.valve.mv && !vo.mv) A.edv = s.lv;
+        S.valve = vo;
+        // the phase, from the valves and the pressures alone
+        let ph;
+        if (vo.av) S.ejected = true;
+        if (vo.av) ph = P.lv >= S.lvPrev ? 'rej' : 'redj';
+        else if (vo.mv) ph = a.ea > 0.12 ? 'as' : (f.mv > 0.35 * S.qmvPk ? 'rf' : 'ds');
+        else ph = S.ejected ? 'ivr' : 'ivc';          // shut, before or after this beat's ejection
+        S.lvPrev = P.lv;
+        if (ph !== S.lastPh) { S.phases.push([s.t / RR, ph]); S.lastPh = ph; }
+        S.phase = ph;
+        // what a cardiologist would measure over this beat
+        A.esv = Math.min(A.esv, s.lv);
+        A.sysA = Math.max(A.sysA, P.sa); A.diaA = Math.min(A.diaA, P.sa);
+        A.sysPA = Math.max(A.sysPA, P.pa); A.diaPA = Math.min(A.diaPA, P.pa);
+        A.lvPk = Math.max(A.lvPk, P.lv); A.rvPk = Math.max(A.rvPk, P.rv);
+        A.laSum += P.la; A.raSum += P.ra; A.n++;
+        A.fwd += f.av * hs; A.regurg += f.mr * hs;
+        A.qmvPk = Math.max(A.qmvPk, f.mv);
+        if (f.av > 0) A.avGrad = Math.max(A.avGrad, P.lv - P.sa);
+        if (i % 4 === 0) S.loop.push([s.lv, P.lv, ph]);
+        S._since = (S._since || 0) + hs;
+        if (S._since >= 0.0025) {
+          S._since = 0;
+          const mur = (p.as > 1.5 ? f.av / 450 * Math.min(1, (p.as - 1) / 12) : 0) + (p.mr > 0.02 ? f.mr / 180 : 0);
+          S.hist.push({ T: S.T, plv: P.lv, pao: P.sa, pla: P.la, prv: P.rv, ppa: P.pa, vlv: s.lv,
+                        ecg: ecgAt(s.t, RR, a.Ts), ph: ph, mur: Math.min(1.2, mur) });
+        }
+        if (r.wrapped) {
+          if (A.edv > 0 && A.n > 50) {
+            const m = { edv: A.edv, esv: A.esv, sysA: A.sysA, diaA: A.diaA, sysPA: A.sysPA, diaPA: A.diaPA,
+                        la: A.laSum / A.n, ra: A.raSum / A.n, lvPk: A.lvPk, rvPk: A.rvPk,
+                        fwd: A.fwd, regurg: A.regurg, avGrad: A.avGrad };
+            m.sv = m.fwd + m.regurg; m.fsv = m.fwd; m.ef = m.sv / m.edv; m.co = m.fwd * p.hr / 1000;
+            m.map = m.diaA + (m.sysA - m.diaA) / 3;
+            m.total = s.lv + s.la + s.rv + s.ra + s.sa + s.sv + s.pa + s.pv;
+            m.tSys = A.tS1 != null && A.tS2 != null ? A.tS2 - A.tS1 + (A.tS2 < A.tS1 ? RR : 0) : null;
+            S.m = m;
+          }
+          S.qmvPk = A.qmvPk || S.qmvPk;
+          S.loopPrev = S.loop; S.loop = [];
+          S.loopEvPrev = A.loopEv;
+          S.phasesPrev = S.phases; S.phases = [[0, ph]];
+          S.acc = null; S.ejected = false;
+        }
+        last = { r: r, a: a, P: P, f: f };
       }
-
-      const tn = S.tc / T;
-      S.tn = tn;
-      S.ecg = ecgAt(tn);
-      S.hist.push([S.hist.length ? S.hist[S.hist.length - 1][0] + dt : 0,
-        S.Plv, S.Pao, S.Pla, S.Vlv, S.ecg]);
-      const span = 2.1 * T;
-      while (S.hist.length > 2 && S.hist[0][0] < S.hist[S.hist.length - 1][0] - span) S.hist.shift();
-      S.loop.push([S.Vlv, S.Plv]);
-      if (S.loop.length > 1400) S.loop.shift();
-
-      S.phase = S.avOpen ? 'Ventricular ejection'
-        : S.mvOpen ? (tn > 0.82 || tn < 0.02 ? 'Atrial systole' : 'Ventricular filling')
-        : (S.eLV > 0.03 && tn < 0.35) ? 'Isovolumetric contraction' : 'Isovolumetric relaxation';
+      if (!last) return;
+      S.P = last.P; S.f = last.f; S.ev = last.a.ev; S.ea = last.a.ea; S.Ts = last.a.Ts;
+      const keep = Math.max(2 * RR, 1.7) + 0.3;
+      while (S.hist.length > 2 && S.hist[0].T < S.T - keep) S.hist.shift();
+      while (S.events.length && S.events[0].T < S.T - keep) S.events.shift();
+      // blood moving through the heart: each dot is pushed by the flow in its own segment
+      const F = last.f;
+      S.particles.forEach(q => {
+        const seg = (q.side ? FLOW_L_SEG : FLOW_R_SEG)[Math.min(9, Math.floor(q.u))];
+        const Q = seg === 'ven' ? F.ven : seg === 'pvn' ? F.pvn : F[seg] || 0;
+        q.u += dt * Q * 0.0042;
+        /* flow can reverse: a badly leaking mitral valve pushes blood back up
+           the pulmonary veins in systole. The dots move back with it, but not
+           out of the drawing. */
+        if (q.u >= 10) q.u -= 10;
+        if (q.u < 0) q.u = 0;
+      });
+      // the Frank–Starling curve follows the controls, recomputed once they settle
+      const key = [p.hr, p.emax, p.afterload, p.as, p.mr].join('|');
+      if (key !== S._fsKey) {
+        if (S._fsWant !== key) { S._fsWant = key; S._fsWantT = S.T; }
+        else if (S.T - S._fsWantT > 0.35) { S.fs = starling(p); S._fsKey = key; }
+      }
     },
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h;
-      const bio = th.bio, artC = '#FFB454', venC = '#5A8FD8';
-      const split = Math.min(W * 0.40, 300);
+      const RR = 60 / p.hr, P = S.P, s = S.s;
+      if (!P) return;
+      const labels = g.labels !== false;
+      const narrow = W < 700;
+      const ph = PH[S.phase] || PH.ds;
+      const cLV = '#FF6B9D', cAo = '#FFB454', cLA = '#6FA8F0', cRV = '#B98CFF', cPA = '#7CE0A8';
+      const mono = (wt, sz) => wt + ' ' + sz + 'px "IBM Plex Mono",monospace';
 
-      /* ================= the heart, as an anatomical plate ================= */
-      const sc = Math.min(W * 0.120, H * 0.250);
-      const hx = W * 0.345, hy = H * 0.50 + sc * 0.16;
-      const tvOpen = S.mvOpen, pvOpen = S.avOpen;
-      BIOART.heart(ctx, hx, hy, sc, {
-        chambers: 4,
-        sat: { ra: 60, rv: 60, la: 98, lv: 98 },
-        contraction: clamp(S.eLV, 0, 1),
-        mvOpen: S.mvOpen, tvOpen: tvOpen, avOpen: S.avOpen, pvOpen: pvOpen,
-        labels: true, leaders: true
-      });
+      /* ---------- zones: they are laid out, never overlapped ---------- */
+      const Z = narrow
+        ? { hx0: 0, hx1: W, hy0: 70, hy1: H * 0.56, wx0: 12, wx1: W - 12, wy0: H * 0.60, wy1: H - 33 }
+        : { hx0: 0, hx1: W * 0.46, hy0: 74, hy1: H - 30, wx0: W * 0.485, wx1: W - 14, wy0: 28, wy1: H - 32 };
 
-      // live LV volume, read off the ventricle itself
-      ctx.font = '600 11px "IBM Plex Mono",monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(5,8,15,.85)';
-      const volTxt = S.Vlv.toFixed(0) + ' mL';
-      ctx.strokeText(volTxt, hx + sc * 0.32, hy + sc * 0.46);
-      ctx.fillStyle = '#F2E3C0'; ctx.fillText(volTxt, hx + sc * 0.32, hy + sc * 0.46);
-
-      g.scaleBar(hx - sc * 0.5, hy + sc * 1.34, sc * 1.0, '≈ 6 cm', th['text-3']);
-
-      /* ---- the four valves, as a state block clear of the figure ---- */
-      const vs = [['mitral', S.mvOpen], ['aortic', S.avOpen],
-                  ['tricuspid', tvOpen], ['pulmonary', pvOpen]];
-      ctx.font = '500 9.5px "IBM Plex Mono",monospace';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      vs.forEach((v, i) => {
-        const yy = 62 + i * 15;
-        ctx.fillStyle = v[1] ? th.ok : g.alpha(th['text-3'], .95);
-        ctx.beginPath(); ctx.arc(16, yy, 3.4, 0, TAU); ctx.fill();
-        ctx.fillStyle = v[1] ? th.ok : th['text-3'];
-        ctx.fillText(v[0] + (v[1] ? '  OPEN' : '  shut'), 26, yy);
-      });
-      ctx.fillStyle = g.alpha('#3D6FB4', 1);
-      ctx.beginPath(); ctx.arc(16, 130, 3.4, 0, TAU); ctx.fill();
-      ctx.fillStyle = th['text-3'];
-      ctx.fillText('deoxygenated ~60%  ·  right heart', 26, 130);
-      ctx.fillStyle = g.alpha('#E8455C', 1);
-      ctx.beginPath(); ctx.arc(16, 145, 3.4, 0, TAU); ctx.fill();
-      ctx.fillStyle = th['text-3'];
-      ctx.fillText('oxygenated ~98%  ·  left heart', 26, 145);
-
-      /* ---- magnified: the muscle that is doing the work ---- */
-      const colL = W * 0.685, colR = W - 22;
-      const mx0 = colL + 12, mx1 = colR - 12, myy = H * 0.32;
-      const mh = Math.min(H * 0.095, 44);
-      ctx.save();
-      ctx.strokeStyle = g.alpha(th['text-3'], .40); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(hx + sc * 0.74, hy + sc * 0.24); ctx.lineTo(mx0 - 8, myy + mh * 0.7);
-      ctx.stroke();
-      ctx.restore();
-      ctx.font = '600 10.5px "IBM Plex Mono",monospace';
-      ctx.fillStyle = th['text-2']; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText('CARDIAC MUSCLE', (colL + colR) / 2, myy - mh * 1.85);
-      ctx.font = '500 9px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText('branched · striated · involuntary', (colL + colR) / 2, myy - mh * 1.85 + 13);
-      const mc = BIOART.myocyte(ctx, mx0, mx1, myy, mh, {
-        contraction: clamp(S.eLV, 0, 1), cells: 3
-      });
-      const tag = (x0, y0, x1, y1, text, col, align) => {
-        ctx.strokeStyle = g.alpha(col, .6); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        ctx.fillStyle = g.alpha(col, .9);
-        ctx.beginPath(); ctx.arc(x0, y0, 1.9, 0, TAU); ctx.fill();
-        ctx.font = '600 9px "IBM Plex Mono",monospace';
-        ctx.textAlign = align; ctx.textBaseline = 'middle';
-        ctx.lineWidth = 3.2; ctx.strokeStyle = 'rgba(5,8,15,.88)';
-        const tx = align === 'right' ? x1 - 4 : align === 'left' ? x1 + 4 : x1;
-        ctx.strokeText(text, tx, y1);
-        ctx.fillStyle = col; ctx.fillText(text, tx, y1);
-      };
-      if (mc.discs.length)
-        tag(mc.discs[0], myy - mh * 0.5, colL + 4, myy - mh * 0.95, 'intercalated disc', '#F2E3C0', 'left');
-      tag(mx1 - (mx1 - mx0) * 0.10, myy - mh * 0.34, colR - 2, myy - mh * 1.30,
-        'striations', '#C8606C', 'right');
-      tag((mx0 + mx1) / 2, myy + mh * 0.24, (colL + colR) / 2, myy + mh * 1.15,
-        'one central nucleus per cell', '#9A8FD0', 'center');
-      ctx.font = '500 8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.fillText('the discs fuse the cells into one syncytium', (colL + colR) / 2, myy + mh * 1.65);
-      g.scaleBar(mx0, myy + mh * 2.25, (mx1 - mx0) * 0.34, '≈ 50 µm', th['text-3']);
-
-      /* ---- the phase, stated plainly ---- */
-      ctx.font = '700 17px "IBM Plex Sans Condensed",sans-serif';
-      ctx.fillStyle = th.text; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText(S.phase || '', 14, 10);
-      ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-      ctx.fillText(p.hr + ' bpm  ·  cycle ' + (S.tn * 100).toFixed(0) + '%  ·  ' +
-        'valves open and shut on pressure alone', 14, 32);
-
-      /* ---- the ECG, lined up with the phase the heart is in ---- */
-      if (p.showECG && S.hist.length > 2) {
-        const ex0 = 20, ex1 = W * 0.62, ey = H * 0.925, eh = H * 0.055;
-        const t0 = S.hist[0][0], t1 = S.hist[S.hist.length - 1][0];
-        const span = Math.max(t1 - t0, 1e-3);
-        ctx.strokeStyle = g.alpha(th['line-soft'], 1); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(ex0, ey); ctx.lineTo(ex1, ey); ctx.stroke();
-        ctx.strokeStyle = th.ok; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
-        ctx.beginPath();
-        S.hist.forEach((r, i) => {
-          const x = ex0 + (r[0] - t0) / span * (ex1 - ex0);
-          const y = ey - clamp(r[5], -0.4, 1.2) * eh;
-          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      /* ---------- the phase, named, and where we are in the beat ---------- */
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = '700 18px "IBM Plex Sans Condensed",sans-serif';
+      ctx.fillStyle = ph.c; ctx.fillText(ph.n, 14, 10);
+      ctx.font = mono(500, 9.5); ctx.fillStyle = th['text-3'];
+      ctx.fillText('NCERT: ' + ph.ncert + '  ·  ' + p.hr + ' bpm  ·  ' +
+        (s.t * 1000).toFixed(0) + ' ms after the QRS', 14, 32);
+      {
+        const rx0 = 14, rx1 = (narrow ? W : Z.hx1) - 14, ry = 50, rh = 13;
+        const segs = S.phasesPrev && S.phasesPrev.length ? S.phasesPrev : S.phases;
+        ctx.fillStyle = g.alpha(th['ink-700'], 1); ctx.fillRect(rx0, ry, rx1 - rx0, rh);
+        segs.forEach((q, i) => {
+          const a = q[0], b = i + 1 < segs.length ? segs[i + 1][0] : 1;
+          if (b - a < 0.004) return;
+          const x0 = rx0 + a * (rx1 - rx0), x1 = rx0 + b * (rx1 - rx0);
+          ctx.fillStyle = g.alpha(PH[q[1]].c, q[1] === S.phase ? 0.95 : 0.55);
+          ctx.fillRect(x0, ry, x1 - x0, rh);
+          if (labels && x1 - x0 > 26) {
+            ctx.font = mono(700, 8.5); ctx.fillStyle = '#0B1020'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(PH[q[1]].k, (x0 + x1) / 2, ry + rh / 2 + 0.5);
+          }
         });
-        ctx.stroke();
-        ctx.font = '600 9.5px "IBM Plex Mono",monospace';
-        ctx.fillStyle = th.ok; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-        ctx.fillText('ECG', ex0, ey - eh * 1.15);
-        ctx.font = '500 8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
-        ctx.fillText('P = atrial depolarisation · QRS = ventricular · T = repolarisation',
-          ex0 + 34, ey - eh * 1.15);
-        // the electrical event that caused the phase now on screen
-        ctx.strokeStyle = g.alpha(th.text, .45); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(ex1, ey - eh * 1.1); ctx.lineTo(ex1, ey + eh * 0.5); ctx.stroke();
+        const cx = rx0 + (s.t / RR) * (rx1 - rx0);
+        ctx.strokeStyle = th.text; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx, ry - 3); ctx.lineTo(cx, ry + rh + 3); ctx.stroke();
+        ctx.font = mono(500, 8.5); ctx.fillStyle = th['text-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText('QRS', rx0, ry + rh + 3);
+        ctx.textAlign = 'right'; ctx.fillText('next QRS · one beat = ' + (RR * 1000).toFixed(0) + ' ms', rx1, ry + rh + 3);
       }
 
-      /* ---- the pressure gradient that is actually driving it ---- */
-      const gx = W * 0.685 + 12, gy = H * 0.64;
-      ctx.font = '600 10px "IBM Plex Mono",monospace';
-      ctx.fillStyle = th['text-2']; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText('PRESSURES NOW', gx, gy - 18);
-      const rows = [['left ventricle', S.Plv, th.bio], ['aorta', S.Pao, '#FFB454'],
-                    ['left atrium', S.Pla, '#5A8FD8']];
-      const pmax = 140;
-      rows.forEach((r, i) => {
-        const yy = gy + i * 22;
-        ctx.font = '500 9.5px "IBM Plex Mono",monospace';
-        ctx.fillStyle = th['text-3']; ctx.textBaseline = 'middle';
-        ctx.fillText(r[0], gx, yy);
-        const bx = gx + 90, bw2 = (W - 60) - bx;
-        ctx.fillStyle = g.alpha(th['ink-700'], 1);
-        ctx.fillRect(bx, yy - 5, bw2, 10);
-        ctx.fillStyle = g.alpha(r[2], .9);
-        ctx.fillRect(bx, yy - 5, bw2 * clamp(r[1] / pmax, 0, 1), 10);
-        ctx.fillStyle = r[2]; ctx.textAlign = 'right';
-        ctx.fillText(r[1].toFixed(0) + ' mmHg', W - 24, yy);
-        ctx.textAlign = 'left';
-      });
+      /* ---------- the heart: all four valves from the model ---------- */
+      {
+        const zw = Z.hx1 - Z.hx0, zh = Z.hy1 - Z.hy0;
+        const sc = narrow ? Math.min(zw * 0.22, zh * 0.36) : Math.min(zw * 0.225, zh * 0.30);
+        const hx = Z.hx0 + zw * (narrow ? 0.5 : 0.555), hy = Z.hy0 + zh * 0.52;
+        BIOART.heart(ctx, hx, hy, sc, {
+          chambers: 4, sat: { ra: 65, rv: 65, la: 98, lv: 98 },
+          contraction: clamp(S.ev, 0, 1),
+          mvOpen: S.valve.mv, tvOpen: S.valve.tv, avOpen: S.valve.av, pvOpen: S.valve.pvl,
+          labels: labels, leaders: labels && !narrow
+        });
+        // the blood itself, pushed along by the computed flows
+        if (p.flow) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          S.particles.forEach(q => {
+            const path = q.side ? FLOW_L : FLOW_R;
+            const k = Math.min(9, Math.floor(q.u)), f = q.u - k;
+            const x = hx + sc * (path[k][0] + (path[k + 1][0] - path[k][0]) * f);
+            const y = hy + sc * (path[k][1] + (path[k + 1][1] - path[k][1]) * f);
+            const col = q.side ? '#FF5E6E' : '#5E8CFF';
+            const gr = ctx.createRadialGradient(x, y, 0, x, y, 5);
+            gr.addColorStop(0, g.alpha(col, 0.95)); gr.addColorStop(1, g.alpha(col, 0));
+            ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, 5, 0, TAU); ctx.fill();
+          });
+          ctx.restore();
+        }
+        // live chamber numbers, only where there is room for them
+        if (labels && sc > 62) {
+          const tag = (x, y, txt, col, al) => {
+            ctx.font = mono(600, 9.5); ctx.textAlign = al; ctx.textBaseline = 'middle';
+            ctx.lineWidth = 3.2; ctx.strokeStyle = 'rgba(5,8,15,.9)'; ctx.strokeText(txt, x, y);
+            ctx.fillStyle = col; ctx.fillText(txt, x, y);
+          };
+          tag(hx + sc * 0.32, hy + sc * 0.40, P.lv.toFixed(0) + ' mmHg', cLV, 'center');
+          tag(hx + sc * 0.32, hy + sc * 0.53, s.lv.toFixed(0) + ' mL', '#F2E3C0', 'center');
+          tag(hx - sc * 0.30, hy + sc * 0.46, P.rv.toFixed(0) + ' mmHg', cRV, 'center');
+        }
+        // the four valves, in words, in one line under the heart
+        const vs = [['tricuspid', S.valve.tv], ['pulmonary', S.valve.pvl], ['mitral', S.valve.mv], ['aortic', S.valve.av]];
+        const vy = Math.min(Z.hy1 - 6, hy + sc * (narrow ? 1.18 : 1.30));
+        ctx.font = mono(600, 9); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        const tw = vs.map(v => ctx.measureText(v[0] + (v[1] ? ' open' : ' shut')).width + 22);
+        let vx = hx - tw.reduce((a, b) => a + b, 0) / 2;
+        vs.forEach((v, i) => {
+          ctx.fillStyle = v[1] ? th.ok : g.alpha(th['text-3'], .9);
+          ctx.beginPath(); ctx.arc(vx + 4, vy, 3.4, 0, TAU); ctx.fill();
+          ctx.fillStyle = v[1] ? th.ok : th['text-3'];
+          ctx.fillText(v[0] + (v[1] ? ' open' : ' shut'), vx + 11, vy);
+          vx += tw[i];
+        });
+      }
+
+      /* ---------- the Wiggers diagram, drawn live as a sweep ---------- */
+      {
+        const x0 = Z.wx0, x1 = Z.wx1, span = Math.max(2 * RR, 1.7);
+        /* on a phone the heart-sound strip is dropped so the other three stay
+           readable; the sounds can still be heard, and MC and AC mark them */
+        const strips = narrow
+          ? [['PRESSURE · mmHg', 0.50], ['LV VOLUME · mL', 0.26], ['ECG', 0.24]]
+          : [['PRESSURE · mmHg', 0.44], ['LEFT VENTRICLE VOLUME · mL', 0.20], ['ECG', 0.17], ['HEART SOUNDS', 0.19]];
+        const gap = 10, tot = Z.wy1 - Z.wy0 - gap * (strips.length - 1);
+        let yy = Z.wy0;
+        const box = strips.map(q => { const b = { t: q[0], y0: yy, y1: yy + tot * q[1] }; yy = b.y1 + gap; return b; });
+        const xOf = T => x0 + ((T % span + span) % span) / span * (x1 - x0);
+        const Tn = S.T, vis = S.hist.filter(q => q.T > Tn - span * 0.93);
+        // phase bands behind every strip, so the diagram reads column by column
+        for (let i = 1; i < vis.length; i++) {
+          const a = xOf(vis[i - 1].T), b = xOf(vis[i].T);
+          if (b < a) continue;
+          ctx.fillStyle = g.alpha(PH[vis[i].ph].c, 0.075);
+          ctx.fillRect(a, Z.wy0, b - a + 0.6, Z.wy1 - Z.wy0);
+        }
+        box.forEach(b => {
+          ctx.strokeStyle = g.alpha(th.line, 0.9); ctx.lineWidth = 1;
+          ctx.strokeRect(x0 + 0.5, b.y0 + 0.5, x1 - x0 - 1, b.y1 - b.y0 - 1);
+          ctx.font = mono(500, 8.5); ctx.fillStyle = th['text-3']; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.fillText(b.t, x0 + 6, b.y0 + 4);
+        });
+        const trace = (bx, val, lo, hi, col, w, alpha) => {
+          ctx.save();
+          ctx.beginPath(); ctx.rect(x0, bx.y0, x1 - x0, bx.y1 - bx.y0); ctx.clip();
+          ctx.strokeStyle = g.alpha(col, alpha == null ? 1 : alpha); ctx.lineWidth = w; ctx.lineJoin = 'round';
+          ctx.beginPath();
+          let px = -1;
+          vis.forEach(q => {
+            const x = xOf(q.T), y = bx.y1 - 6 - (val(q) - lo) / (hi - lo) * (bx.y1 - bx.y0 - 20);
+            if (x < px || px < 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            px = x;
+          });
+          ctx.stroke(); ctx.restore();
+        };
+        const m = S.m;
+        const pHi = Math.max(140, (m ? m.lvPk : 130) * 1.12);
+        trace(box[0], q => q.ppa, 0, pHi, cPA, 1.2, 0.55);
+        trace(box[0], q => q.prv, 0, pHi, cRV, 1.2, 0.55);
+        trace(box[0], q => q.pla, 0, pHi, cLA, 1.6);
+        trace(box[0], q => q.pao, 0, pHi, cAo, 1.9);
+        trace(box[0], q => q.plv, 0, pHi, cLV, 2.3);
+        const vLo = m ? Math.max(0, m.esv - 25) : 20, vHi = m ? m.edv + 25 : 180;
+        trace(box[1], q => q.vlv, vLo, vHi, '#F2E3C0', 2);
+        trace(box[2], q => q.ecg, -0.45, 1.25, th.ok, 1.6);
+        // heart sounds: a damped burst at every valve closure, and a murmur where flow is turbulent
+        if (box[3]) {
+          const bx = box[3], mid = (bx.y0 + bx.y1) / 2 + 5, amp = (bx.y1 - bx.y0) * 0.36;
+          const closes = S.events.filter(e => e.k === 'MC' || e.k === 'TC' || e.k === 'AC' || e.k === 'PC');
+          ctx.save();
+          ctx.beginPath(); ctx.rect(x0, bx.y0, x1 - x0, bx.y1 - bx.y0); ctx.clip();
+          ctx.strokeStyle = '#E6ECF8'; ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          let px = -1;
+          vis.forEach(q => {
+            let v = 0;
+            closes.forEach(e => {
+              const d = q.T - e.T;
+              if (d >= 0 && d < 0.12) {
+                const A = e.k === 'MC' ? 1 : e.k === 'AC' ? 0.8 : e.k === 'TC' ? 0.55 : 0.45;
+                v += A * Math.exp(-d / 0.022) * Math.sin(TAU * 48 * d);
+              }
+            });
+            v += q.mur * 0.45 * Math.sin(q.T * 911) * Math.sin(q.T * 377 + 1.3);
+            const x = xOf(q.T), y = mid - clamp(v, -1.3, 1.3) * amp;
+            if (x < px || px < 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            px = x;
+          });
+          ctx.stroke(); ctx.restore();
+          if (labels) closes.forEach(e => {
+            if (e.T < Tn - span * 0.93 || (e.k !== 'MC' && e.k !== 'AC')) return;
+            ctx.font = mono(700, 9); ctx.fillStyle = e.k === 'MC' ? cLV : cAo; ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(e.k === 'MC' ? 'S1 lub' : 'S2 dub', xOf(e.T) + 14, bx.y0 + 14);
+          });
+        }
+        // valve events, through every strip at once: the Wiggers diagram's spine
+        S.events.forEach(e => {
+          if (e.T < Tn - span * 0.93) return;
+          if (!/^(MC|AO|AC|MO)$/.test(e.k)) return;
+          const x = xOf(e.T);
+          ctx.save();
+          ctx.strokeStyle = g.alpha('#E6ECF8', .28); ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(x, Z.wy0); ctx.lineTo(x, Z.wy1); ctx.stroke();
+          ctx.restore();
+          if (labels) {
+            ctx.font = mono(700, 8.5); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+            ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(5,8,15,.9)';
+            ctx.strokeText(e.k, x, Z.wy0 - 13);
+            ctx.fillStyle = e.k[0] === 'M' ? cLA : cAo; ctx.fillText(e.k, x, Z.wy0 - 13);
+          }
+        });
+        // the sweep cursor
+        const cx = xOf(Tn);
+        ctx.strokeStyle = g.alpha(th.text, .7); ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(cx, Z.wy0); ctx.lineTo(cx, Z.wy1); ctx.stroke();
+        // legend and live values for the pressure strip
+        {
+          const b = box[0], items = [['LV', P.lv, cLV], ['aorta', P.sa, cAo], ['LA', P.la, cLA],
+                                     ['RV', P.rv, cRV], ['pulm. artery', P.pa, cPA]];
+          ctx.font = mono(600, 8.5); ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+          let lx = x1 - 6;
+          items.slice().reverse().forEach(it => {
+            const t = it[0] + ' ' + it[1].toFixed(0);
+            ctx.fillStyle = it[2]; ctx.fillText(t, lx, b.y0 + 4);
+            lx -= ctx.measureText(t).width + 10;
+          });
+        }
+        if (m) {
+          const b = box[1];
+          ctx.font = mono(500, 8.5); ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillStyle = th['text-2'];
+          ctx.fillText('EDV ' + m.edv.toFixed(0) + '  ·  ESV ' + m.esv.toFixed(0) + '  ·  SV ' + m.sv.toFixed(0),
+                       x1 - 6, b.y0 + 4);
+        }
+      }
     },
 
-    plotTitle: 'Pressure–volume loop of the left ventricle',
-    legend: [{ c: '#FF6B9D', label: 'current beat' }, { c: '#63729A', label: 'previous beat' }],
-    drawPlot(S, g) {
-      const P = g.Plot({
-        xmin: 0, xmax: 180, ymin: 0, ymax: 200,
-        xlabel: 'LV volume (mL)', ylabel: 'LV pressure (mmHg)',
-        xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0)
-      }).frame();
-      P.clip(() => {
-        if (S.loopPrev && S.loopPrev.length > 3) P.line(S.loopPrev, g.alpha(g.theme['text-3'], .85), 1.5);
-        if (S.loop.length > 3) {
-          P.area(S.loop, 0, g.alpha(g.theme.bio, .10));
-          P.line(S.loop, g.theme.bio, 2);
-        }
-        P.dot(S.Vlv, S.Plv, 4.5, g.theme.text, g.theme['ink-950']);
-        P.vline(S.esv, g.alpha(g.theme['text-3'], .6), [3, 3]);
-        P.vline(S.edv, g.alpha(g.theme['text-3'], .6), [3, 3]);
-      });
-      P.tag(S.esv, 190, 'ESV ' + S.esv.toFixed(0), g.theme['text-2'], 'right', 0);
-      P.tag(S.edv, 190, 'EDV ' + S.edv.toFixed(0), g.theme['text-2'], 'left', 0);
-      P.tag((S.esv + S.edv) / 2, 20, 'SV = ' + (S.edv - S.esv).toFixed(0) + ' mL',
-        g.theme.bio, 'left', 0);
-    },
+    plots: [
+      { title: 'Pressure–volume loop of the left ventricle, coloured by phase',
+        legend: PH_ORDER.map(k => ({ c: PH[k].c, label: PH[k].k + ' ' + PH[k].n.toLowerCase() })),
+        draw(S, g) {
+          const p = S.p, m = S.m || {};
+          const xmax = Math.max(200, (m.edv || 150) + 40), ymax = Math.max(160, (m.lvPk || 130) * 1.18);
+          const P = g.Plot({ xmin: 0, xmax: xmax, ymin: 0, ymax: ymax,
+            xlabel: 'LV volume (mL)', ylabel: 'LV pressure (mmHg)',
+            xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+          const loop = S.loopPrev && S.loopPrev.length > 10 ? S.loopPrev : S.loop;
+          P.clip(() => {
+            // the two boundaries the loop lives between
+            const V0 = CV.lv.V0;
+            P.line([[V0, 0], [V0 + ymax / p.emax, ymax]], g.alpha(g.theme['text-2'], .75), 1.3, [6, 4]);
+            const ed = [];
+            for (let v = V0; v <= xmax; v += 2) ed.push([v, CV.lv.A * (Math.exp(CV.lv.B * (v - V0)) - 1)]);
+            P.line(ed, g.alpha(g.theme['text-3'], .85), 1.3, [3, 4]);
+            let seg = [], ph = null;
+            const flush = () => { if (seg.length > 1) P.line(seg, PH[ph].c, 2.6); };
+            loop.forEach(q => {
+              if (q[2] !== ph) { flush(); seg = seg.length ? [seg[seg.length - 1]] : []; ph = q[2]; }
+              seg.push([q[0], q[1]]);
+            });
+            flush();
+            if (S.loop.length > 2 && loop !== S.loop) P.line(S.loop.map(q => [q[0], q[1]]), g.alpha(g.theme.text, .35), 1);
+            if (S.P) P.dot(S.s.lv, S.P.lv, 5, g.theme.text, g.theme['ink-950']);
+            (S.loopEvPrev || []).forEach(e => P.dot(e.V, e.P, 3.8, '#E6ECF8', g.theme['ink-950']));
+          });
+          if (g.labels !== false) {
+            (S.loopEvPrev || []).forEach(e => {
+              const up = e.k === 'AO' || e.k === 'AC';
+              P.tag(e.V, e.P, e.k, '#E6ECF8', e.k === 'MC' || e.k === 'AO' ? 'left' : 'right', up ? -10 : 12);
+            });
+            P.tag(CV.lv.V0 + ymax * 0.93 / p.emax - 2, ymax * 0.93, 'end-systolic line · slope = contractility',
+                  g.theme['text-2'], 'right', 0);
+            const vx = Math.min(xmax * 0.97, CV.lv.V0 + Math.log(1 + ymax * 0.22 / CV.lv.A) / CV.lv.B);
+            P.tag(vx, ymax * 0.22, 'relaxed wall: stiffens as it stretches', g.theme['text-3'], 'right', -8);
+            if (m.sv) P.tag((m.edv + m.esv) / 2, (m.lvPk || 100) * 0.45, '← stroke volume ' + m.sv.toFixed(0) + ' mL →',
+                            g.theme.text, 'center', 0);
+          }
+        },
+        hover(S, x) {
+          const loop = S.loopPrev || [];
+          let best = null;
+          loop.forEach(q => { if (!best || Math.abs(q[0] - x) < Math.abs(best[0] - x)) best = q; });
+          if (!best) return null;
+          return [{ label: 'volume', value: best[0].toFixed(0) + ' mL' },
+                  { label: 'pressure', value: best[1].toFixed(0) + ' mmHg', color: PH[best[2]].c },
+                  { label: 'phase', value: PH[best[2]].n }];
+        } },
+
+      { title: 'Frank–Starling — stroke volume against filling pressure, measured by the model',
+        legend: [{ c: '#FF6B9D', label: 'this heart' }, { c: '#63729A', label: 'normal heart' },
+                 { c: '#FFB454', label: 'reaching the aorta (if the mitral leaks)' }],
+        draw(S, g) {
+          const fs = S.fs || [], ref = STARLING_REF || [], m = S.m || {};
+          const all = fs.concat(ref);
+          const xmax = Math.max(24, Math.max.apply(null, all.map(q => q[0]).concat([m.la || 0])) * 1.06);
+          const ymax = Math.max(120, Math.max.apply(null, all.map(q => q[1]).concat([m.sv || 0])) * 1.15);
+          const P = g.Plot({ xmin: 0, xmax: xmax, ymin: 0, ymax: ymax,
+            xlabel: 'filling pressure — mean left atrial (mmHg)', ylabel: 'stroke volume (mL)',
+            xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+          P.clip(() => {
+            if (ref.length) P.line(ref.map(q => [q[0], q[1]]), g.alpha('#63729A', 1), 1.6, [5, 4]);
+            if (fs.length) {
+              P.line(fs.map(q => [q[0], q[1]]), g.theme.bio, 2.4);
+              if (S.p.mr > 0.02) P.line(fs.map(q => [q[0], q[2]]), '#FFB454', 1.8);
+              fs.forEach(q => P.dot(q[0], q[1], 2.6, g.theme.bio, g.theme['ink-950']));
+            }
+            P.vline(18, g.alpha(g.theme.crit, .55), [4, 4]);
+            if (m.la) P.dot(m.la, m.sv, 5.5, g.theme.text, g.theme['ink-950']);
+          });
+          if (g.labels !== false) {
+            if (m.la) P.tag(m.la, m.sv, 'now', g.theme.text, 'left', -10);
+            P.tag(18.3, ymax * 0.08, 'above ~18 mmHg fluid leaks into the lungs', g.theme.crit, 'left', 0);
+          }
+        } }
+    ],
 
     readouts(S) {
-      const p = S.p;
-      const sv = Math.max(S.edv - S.esv, 0);
-      const ef = S.edv > 0 ? sv / S.edv * 100 : 0;
-      const co = sv * p.hr / 1000;
-      const map = S.diaP + (S.sysP - S.diaP) / 3;
-      return [
-        { label: 'EDV', value: S.edv.toFixed(0), unit: 'mL', hint: 'end of filling' },
-        { label: 'ESV', value: S.esv.toFixed(0), unit: 'mL', hint: 'end of ejection' },
-        { label: 'Stroke volume EDV−ESV', value: sv.toFixed(0), unit: 'mL', flag: 'accent' },
-        { label: 'Ejection fraction SV/EDV', value: ef.toFixed(0), unit: '%',
-          flag: ef < 40 ? 'crit' : ef < 50 ? 'warn' : 'ok', hint: 'normal 55–70%' },
-        { label: 'Cardiac output SV×HR', value: co.toFixed(2), unit: 'L/min', flag: 'accent' },
-        { label: 'Blood pressure', value: S.sysP.toFixed(0) + '/' + S.diaP.toFixed(0), unit: 'mmHg' },
-        { label: 'Mean arterial pressure', value: map.toFixed(0), unit: 'mmHg', hint: 'DBP + PP/3' },
-        { label: 'Cycle duration', value: (60 / p.hr).toFixed(2), unit: 's' }
+      const p = S.p, m = S.m || {};
+      const RR = 60 / p.hr;
+      const out = [
+        { label: 'End-diastolic volume', value: (m.edv || 0).toFixed(0), unit: 'mL', hint: 'filled, just as the mitral shuts' },
+        { label: 'End-systolic volume', value: (m.esv || 0).toFixed(0), unit: 'mL', hint: 'left after ejection' },
+        { label: 'Stroke volume', value: (m.sv || 0).toFixed(0), unit: 'mL', flag: 'accent', hint: 'EDV − ESV' },
+        { label: 'Ejection fraction', value: ((m.ef || 0) * 100).toFixed(0), unit: '%',
+          flag: m.ef < 0.40 ? 'crit' : m.ef < 0.50 ? 'warn' : 'ok', hint: 'normal 55–70%' },
+        { label: 'Cardiac output', value: (m.co || 0).toFixed(2), unit: 'L/min', flag: 'accent',
+          hint: 'forward SV × HR' },
+        { label: 'Blood pressure', value: (m.sysA || 0).toFixed(0) + '/' + (m.diaA || 0).toFixed(0), unit: 'mmHg',
+          hint: 'mean ' + (m.map || 0).toFixed(0) },
+        { label: 'Lung artery pressure', value: (m.sysPA || 0).toFixed(0) + '/' + (m.diaPA || 0).toFixed(0),
+          unit: 'mmHg', hint: 'right heart: a fifth of the left' },
+        { label: 'Left atrial pressure', value: (m.la || 0).toFixed(1), unit: 'mmHg',
+          flag: m.la > 15 ? 'crit' : undefined, hint: m.la > 15 ? 'high: fluid backs up into the lungs' : 'mean' },
+        { label: 'Systole · S1 to S2', value: m.tSys ? (m.tSys * 1000).toFixed(0) : '—', unit: 'ms',
+          hint: m.tSys ? 'diastole ' + ((RR - m.tSys) * 1000).toFixed(0) + ' ms' : 'measuring' },
+        { label: 'Blood volume, checked', value: (m.total || p.vol).toFixed(1), unit: 'mL', flag: 'ok',
+          hint: 'moved, never made or lost' }
       ];
+      if (p.mr > 0.02) out.push({ label: 'Leaks back through mitral', value: (m.regurg || 0).toFixed(0), unit: 'mL/beat',
+        flag: 'crit', hint: ((m.regurg || 0) / Math.max(m.sv || 1, 1) * 100).toFixed(0) + '% of what the LV pumps' });
+      if (p.as > 1.5) out.push({ label: 'Pressure lost across aortic valve', value: (m.avGrad || 0).toFixed(0), unit: 'mmHg',
+        flag: m.avGrad > 40 ? 'crit' : 'warn', hint: 'peak LV − aortic, same instant' });
+      return out;
     },
 
     equation(S) {
-      const p = S.p;
-      const sv = Math.max(S.edv - S.esv, 0);
-      return E.v('P') + E.sub('LV') + '(' + E.v('t') + ') ' + E.op('=') + ' ' + E.v('E') + '(' + E.v('t') + ')' +
-        E.op('·') + '(' + E.v('V') + E.op('−') + E.v('V') + '₀)' + E.op('·') +
-        ' valves follow ' + E.v('ΔP') + ' alone' +
-        '<br>SV ' + E.op('=') + ' EDV ' + E.op('−') + ' ESV ' + E.op('=') + ' ' +
-        E.n(S.edv.toFixed(0), 'mL') + E.op('−') + E.n(S.esv.toFixed(0), 'mL') + ' ' + E.op('=') + ' ' +
-        E.n(sv.toFixed(0), 'mL') +
-        '<br>EF ' + E.op('=') + ' ' + E.frac('SV', 'EDV') + ' ' + E.op('=') + ' ' +
-        E.n((S.edv > 0 ? sv / S.edv * 100 : 0).toFixed(0), '%') + E.op('·') +
-        ' CO ' + E.op('=') + ' SV ' + E.op('×') + ' HR ' + E.op('=') + ' ' +
-        E.n((sv * p.hr / 1000).toFixed(2), 'L/min');
+      const p = S.p, m = S.m || {};
+      return 'CO ' + E.op('=') + ' SV ' + E.op('×') + ' HR ' + E.op('=') + ' ' + E.n((m.fsv || 0).toFixed(1), 'mL') +
+        E.op('×') + ' ' + E.n(p.hr, '/min') + ' ' + E.op('=') + ' ' + E.n((m.co || 0).toFixed(2), 'L/min') +
+        '<br>EF ' + E.op('=') + ' ' + E.frac('EDV ' + E.op('−') + ' ESV', 'EDV') + ' ' + E.op('=') + ' ' +
+        E.frac(E.n((m.edv || 0).toFixed(0), '') + E.op('−') + E.n((m.esv || 0).toFixed(0), ''), E.n((m.edv || 0).toFixed(0), '')) +
+        ' ' + E.op('=') + ' ' + E.n(((m.ef || 0) * 100).toFixed(1), '%') +
+        '<br>MAP ' + E.op('≈') + ' DBP ' + E.op('+') + ' ' + E.frac('SBP ' + E.op('−') + ' DBP', '3') + ' ' + E.op('=') + ' ' +
+        E.n((m.map || 0).toFixed(0), 'mmHg') + E.op('·') + ' a valve opens only when ' + E.v('P') + E.sub('behind') +
+        ' ' + E.op('>') + ' ' + E.v('P') + E.sub('in front');
     },
-    eqNote: '<b>The loop area is the work done.</b> The area enclosed by the pressure–volume loop is the stroke ' +
-      'work of the left ventricle. Raise contractility and the loop grows taller and wider; raise afterload and it ' +
-      'gets taller but narrower — which is exactly why a chronically hypertensive heart ejects less per beat.',
+
+    eqNote: '<b>One rule runs the whole cycle: blood moves from high pressure to low, and a valve opens only ' +
+      'when the pressure behind it is higher than the pressure in front.</b> On the Wiggers diagram every valve ' +
+      'event is a crossing of two pressure curves. The mitral valve shuts (MC) when LV pressure rises above LA ' +
+      'pressure, the aortic valve opens (AO) when LV pressure passes aortic pressure, and so on around the ' +
+      'beat. The heart sounds are those closures: <b>S1 "lub"</b> when the AV valves shut, and <b>S2 "dub"</b> ' +
+      'when the semilunar valves shut. The ECG comes <i>before</i> each event, because electrical activity ' +
+      'triggers the contraction.',
+
+    problems: [
+      { source: 'NEET pattern · ejection fraction',
+        q: 'The lab\'s resting heart fills to an end-diastolic volume of 131.4 mL and empties to an end-systolic volume of 59.2 mL. What is its ejection fraction, in per cent?',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 },
+        predict: { label: 'ejection fraction', unit: '%', tol: 0.03 },
+        measure: S => S.m.ef * 100,
+        working: 'SV = EDV − ESV = 131.4 − 59.2 = 72.2 mL, and EF = SV/EDV = 72.2/131.4 = <b>54.9%</b>. That is at the ' +
+          'bottom of the normal 55–70% range. The ventricle never empties: nearly half its blood stays behind ' +
+          'every beat as a reserve that exercise can draw on.' },
+      { source: 'NEET pattern · cardiac output',
+        q: 'The same heart ejects 72.2 mL per beat at 72 beats per minute. What is its cardiac output, in litres per minute?',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 },
+        predict: { label: 'cardiac output', unit: 'L/min', tol: 0.02 },
+        measure: S => S.m.co,
+        working: 'CO = SV × HR = 72.2 mL × 72 /min = 5198 mL/min = <b>5.20 L/min</b>. The whole 5 L of blood goes ' +
+          'round the body about once a minute. The right ventricle pumps exactly the same amount into the lungs; ' +
+          'the lab checks this, because in a closed loop it cannot be otherwise for long.' },
+      { source: 'NEET pattern · mean arterial pressure',
+        q: 'The lab reads a blood pressure of 129.5/85.7 mmHg. Estimate the mean arterial pressure, in mmHg.',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 },
+        predict: { label: 'mean arterial pressure', unit: 'mmHg', tol: 0.02 },
+        measure: S => S.m.map,
+        working: 'MAP ≈ DBP + (SBP − DBP)/3 = 85.7 + 43.8/3 = <b>100.3 mmHg</b>. It is not the simple average (107.6), ' +
+          'because the heart spends about two thirds of each beat in diastole, when the pressure is near the ' +
+          'lower value.' },
+      { source: 'JEE/NEET extension · a leaking mitral valve',
+        q: 'With the mitral leak set to 1.2, the left ventricle pumps 117.1 mL per beat, but 60.6 mL of it goes backwards into the left atrium. What percentage of each beat leaks back?',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 1.2 },
+        predict: { label: 'fraction leaking back', unit: '%', tol: 0.03 },
+        measure: S => S.m.regurg / S.m.sv * 100,
+        working: '60.6/117.1 = <b>51.7%</b> of every beat goes the wrong way. The trap is the ejection fraction: it ' +
+          'reads a healthy-looking 77%, because the ventricle does empty — but half of it into the atrium. ' +
+          'The forward stroke volume is only 56.5 mL, and the cardiac output falls to 4.07 L/min.' },
+      { source: 'NEET pattern · output in exercise',
+        q: 'In the exercise preset the heart beats at 140 per minute and ejects 84.7 mL per beat. What is the cardiac output, in litres per minute?',
+        params: { hr: 140, emax: 4.2, afterload: 0.55, vol: 5900, as: 1, mr: 0 },
+        predict: { label: 'cardiac output', unit: 'L/min', tol: 0.02 },
+        measure: S => S.m.co,
+        working: 'CO = 84.7 × 140 = 11 858 mL/min = <b>11.9 L/min</b>, more than double the resting value. Both ' +
+          'factors rose. Faster rate is the bigger one; stronger contraction (a steeper end-systolic line on the ' +
+          'PV loop) and more venous return kept the stroke volume up even though diastole became very short.' }
+    ],
 
     walkthrough: [
-      { title: '1 · Four phases, two valves',
-        body: 'Watch the valve labels on the heart and the phase caption at the top left. Nothing about the valves is scripted — each one opens the instant the pressure behind it exceeds the pressure in front.',
-        ask: 'During isovolumetric contraction, both valves are shut. What is happening to the volume?',
-        reveal: '<b>Nothing at all — that is what "isovolumetric" means.</b> The muscle is contracting hard and pressure climbs steeply, but with both valves closed no blood can leave, so the volume trace is flat. On the PV loop this is the vertical line up the right-hand side.',
-        params: { hr: 72, emax: 2.0, preload: 10, afterload: 1.0 } },
-      { title: '2 · Reading the PV loop',
-        body: 'The loop runs anticlockwise. Follow one lap: fill along the bottom, rise vertically, eject along the top, fall vertically.',
-        ask: 'Which two points on the loop give you the stroke volume?',
-        reveal: 'The widest and narrowest volumes: <b>SV = EDV − ESV</b>. Those are the two dashed vertical lines. Everything clinical — ejection fraction, cardiac output — is built from this one subtraction.',
-        params: { hr: 72, emax: 2.0, preload: 10, afterload: 1.0 } },
-      { title: '3 · Preload and the Frank–Starling law',
-        body: 'Raise the preload slider and watch EDV, then stroke volume.',
-        ask: 'Filling the ventricle more makes it eject more. Why should stretching the muscle help?',
-        reveal: 'This is the <b>Frank–Starling law</b>: greater stretch gives better overlap of actin and myosin filaments, so the next contraction is more forceful. The heart therefore automatically matches its output to whatever comes back to it — which is how the two sides of the heart stay balanced without any nervous control.',
-        params: { hr: 72, emax: 2.0, preload: 17, afterload: 1.0 } },
-      { title: '4 · Afterload works the other way',
-        body: 'Return preload to normal and now push the afterload slider up, as in untreated hypertension.',
-        ask: 'What happens to the loop shape and to the ejection fraction?',
-        reveal: 'The loop becomes <b>taller but narrower</b>. The ventricle must generate far more pressure before the aortic valve will open, and once it does open it ejects less — so ESV rises and <b>EF falls</b>. This is the chronic load that eventually produces ventricular hypertrophy.',
-        params: { hr: 72, emax: 2.0, preload: 10, afterload: 2.0 } },
-      { title: '5 · Lining the ECG up with the mechanics',
-        body: 'The ECG is electrical; the pressure curves are mechanical. Watch how one leads the other on the stacked traces.',
-        ask: 'Does the QRS complex happen before or after the ventricle contracts?',
-        reveal: '<b>Before.</b> QRS is ventricular <i>depolarisation</i> — the electrical trigger. Mechanical contraction follows a few milliseconds later, which is why the LV pressure rise begins just after the R wave. Similarly the P wave precedes atrial systole, and the T wave (repolarisation) precedes relaxation.',
-        params: { hr: 72, showECG: true } },
-      { title: '6 · Exercise',
-        body: 'Load the exercise preset: faster rate, stronger contraction, better filling, dilated vessels.',
-        ask: 'Cardiac output roughly quadruples. Which factors did the work?',
-        reveal: '<b>Both terms of CO = SV × HR.</b> Heart rate nearly doubles, and stroke volume rises through increased contractility and venous return while the falling afterload lets the ventricle empty more completely. Notice diastole shortens far more than systole — which is why very high rates eventually reduce filling and cap the output.',
-        params: { hr: 140, emax: 3.4, preload: 14, afterload: 0.75 } }
+      { title: '1 · One rule for all four valves',
+        body: 'Watch the pressure strip and the dashed vertical lines. Each is labelled with the valve event it marks.',
+        ask: 'What makes the mitral valve shut (MC) at exactly that instant?',
+        reveal: 'The <b>LV pressure (pink) climbs past the LA pressure (blue)</b>. Nothing else is involved. The ' +
+          'aortic valve opens (AO) where pink passes orange, shuts (AC) where it falls back below, and the ' +
+          'mitral reopens (MO) where pink drops under blue. Every valve event on the Wiggers diagram is a ' +
+          'crossing of two curves.',
+        params: { hr: 60, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 } },
+      { title: '2 · Squeezing without emptying',
+        body: 'Look at the volume strip between MC and AO, and at the matching vertical edge of the PV loop.',
+        ask: 'Pressure rises steeply there. Why does the volume not change at all?',
+        reveal: 'Both valves are shut, so blood has nowhere to go. That is <b>isovolumetric contraction</b>. The ' +
+          'muscle turns its effort into pressure until LV pressure beats aortic pressure. The same happens in ' +
+          'reverse between AC and MO: isovolumetric relaxation.',
+        params: { hr: 60, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 } },
+      { title: '3 · Lub and dub',
+        body: 'Tick "Play the heart sounds" and watch the bottom strip.',
+        ask: 'Which valves make the first sound, and which the second?',
+        reveal: '<b>S1, "lub", is the AV valves (mitral and tricuspid) shutting</b> at the start of ventricular ' +
+          'systole. <b>S2, "dub", is the semilunar valves (aortic and pulmonary) shutting</b> at its end. Opening ' +
+          'valves make no sound. The time from S1 to S2 is systole, shown in the readouts.',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0, sound: true } },
+      { title: '4 · Electrical first, mechanical second',
+        body: 'Compare the ECG strip with the pressure strip.',
+        ask: 'Does the QRS come before or after the LV pressure starts to rise?',
+        reveal: '<b>Before.</b> QRS is ventricular depolarisation, the trigger, and contraction follows. The P ' +
+          'wave comes before atrial systole (the small bump in LV volume at the end of filling), and the T ' +
+          'wave comes before relaxation. Atrial repolarisation has no wave of its own: it is hidden inside the QRS.',
+        params: { hr: 60, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 } },
+      { title: '5 · More in, more out — Frank–Starling',
+        body: 'Raise the blood volume slider slowly and watch the dot move on the second graph.',
+        ask: 'The contractility control has not changed. Why does the stroke volume rise?',
+        reveal: 'More blood returns, so the ventricle fills further (EDV rises) and its stretched fibres contract ' +
+          'harder. That is the <b>Frank–Starling law</b>: the heart pumps out what comes in. The two sides of the ' +
+          'heart stay balanced this way without any nerves telling them to.',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5600, as: 1, mr: 0 } },
+      { title: '6 · Fast hearts steal from diastole',
+        body: 'Push the heart rate to 150 and watch the phase ribbon under the title.',
+        ask: 'Which part of the beat gets shorter: systole or diastole?',
+        reveal: '<b>Mostly diastole.</b> Systole shortens only a little; the filling phases collapse. At very high ' +
+          'rates the ventricle has no time to fill, the stroke volume falls, and cardiac output stops rising. ' +
+          'This is also why the heart muscle, which is fed during diastole, suffers first at high rates.',
+        params: { hr: 150, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 0 } },
+      { title: '7 · A leaking valve fools the ejection fraction',
+        body: 'Load the mitral regurgitation preset. Watch the heart-sound strip and the readouts.',
+        ask: 'EF is 77%, higher than normal. Is this heart pumping well?',
+        reveal: '<b>No.</b> Half of every beat goes backwards into the left atrium, which is why LA pressure ' +
+          'climbs and a murmur fills the whole of systole. Forward output has fallen. EF counts blood leaving ' +
+          'the ventricle, not blood reaching the body.',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 5000, as: 1, mr: 1.2 } },
+      { title: '8 · Rescue a bleeding patient',
+        body: 'Load "Blood loss". Blood pressure falls to about 83/55 — this model has no reflexes.',
+        ask: 'Using only heart rate and the resistance of the arteries, can you bring the pressure back towards normal?',
+        reveal: 'Raising both works: that is exactly what the <b>baroreceptor reflex</b> does, through the ' +
+          'sympathetic nerves — faster heart, narrower arterioles. Notice what it cannot do: it cannot restore ' +
+          'the lost filling, so the stroke volume stays low. Only replacing the blood (raise the volume) fixes that.',
+        params: { hr: 72, emax: 2.6, afterload: 1.2, vol: 4500, as: 1, mr: 0 } }
+    ],
+
+    quiz: [
+      { q: 'The first heart sound "lubb" is produced by:',
+        options: ['closure of the semilunar valves', 'closure of the atrioventricular valves',
+                  'opening of the AV valves', 'atrial contraction'], answer: 1,
+        why: 'The mitral and tricuspid valves snap shut when ventricular pressure rises above atrial pressure at the start of systole. The semilunar valves shutting at the end of systole give "dupp".' },
+      { q: 'During isovolumetric ventricular contraction:',
+        options: ['both AV and semilunar valves are open', 'both are closed',
+                  'only the AV valves are open', 'only the semilunar valves are open'], answer: 1,
+        why: 'With every valve shut no blood can enter or leave, so pressure rises at constant volume.' },
+      { q: 'Stroke volume is 70 mL and heart rate is 72 bpm. Cardiac output is:',
+        options: ['about 5.0 L/min', 'about 0.5 L/min', 'about 50 L/min', 'about 1.4 L/min'], answer: 0,
+        why: 'CO = SV × HR = 70 × 72 = 5040 mL/min ≈ 5 L/min.' },
+      { q: 'If EDV is 120 mL and ESV is 50 mL, the ejection fraction is:',
+        options: ['42%', '58%', '70%', '120%'], answer: 1,
+        why: 'SV = 70 mL, and EF = 70/120 = 58%.' },
+      { q: 'On a normal ECG, atrial repolarisation:',
+        options: ['is the T wave', 'is the P wave', 'is hidden within the QRS complex', 'does not occur'], answer: 2,
+        why: 'It happens, but it coincides with the far larger ventricular depolarisation and is masked by the QRS.' },
+      { q: 'When the heart rate rises from 70 to 150 bpm, the phase that shortens most is:',
+        options: ['ventricular ejection', 'isovolumetric contraction', 'ventricular filling (diastole)', 'none — all shorten equally'], answer: 2,
+        why: 'Systole shortens only slightly; most of the time saved comes out of diastole, which limits filling at very high rates.' }
     ],
 
     notes: '<b>Where this shows up in the paper.</b>' +
-      '<ul><li>Direct numericals: CO = SV × HR, EF = SV/EDV — plug and go, appears most years.</li>' +
-      '<li>Matching ECG waves to events: P → atrial depolarisation, QRS → ventricular depolarisation (atrial repolarisation is buried inside it), T → ventricular repolarisation.</li>' +
-      '<li>Heart sounds: "lubb" is the AV valves shutting at the start of systole, "dupp" the semilunar valves shutting at its end.</li>' +
-      '<li>Ordering the phases of the cardiac cycle correctly.</li></ul>' +
-      '<div class="pyq"><em>Trap to avoid</em>There is no wave on a normal ECG for atrial repolarisation. It does ' +
-      'happen, but it is hidden underneath the much larger QRS complex — a favourite one-mark discriminator.</div>'
+      '<ul><li>CO = SV × HR and EF = SV/EDV: direct numericals, most years.</li>' +
+      '<li>The order of events in one beat, and which valves are open in each phase. NCERT splits the cycle ' +
+      'into joint diastole, atrial systole and ventricular systole; the Wiggers diagram splits the same beat ' +
+      'into seven phases.</li>' +
+      '<li>Heart sounds: lub = AV valves closing, dub = semilunar valves closing.</li>' +
+      '<li>ECG waves: P = atrial depolarisation, QRS = ventricular depolarisation, T = ventricular ' +
+      'repolarisation; the P–Q interval is the delay at the AV node.</li>' +
+      '<li>Normal values: about 120/80 mmHg, EDV about 130 mL, stroke volume about 70 mL, cardiac output ' +
+      'about 5 L/min, a cycle of 0.8 s at 72 bpm.</li></ul>' +
+      '<div class="pyq"><em>Trap to avoid</em>Valves open and close <b>passively</b>, on pressure differences ' +
+      'alone. No nerve and no muscle opens a heart valve. The papillary muscles and chordae tendineae only stop ' +
+      'the AV valves being pushed back into the atria.</div>' +
+      '<div class="pyq"><em>Trap to avoid</em>"Lub" is not atrial contraction and "dub" is not ventricular ' +
+      'contraction. Both sounds are valves <b>closing</b>.</div>'
   });
+
 
 })(window.InsightLab);

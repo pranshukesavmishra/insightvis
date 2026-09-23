@@ -310,7 +310,7 @@ window.ZOOART = (function () {
       y += h;
     });
     // bracket and name each layer down the left
-    if (o.labels !== false) {
+    if (o.labels !== false && window.__LABELS !== false) {
       out.forEach(L => {
         if (!L.name) return;
         const lx = o.labelX == null ? x0 - 10 : o.labelX;

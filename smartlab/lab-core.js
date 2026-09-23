@@ -567,6 +567,13 @@ window.InsightLab = (function () {
     p.body = body; p.head = head;
     return p;
   }
+  /* the labels switch remembers its last position for this viewer */
+  (function () {
+    let on = true;
+    try { on = localStorage.getItem('isl-labels') !== '0'; } catch (e) { on = true; }
+    window.__LABELS = on;
+  })();
+
   function miniBtn(label, fn, cls) {
     const b = el('button', 'mbtn' + (cls ? ' ' + cls : ''), label);
     b.addEventListener('click', fn);
@@ -1057,6 +1064,23 @@ window.InsightLab = (function () {
       if (document.fullscreenElement) document.exitFullscreen();
       else sp.requestFullscreen && sp.requestFullscreen();
     }));
+    /* Labels on or off, for every lab at once. Off leaves the apparatus and
+       the instrument panels, and removes the names written over the scene —
+       for a clean look, or to test yourself on what each part is called. */
+    {
+      const lab = el('label', 'switch lbl-switch');
+      const inp = document.createElement('input');
+      if (R.labels === undefined) R.labels = window.__LABELS !== false;
+      inp.type = 'checkbox'; inp.checked = R.labels !== false; inp.id = 'labelsCtl';
+      lab.appendChild(inp); lab.appendChild(el('span', 'switch-track'));
+      lab.appendChild(el('span', 'switch-label', 'Labels'));
+      lab.title = 'Show or hide the labels drawn on the scene';
+      inp.addEventListener('change', () => {
+        R.labels = inp.checked; window.__LABELS = R.labels;
+        try { localStorage.setItem('isl-labels', R.labels ? '1' : '0'); } catch (e) { /* private mode */ }
+      });
+      tp.appendChild(lab);
+    }
     const sw = el('div', 'speed');
     const si = document.createElement('input');
     si.type = 'range'; si.min = 0.1; si.max = 3; si.step = 0.05; si.value = 1; si.id = 'speedCtl';
@@ -1250,7 +1274,8 @@ window.InsightLab = (function () {
         // layer 5 — eased parameter changes
         tween: (key, target, tau) => tween(S, key, target, tau, dt),
         // layer 3 — collision-aware labels
-        label: (x, y, text, o) => R.labelKit.place(x, y, text, o),
+        label: (x, y, text, o) => (R.labels === false ? null : R.labelKit.place(x, y, text, o)),
+        labels: R.labels !== false,
         // layer 6 — lit materials
         sphere: (x, y, r, colour, o) => sphere(ctx, x, y, r, colour, o),
         shadow: (blur, colour, fn) => shadow(ctx, blur, colour, fn),

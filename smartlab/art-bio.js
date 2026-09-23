@@ -54,8 +54,8 @@ window.BIOART = (function () {
     const n = o.chambers || 4;
     const sat = o.sat || { ra: 60, rv: 60, la: 98, lv: 98 };
     const con = o.contraction || 0;
-    const labels = o.labels !== false;
-    const leaders = o.leaders === undefined ? labels : o.leaders;
+    const labels = o.labels !== false && window.__LABELS !== false;
+    const leaders = window.__LABELS === false ? false : o.leaders === undefined ? labels : o.leaders;
     const X = x => cx + x * s, Y = y => cy + y * s;
 
     if (n === 2) return heart2(ctx, cx, cy, s, o, sat, labels);
@@ -406,7 +406,7 @@ window.BIOART = (function () {
     const myelin = !!o.myelin;
     const nodes = o.nodes || 7;
     const colourAt = o.colourAt || (() => '#2E5F8A');
-    const labels = o.labels !== false;
+    const labels = o.labels !== false && window.__LABELS !== false;
     const axStart = x0 + somaR * 1.5;
 
     /* ---- dendrites: tapering lit processes, not strokes ---- */

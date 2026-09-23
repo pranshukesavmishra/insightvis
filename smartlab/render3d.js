@@ -506,6 +506,7 @@
      ===================================================================== */
   function label(F, at, text, colour, o) {
     o = o || {};
+    if (window.__LABELS === false && !o.keep) return;   // the global Labels switch
     F.push(at, () => {
       const q = F.cam.project(at);
       if (!q.ok) return;
@@ -523,6 +524,7 @@
   /* a leader from a world point out to a screen-space caption */
   function callout(F, at, dx, dy, text, colour, o) {
     o = o || {};
+    if (window.__LABELS === false && !o.keep) return;
     F.push(at, () => {
       const q = F.cam.project(at);
       if (!q.ok) return;

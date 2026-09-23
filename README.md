@@ -368,11 +368,19 @@ EPSP/IPSP arithmetic, and three drugs acting at three different points in the ch
 botulinum and neostigmine.
 
 ### Biology · Body Fluids & Circulation
-**11 · The Cardiac Cycle — Pressure, Volume and the ECG**
-**Time-varying elastance** with a Windkessel aorta; valves open purely on pressure gradient. The
-heart is drawn as the organ — four chambers coloured by live oxygen saturation, AV valves with
-chordae tendineae, semilunar valves showing the three-cusp closure. Live
-Wiggers diagram, pressure–volume loop, and a **Frank–Starling curve that you build by experiment**.
+**11 · The Cardiac Cycle — Pressure, Volume, Valves and the ECG** *(rebuilt)*
+A **whole closed circulation**, not a heart on its own: RA → RV → lungs → LA → LV → body arteries →
+veins → back, with a time-varying elastance for every chamber (the left ventricle's relaxed wall
+stiffens exponentially) and a compliance for every vessel bed. **All four valves** open and shut on
+pressure alone, and blood volume is conserved to the last millilitre, checked on screen. Timing comes
+from the ECG: a PR interval, a 35 ms electromechanical delay, and systole that shortens with heart
+rate as QT does. The stage is a **live Wiggers diagram** (pressures, LV volume, ECG and a
+phonocardiogram with S1 and S2 at the valve closures) beside the heart, with blood moving through
+it at the computed flows. A ribbon above names the seven textbook phases, and the heart sounds
+can be played aloud. Presets cover exercise, hypertension, heart failure, blood loss, aortic
+stenosis and mitral regurgitation, each producing its real signs: a pressure gradient, murmurs, a
+misleadingly high EF, and a raised atrial pressure. The PV loop is coloured by phase, and the
+Frank–Starling curve is measured, not drawn, and bends over as it should.
 
 **12 · Cardiac Conduction System & Heart Block**
 Event-driven conduction from SA node through the internodal tracts, AV node, bundle of His, both
