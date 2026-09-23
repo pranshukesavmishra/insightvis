@@ -10,189 +10,281 @@
   const PA = window.PHYSART, R3 = window.R3, RX = window.RX, SV = window.SOLVE;
 
   /* =========================================================================
-     16 · LAWS OF MOTION — the constraint equations, solved
+     16 · LAWS OF MOTION — a real bench, solved as constraint equations
 
-     Nothing here is substituted into a remembered formula. Each arrangement
-     is written as Newton's second law for every body plus the inextensible-
-     string constraint, assembled as a linear system and solved. Friction is
-     never assumed: the system is first solved on the assumption that it does
-     NOT move, the friction that assumption demands is read out, and only if
-     that exceeds mu_s N does the body get released to slide on mu_k N. That
-     is the whole of the static-versus-kinetic question, done as a test rather
-     than as a rule.
+     Every rig is Newton's second law for each body plus the constraints
+     that tie them together (an inextensible string, a pulley that turns
+     without slipping, a block that must stay on the face of a wedge),
+     assembled as a linear system and handed to SOLVE.lin. Nothing is looked
+     up. Friction is settled by a test before anything moves: solve as if
+     static, read off the friction that would need, compare with μₛN, and
+     only if it cannot be supplied release the bodies onto μₖN.
+
+     The bench measures as well as computes: an ultrasonic motion sensor
+     logs position against time with the millimetre noise a real one has,
+     and the acceleration is recovered from its record by least squares —
+     which is how the practical exam asks for it.
      ========================================================================= */
 
   const G = 9.81;
+
+  /* the lift's journey: rest, accelerate, cruise, brake, rest — or the cable
+     parts, the car falls freely, and the safety brake catches it */
+  function liftProfile(p) {
+    const A = p.liftA, segs = [];
+    if (p.trip === 'cut') {
+      segs.push([0.8, 0], [0.62, -G], [0.30, 2 * G * 0.62 / 0.30 / 2], [1.2, 0]);
+    } else {
+      const s = p.trip === 'down' ? -1 : 1;
+      segs.push([0.6, 0], [1.2, s * A], [1.0, 0], [1.2, -s * A], [1.0, 0]);
+    }
+    // integrate once, exactly (piecewise-constant a)
+    const out = [];
+    let t = 0, v = 0, z = 0;
+    segs.forEach(q => { out.push({ t0: t, dur: q[0], a: q[1], v0: v, z0: z });
+                        z += v * q[0] + 0.5 * q[1] * q[0] * q[0]; v += q[1] * q[0]; t += q[0]; });
+    return { segs: out, T: t, zEnd: z, zMin: Math.min(0, ...out.map(q => q.z0), z), zMax: Math.max(0, ...out.map(q => q.z0), z) };
+  }
+  function liftAt(L, t) {
+    let q = L.segs[L.segs.length - 1];
+    for (const s of L.segs) if (t < s.t0 + s.dur) { q = s; break; }
+    const u = Math.min(Math.max(t - q.t0, 0), q.dur);
+    return { a: q.a, v: q.v0 + q.a * u, z: q.z0 + q.v0 * u + 0.5 * q.a * u * u };
+  }
 
   function mechanics(S) {
     const p = S.p, g = G;
     const us = p.muS, uk = Math.min(p.muK, p.muS);
     const R = { mode: p.mode, g: g };
+    const Ip = 0.5 * p.mp;                                // I/r² of a uniform-disc pulley
 
     if (p.mode === 'atwood') {
-      /* Unknowns (a, T), with a positive when m1 descends:
-           m1·a + T = m1·g
-           m2·a − T = −m2·g                                     */
-      const x = SV.lin([[p.m1, 1], [p.m2, -1]], [p.m1 * g, -p.m2 * g]);
-      R.a = x[0]; R.T = x[1]; R.static = false; R.slipping = true;
-      R.fNeed = 0; R.fMax = 0;
+      /* unknowns (a, T₁, T₂), a positive when m₁ descends:
+           m₁a + T₁ = m₁g ;  m₂a − T₂ = −m₂g ;  (I/r²)a − T₁ + T₂ = 0      */
+      const x = SV.lin([[p.m1, 1, 0], [p.m2, 0, -1], [Ip, -1, 1]], [p.m1 * g, -p.m2 * g, 0]);
+      R.a = x[0]; R.T1 = x[1]; R.T2 = x[2]; R.T = R.T1;
+      R.static = Math.abs(R.a) < 1e-12; R.fNeed = 0; R.fMax = 0;
       R.bodies = [
-        { tag: 'm₁', m: p.m1, W: p.m1 * g, T: R.T, N: 0, f: 0, a: R.a },
-        { tag: 'm₂', m: p.m2, W: p.m2 * g, T: R.T, N: 0, f: 0, a: -R.a }
+        { tag: 'm₁', m: p.m1, W: p.m1 * g, T: R.T1, N: 0, f: 0, a: R.a },
+        { tag: 'm₂', m: p.m2, W: p.m2 * g, T: R.T2, N: 0, f: 0, a: -R.a }
       ];
       return R;
     }
 
     if (p.mode === 'table' || p.mode === 'incline') {
       const th = p.mode === 'incline' ? p.theta * Math.PI / 180 : 0;
-      const N = p.m1 * g * Math.cos(th);                 // normal on the slope block
-      const drive = p.m2 * g - p.m1 * g * Math.sin(th);  // + means m2 descends
-      /* STEP 1 — assume it does not move and ask what friction that needs. */
-      const fNeed = drive;                                // magnitude and sign
+      const N = p.m1 * g * Math.cos(th);
+      const drive = p.m2 * g - p.m1 * g * Math.sin(th);
       const fMax = us * N;
-      R.N = N; R.fNeed = fNeed; R.fMax = fMax; R.drive = drive;
-      if (Math.abs(fNeed) <= fMax + 1e-12) {
-        /* STEP 2 — static friction can supply it, so nothing moves. */
-        R.static = true; R.slipping = false;
-        R.a = 0; R.T = p.m2 * g; R.f = fNeed;
+      R.N = N; R.fNeed = drive; R.fMax = fMax; R.drive = drive; R.theta = th;
+      if (Math.abs(drive) <= fMax + 1e-12) {
+        /* static: nothing turns, so the pulley needs no torque and the two
+           tensions are equal; friction is exactly what balance requires */
+        R.static = true; R.a = 0; R.T1 = R.T2 = p.m2 * g; R.f = drive;
       } else {
-        /* STEP 3 — it cannot, so the block slides and friction becomes
-           kinetic, opposing the motion that is actually happening. */
-        const dir = Math.sign(drive);
-        const fk = uk * N * dir;                          // opposes the motion
-        /* Unknowns (a, T), a positive in the direction m2 descends:
-             m2·a + T = m2·g
-             m1·a − T = −m1·g·sinθ − fk                   */
-        const x = SV.lin([[p.m2, 1], [p.m1, -1]],
-                         [p.m2 * g, -p.m1 * g * Math.sin(th) - fk]);
-        R.static = false; R.slipping = true;
-        R.a = x[0]; R.T = x[1]; R.f = fk;
+        const fk = uk * N * Math.sign(drive);
+        /* unknowns (a, T₁, T₂), a positive when m₂ descends:
+             m₂a + T₂ = m₂g
+             m₁a − T₁ = −m₁g sinθ − f_k
+             (I/r²)a + T₁ − T₂ = 0                                        */
+        const x = SV.lin([[p.m2, 0, 1], [p.m1, -1, 0], [Ip, 1, -1]],
+                         [p.m2 * g, -p.m1 * g * Math.sin(th) - fk, 0]);
+        R.static = false; R.a = x[0]; R.T1 = x[1]; R.T2 = x[2]; R.f = fk;
       }
+      R.T = R.T1;
       R.bodies = [
-        { tag: 'm₁', m: p.m1, W: p.m1 * g, T: R.T, N: N, f: R.f, a: R.a,
-          theta: th, comp: p.m1 * g * Math.sin(th) },
-        { tag: 'm₂', m: p.m2, W: p.m2 * g, T: R.T, N: 0, f: 0, a: R.a }
+        { tag: 'm₁', m: p.m1, W: p.m1 * g, T: R.T1, N: N, f: R.f, a: R.a, theta: th },
+        { tag: 'm₂', m: p.m2, W: p.m2 * g, T: R.T2, N: 0, f: 0, a: R.a }
       ];
+      return R;
+    }
+
+    if (p.mode === 'wedge') {
+      /* A block m on the smooth face of a wedge M that is itself free to slide
+         on a smooth floor. Unknowns (A, a_r, N): the wedge's acceleration
+         (backwards), the block's acceleration down the face RELATIVE to the
+         wedge, and the normal force. The constraint is that the block stays
+         on the face; that is what couples the two.
+           block, horizontal:  m(a_r cosθ − A) = N sinθ
+           block, vertical:    −m a_r sinθ     = N cosθ − mg
+           wedge, horizontal:  M A             = N sinθ                   */
+      const th = p.theta * Math.PI / 180, m = p.m1, M = p.M, s = Math.sin(th), c = Math.cos(th);
+      let A, ar, N;
+      if (p.fixWedge) { A = 0; ar = g * s; N = m * g * c; }
+      else {
+        const x = SV.lin([[-m, m * c, -s], [0, -m * s, -c], [M, 0, -s]], [0, -m * g, 0]);
+        A = x[0]; ar = x[1]; N = x[2];
+      }
+      R.A = A; R.ar = ar; R.N = N; R.theta = th;
+      R.ax = ar * c - A; R.az = -ar * s;                 // the block, in the ground frame
+      R.a = Math.hypot(R.ax, R.az);
+      R.pathAngle = Math.atan2(-R.az, R.ax) * 180 / Math.PI;
+      R.Nfloor = M * g + N * c;                          // what the floor pushes up on the wedge
+      R.static = false; R.fNeed = 0; R.fMax = 0; R.T = 0;
+      R.bodies = [
+        { tag: 'm', m: m, W: m * g, T: 0, N: N, f: 0, a: R.a, theta: th },
+        { tag: 'M', m: M, W: M * g, T: 0, N: R.Nfloor, f: 0, a: A, push: 0 }
+      ];
+      return R;
+    }
+
+    if (p.mode === 'lift') {
+      const L = S.liftTrip || (S.liftTrip = liftProfile(p));
+      const k = liftAt(L, S.tRun || 0);
+      R.aLift = k.a; R.vLift = k.v;
+      R.Nscale = p.m1 * (g + k.a);                       // what the scale pushes up with
+      R.reading = R.Nscale / g;                          // what it shows, in kg
+      R.Tcable = p.trip === 'cut' && (S.tRun || 0) > 0.8 ? 0 : (p.liftM + p.m1) * (g + k.a);
+      R.a = k.a; R.static = false; R.fNeed = 0; R.fMax = 0; R.T = R.Tcable;
+      R.bodies = [{ tag: 'm', m: p.m1, W: p.m1 * g, T: 0, N: R.Nscale, f: 0, a: k.a }];
       return R;
     }
 
     if (p.mode === 'contact') {
-      /* Two blocks pushed along a rough surface by F applied to m1.
-         Unknowns (a, Nc) where Nc is the contact force between them:
-           m1·a + Nc = F − uk·m1·g
-           m2·a − Nc = −uk·m2·g                            */
-      const F = p.F;
-      const fTot = us * (p.m1 + p.m2) * g;
+      /* two blocks pushed by F on m₁, each with its own friction */
+      const F = p.F, fTot = us * (p.m1 + p.m2) * g;
+      R.fNeed = F; R.fMax = fTot;
       if (F <= fTot + 1e-12) {
-        R.static = true; R.slipping = false; R.a = 0;
-        R.Nc = p.m2 * 0 + Math.max(0, F - us * p.m1 * g * 0) * 0;
-        /* At rest the contact force is whatever the rear block needs to not
-           move, which with both at rest is simply zero net — so report the
-           share of the applied force that reaches block 2. */
-        R.Nc = 0;
-        R.fNeed = F; R.fMax = fTot;
+        /* Static, and genuinely indeterminate: how the static friction is
+           shared between the two blocks is not fixed by Newton's laws, so
+           the contact force can be anything from 0 up to the least of F and
+           what block 2's friction can hold. The lab says so, not a number. */
+        R.static = true; R.a = 0; R.Nc = null;
+        R.NcMax = Math.min(F, us * p.m2 * g);
       } else {
-        const x = SV.lin([[p.m1, 1], [p.m2, -1]],
-                         [F - uk * p.m1 * g, -uk * p.m2 * g]);
-        R.static = false; R.slipping = true;
-        R.a = x[0]; R.Nc = x[1];
-        R.fNeed = F; R.fMax = fTot;
+        const x = SV.lin([[p.m1, 1], [p.m2, -1]], [F - uk * p.m1 * g, -uk * p.m2 * g]);
+        R.static = false; R.a = x[0]; R.Nc = x[1];
       }
-      R.T = R.Nc;
+      R.T = R.Nc || 0;
       R.bodies = [
-        { tag: 'm₁', m: p.m1, W: p.m1 * g, T: -R.Nc, N: p.m1 * g,
-          f: R.slipping ? uk * p.m1 * g : 0, a: R.a, push: F },
-        { tag: 'm₂', m: p.m2, W: p.m2 * g, T: R.Nc, N: p.m2 * g,
-          f: R.slipping ? uk * p.m2 * g : 0, a: R.a }
+        { tag: 'm₁', m: p.m1, W: p.m1 * g, T: -(R.Nc || 0), N: p.m1 * g, f: R.static ? 0 : uk * p.m1 * g, a: R.a, push: F },
+        { tag: 'm₂', m: p.m2, W: p.m2 * g, T: R.Nc || 0, N: p.m2 * g, f: R.static ? 0 : uk * p.m2 * g, a: R.a }
       ];
       return R;
     }
 
-    /* banking — circular motion, so the unknown is a SPEED RANGE rather than
-       an acceleration. Solve N and friction at the two limits of the cone. */
-    const th = p.theta * Math.PI / 180, r = p.radius;
-    const t = Math.tan(th);
+    /* banking — circular motion: the unknown is a band of speeds */
+    const th = p.theta * Math.PI / 180, r = p.radius, t = Math.tan(th);
     R.vIdeal = Math.sqrt(r * g * t);
-    const num1 = t + us, den1 = 1 - us * t;
-    const num2 = t - us, den2 = 1 + us * t;
+    const num1 = t + us, den1 = 1 - us * t, num2 = t - us, den2 = 1 + us * t;
     R.vMax = den1 > 1e-6 ? Math.sqrt(r * g * num1 / den1) : Infinity;
     R.vMin = num2 > 0 ? Math.sqrt(r * g * num2 / den2) : 0;
-    R.v = p.speed;
     R.needed = p.m1 * p.speed * p.speed / r;
     R.safe = p.speed >= R.vMin - 1e-9 && p.speed <= R.vMax + 1e-9;
     R.slides = p.speed > R.vMax ? 'out' : p.speed < R.vMin ? 'in' : null;
     R.a = p.speed * p.speed / r;
-    R.static = R.safe; R.slipping = !R.safe;
-    /* the friction the tyres must actually supply along the slope at this
-       speed, and what they can give — the same test as everywhere else */
-    const Nb = p.m1 * (g * Math.cos(th) + (p.speed * p.speed / r) * Math.sin(th));
-    R.fNeed = p.m1 * ((p.speed * p.speed / r) * Math.cos(th) - g * Math.sin(th));
+    R.static = R.safe;
+    const Nb = p.m1 * (g * Math.cos(th) + R.a * Math.sin(th));
+    R.fNeed = p.m1 * (R.a * Math.cos(th) - g * Math.sin(th));
     R.fMax = us * Nb;
-    R.bodies = [{ tag: 'car', m: p.m1, W: p.m1 * g, T: 0, N: Nb,
-                  f: R.fNeed, a: R.a, theta: th }];
+    R.bodies = [{ tag: 'car', m: p.m1, W: p.m1 * g, T: 0, N: Nb, f: R.fNeed, a: R.a, theta: th }];
     return R;
   }
 
+  /* least-squares slope of v against t: the acceleration a student would
+     report from the sensor's record */
+  function fitSlope(pts) {
+    const n = pts.length;
+    if (n < 3) return null;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    pts.forEach(q => { sx += q[0]; sy += q[1]; sxx += q[0] * q[0]; sxy += q[0] * q[1]; });
+    const d = n * sxx - sx * sx;
+    return Math.abs(d) < 1e-12 ? null : { m: (n * sxy - sx * sy) / d, c: (sy * sxx - sx * sxy) / d };
+  }
+
+  /* how far each rig can run before something hits a stop */
+  function travelOf(p, R) {
+    if (p.mode === 'atwood') return 0.34;
+    if (p.mode === 'table') return 0.52;
+    if (p.mode === 'incline') return 0.42;
+    if (p.mode === 'contact') return 0.62;
+    if (p.mode === 'wedge') {
+      const th = p.theta * Math.PI / 180, Lw = 0.62, Ls = Lw / Math.cos(th);
+      return Math.max(0.05, Ls - 0.30);
+    }
+    return 0;
+  }
+  /* A sensor's reading is never perfectly clean. Each sample gets its own
+     independent error of up to ±0.3 mm (repeatable, from a hash of the time),
+     so it averages out over a run the way real sensor noise does — a smooth
+     wobble would not, and would bias the fitted slope. Logged at 50 Hz. */
+  const sensorNoise = t => {
+    const h = Math.sin(Math.round(t * 50) * 12.9898 + 78.233) * 43758.5453;
+    return 0.0003 * 2 * ((h - Math.floor(h)) - 0.5);
+  };
+
   L.register({
     id: 'newton', subject: 'physics',
-    name: 'Connected Bodies — Pulleys, Friction and Banking',
+    name: 'Laws of Motion — Pulleys, Wedges, Lifts and Friction',
     chapter: 'Laws of Motion',
     exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
     weight: 'Very high yield',
     is3D: true,
-    stageHint: 'Drag the hanging mass to change it · friction is tested every frame, never assumed',
-    lede: 'The lab never decides in advance whether a block moves. It writes Newton\'s second law for ' +
-      'every body together with the string constraint, solves the system, and then <b>tests the friction ' +
-      'that answer demands against μ<sub>s</sub>N</b>. If static friction can supply it, nothing moves — ' +
-      'and the friction force is whatever equilibrium needs, not μ<sub>s</sub>N. If it cannot, the block ' +
-      'is released and slides on μ<sub>k</sub>N. Cross that threshold with a slider and you can watch the ' +
-      'whole system break loose, which is the single most examined idea in the chapter.',
+    stageHint: 'Drag the hanging mass to change it · the motion sensor measures what the equations predict',
+    lede: 'This is a working bench, not a diagram. Each rig — pulleys, a ramp, a wedge that slides away ' +
+      'from under its block, a lift on a trip — is solved from Newton\'s second law for <b>every body</b> ' +
+      'plus the <b>constraints</b> that join them: a string that cannot stretch, a pulley that turns ' +
+      'without slipping, a block that must stay on the wedge. Friction is settled by a test before ' +
+      'anything moves. Then the bench <b>measures</b> what happens: an ultrasonic motion sensor logs the ' +
+      'position with real millimetre noise, the acceleration is fitted from its record, and a force ' +
+      'sensor reads the tension. Theory and measurement sit side by side, as they do in the practical exam.',
 
-    params: { mode: 'incline', m1: 4, m2: 3, theta: 30, muS: 0.30, muK: 0.25,
-              F: 20, radius: 80, speed: 15, showFBD: true, run: true },
+    params: { mode: 'table', m1: 4, m2: 3, mp: 0, theta: 30, muS: 0.30, muK: 0.25,
+              F: 20, M: 4, fixWedge: false, liftA: 2, liftM: 350, trip: 'up',
+              radius: 80, speed: 15, showFBD: true, run: true },
 
     presets: [
-      { name: 'Atwood machine', params: { mode: 'atwood', m1: 5, m2: 3 } },
-      { name: 'Table · it holds', params: { mode: 'table', m1: 10, m2: 2, muS: 0.5, muK: 0.4, theta: 0 } },
-      { name: 'Table · it breaks free', params: { mode: 'table', m1: 10, m2: 8, muS: 0.5, muK: 0.4, theta: 0 } },
-      { name: 'Incline · frictionless', params: { mode: 'incline', m1: 4, m2: 3, theta: 30, muS: 0, muK: 0 } },
-      { name: 'Incline · on the edge', params: { mode: 'incline', m1: 5, m2: 3, theta: 30, muS: 0.6, muK: 0.5 } },
+      { name: 'Atwood machine', params: { mode: 'atwood', m1: 5, m2: 3, mp: 0 } },
+      { name: 'Atwood · heavy pulley', params: { mode: 'atwood', m1: 5, m2: 3, mp: 2 } },
+      { name: 'Table · it holds', params: { mode: 'table', m1: 10, m2: 2, muS: 0.5, muK: 0.4, mp: 0 } },
+      { name: 'Table · it breaks free', params: { mode: 'table', m1: 10, m2: 8, muS: 0.5, muK: 0.4, mp: 0 } },
+      { name: 'Incline · on the edge', params: { mode: 'incline', m1: 5, m2: 3, theta: 30, muS: 0.6, muK: 0.5, mp: 0 } },
+      { name: 'Incline · slides down', params: { mode: 'incline', m1: 10, m2: 1, theta: 35, muS: 0.2, muK: 0.1, mp: 0 } },
+      { name: 'Sliding wedge', params: { mode: 'wedge', m1: 1, M: 4, theta: 30, fixWedge: false } },
+      { name: 'Light wedge recoils', params: { mode: 'wedge', m1: 2, M: 1, theta: 40, fixWedge: false } },
+      { name: 'Lift going up', params: { mode: 'lift', m1: 60, liftA: 2, trip: 'up' } },
+      { name: 'Lift cable cut', params: { mode: 'lift', m1: 60, liftA: 2, trip: 'cut' } },
       { name: 'Blocks in contact', params: { mode: 'contact', m1: 3, m2: 2, F: 20, muS: 0, muK: 0 } },
-      { name: 'Contact with friction', params: { mode: 'contact', m1: 3, m2: 2, F: 30, muS: 0.2, muK: 0.18 } },
-      { name: 'Banked curve', params: { mode: 'banking', m1: 1200, theta: 20, radius: 80, muS: 0.4, muK: 0.35, speed: 15 } },
-      { name: 'Banked · too fast', params: { mode: 'banking', m1: 1200, theta: 20, radius: 80, muS: 0.4, muK: 0.35, speed: 30 } }
+      { name: 'Banked curve', params: { mode: 'banking', m1: 1200, theta: 20, radius: 80, muS: 0.4, muK: 0.35, speed: 15 } }
     ],
 
     controls: [
       { group: 'Arrangement', items: [
-        { key: 'mode', type: 'select', label: 'What is set up', restructure: true, options: [
+        { key: 'mode', type: 'select', label: 'What is on the bench', restructure: true, options: [
           { value: 'atwood', label: 'Atwood' }, { value: 'table', label: 'Table' },
-          { value: 'incline', label: 'Incline' }, { value: 'contact', label: 'In contact' },
+          { value: 'incline', label: 'Ramp' }, { value: 'wedge', label: 'Wedge' },
+          { value: 'lift', label: 'Lift' }, { value: 'contact', label: 'Contact' },
           { value: 'banking', label: 'Banking' }] }
       ] },
       { group: 'The masses', items: [
-        { key: 'm1', label: 'Mass <i>m</i>₁', min: 0.5, max: 20, step: 0.1, unit: 'kg',
+        { key: 'm1', label: 'Mass <i>m</i>₁ (block, or person in the lift)', min: 0.5, max: 100, step: 0.1, unit: 'kg',
           fmt: v => v.toFixed(1), restructure: true },
-        { key: 'm2', label: 'Mass <i>m</i>₂', min: 0.5, max: 20, step: 0.1, unit: 'kg',
+        { key: 'm2', label: 'Mass <i>m</i>₂ (hanging)', min: 0.5, max: 20, step: 0.1, unit: 'kg',
+          fmt: v => v.toFixed(1), restructure: true },
+        { key: 'mp', label: 'Pulley mass (a uniform disc)', min: 0, max: 6, step: 0.1, unit: 'kg',
           fmt: v => v.toFixed(1), restructure: true }
       ] },
-      { group: 'The surface', items: [
-        { key: 'theta', label: 'Angle <i>θ</i>', min: 0, max: 60, step: 0.5, unit: '°',
-          fmt: v => v.toFixed(1), restructure: true },
-        { key: 'muS', label: 'Static <i>μ</i><sub>s</sub>', min: 0, max: 1.2, step: 0.01, unit: '',
-          fmt: v => v.toFixed(2), restructure: true },
-        { key: 'muK', label: 'Kinetic <i>μ</i><sub>k</sub>', min: 0, max: 1.2, step: 0.01, unit: '',
-          fmt: v => v.toFixed(2), restructure: true }
+      { group: 'The surfaces', items: [
+        { key: 'theta', label: 'Angle <i>θ</i>', min: 5, max: 60, step: 0.5, unit: '°', fmt: v => v.toFixed(1), restructure: true },
+        { key: 'muS', label: 'Static <i>μ</i><sub>s</sub>', min: 0, max: 1.2, step: 0.01, unit: '', fmt: v => v.toFixed(2), restructure: true },
+        { key: 'muK', label: 'Kinetic <i>μ</i><sub>k</sub>', min: 0, max: 1.2, step: 0.01, unit: '', fmt: v => v.toFixed(2), restructure: true }
+      ] },
+      { group: 'The wedge', items: [
+        { key: 'M', label: 'Wedge mass <i>M</i>', min: 0.5, max: 20, step: 0.1, unit: 'kg', fmt: v => v.toFixed(1), restructure: true },
+        { key: 'fixWedge', type: 'toggle', label: 'Clamp the wedge to the track', restructure: true }
+      ] },
+      { group: 'The lift', items: [
+        { key: 'trip', type: 'select', label: 'The trip', restructure: true, options: [
+          { value: 'up', label: 'Up' }, { value: 'down', label: 'Down' }, { value: 'cut', label: 'Cable cut' }] },
+        { key: 'liftA', label: 'Acceleration', min: 0.2, max: 5, step: 0.1, unit: 'm/s²', fmt: v => v.toFixed(1), restructure: true },
+        { key: 'liftM', label: 'Car mass', min: 100, max: 1000, step: 10, unit: 'kg', fmt: v => v.toFixed(0), restructure: true }
       ] },
       { group: 'Pushing force', items: [
-        { key: 'F', label: 'Applied force <i>F</i>', min: 0, max: 120, step: 0.5, unit: 'N',
-          fmt: v => v.toFixed(1), restructure: true }
+        { key: 'F', label: 'Applied force <i>F</i>', min: 0, max: 120, step: 0.5, unit: 'N', fmt: v => v.toFixed(1), restructure: true }
       ] },
       { group: 'The banked curve', items: [
-        { key: 'radius', label: 'Radius <i>r</i>', min: 10, max: 300, step: 1, unit: 'm',
-          fmt: v => v.toFixed(0), restructure: true },
-        { key: 'speed', label: 'Speed <i>v</i>', min: 1, max: 60, step: 0.5, unit: 'm/s',
-          fmt: v => v.toFixed(1), restructure: true }
+        { key: 'radius', label: 'Radius <i>r</i>', min: 10, max: 300, step: 1, unit: 'm', fmt: v => v.toFixed(0), restructure: true },
+        { key: 'speed', label: 'Speed <i>v</i>', min: 1, max: 60, step: 0.5, unit: 'm/s', fmt: v => v.toFixed(1), restructure: true }
       ] },
       { group: 'Display', items: [
         { key: 'showFBD', type: 'toggle', label: 'Show the free-body diagram' },
@@ -202,17 +294,23 @@
 
     setup(S) {
       const p = S.p;
-      if (p.muK > p.muS) p.muK = p.muS;              // kinetic never exceeds static
+      if (p.muK > p.muS) p.muK = p.muS;
+      S.tRun = 0; S.s = 0; S.v = 0; S.sW = 0; S.log = []; S.fit = null; S._lastLog = -1;
+      S.liftTrip = p.mode === 'lift' ? liftProfile(p) : null;
       S.R = mechanics(S);
-      S.s = 0; S.v = 0;                              // displacement along the string
-      /* Each arrangement needs its own viewpoint: a banked road only reads as
-         banked from close to its own plane, while a pulley rig needs height. */
-      const view = p.mode === 'banking' ? { theta: -1.30, phi: 0.11, dist: 3.0, target: [0, 0, 0.02] }
-                 : p.mode === 'contact' ? { theta: -1.50, phi: 0.20, dist: 2.6, target: [0, 0, 0.02] }
-                 : { theta: -1.50, phi: 0.20, dist: 2.75, target: [0.02, 0, 0.18] };
+      S.travel = travelOf(p, S.R);
+      const views = {
+        atwood: { theta: -1.36, phi: 0.14, dist: 2.0, target: [0.08, 0, 0.62] },
+        table: { theta: -1.30, phi: 0.24, dist: 2.1, target: [0.38, 0, -0.14] },
+        incline: { theta: -1.38, phi: 0.20, dist: 2.2, target: [0.40, 0, 0.22] },
+        wedge: { theta: -1.42, phi: 0.20, dist: 1.8, target: [-0.05, 0, 0.18] },
+        lift: { theta: -1.30, phi: 0.12, dist: 3.6, target: [-0.20, 0, 1.25] },
+        contact: { theta: -1.38, phi: 0.30, dist: 1.9, target: [0.1, 0, 0.04] },
+        banking: { theta: -1.30, phi: 0.11, dist: 3.0, target: [0, 0, 0.02] }
+      };
       if (!S.cam || S._viewMode !== p.mode) {
-        S.cam = Camera(view);
-        S.cam.minDist = 1.5; S.cam.maxDist = 12;
+        S.cam = Camera(views[p.mode] || views.table);
+        S.cam.minDist = 1.2; S.cam.maxDist = 14;
         S._viewMode = p.mode;
       }
       S.carPhase = S.carPhase || 0;
@@ -220,250 +318,369 @@
 
     step(S, dt) {
       const p = S.p, R = S.R;
-      S.t2 = (S.t2 || 0) + dt;
       if (p.mode === 'banking') { S.carPhase += dt * p.speed / Math.max(p.radius, 1); return; }
-      if (!p.run || R.static) { S.v = 0; return; }
-      /* The motion is the solved acceleration, integrated. Nothing is
-         scripted: change mu and the same integrator either moves or does not. */
-      S.v += R.a * dt;
-      S.s += S.v * dt;
-      const lim = p.mode === 'contact' ? 1.05 : 0.62;
-      if (Math.abs(S.s) > lim) { S.s = 0; S.v = 0; }   // reset and run again
+      if (!p.run) return;
+      S.tRun += dt;
+      if (p.mode === 'lift') {
+        const L = S.liftTrip;
+        if (S.tRun > L.T + 0.6) { S.tRun = 0; S.log = []; S._lastLog = -1; }
+        S.R = mechanics(S);
+        const k = liftAt(L, S.tRun);
+        S.s = k.z; S.v = k.v;
+        if (S.tRun - S._lastLog >= 1 / 30) {
+          S._lastLog = S.tRun;
+          S.log.push([S.tRun, k.z + sensorNoise(S.tRun), S.R.reading]);
+        }
+        return;
+      }
+      /* wait a moment, release, run until something reaches a stop, hold, repeat */
+      const t0 = 0.35, tm = Math.max(0, S.tRun - t0);
+      const a = p.mode === 'wedge' ? R.ar : R.a;
+      let s = R.static ? 0 : 0.5 * a * tm * tm, v = R.static ? 0 : a * tm;
+      const lim = S.travel;
+      if (Math.abs(s) >= lim) {
+        const tStop = Math.sqrt(2 * lim / Math.max(Math.abs(a), 1e-9));
+        s = Math.sign(a) * lim; v = 0;
+        if (tm > tStop + 1.1) { S.tRun = 0; S.log = []; S._lastLog = -1; S.fit = null; }
+      } else if (R.static && S.tRun > 2.6) { S.tRun = 0; S.log = []; S._lastLog = -1; }
+      S.s = s; S.v = v;
+      if (p.mode === 'wedge') S.sW = R.ar ? s * R.A / R.ar : 0;   // the wedge moves back in step
+      if (S.tRun - S._lastLog >= 1 / 50) {
+        S._lastLog = S.tRun;
+        // on the wedge rig the sensor sits at the end of the track and sees the wedge
+        const track = p.mode === 'wedge' ? S.sW : s;
+        S.log.push([S.tRun, track + sensorNoise(S.tRun)]);
+        if (S.log.length > 400) S.log.shift();
+        // velocities by central difference, then a straight-line fit while it moves
+        const vs = [];
+        for (let i = 1; i < S.log.length - 1; i++) {
+          const q0 = S.log[i - 1], q1 = S.log[i + 1];
+          vs.push([S.log[i][0], (q1[1] - q0[1]) / (q1[0] - q0[0])]);
+        }
+        S.vlog = vs;
+        const moving = vs.filter(q => q[0] > t0 + 0.05 && Math.abs(q[1]) > 0.004 &&
+          (Math.abs(a) < 1e-9 || q[0] < t0 + Math.sqrt(2 * lim / Math.abs(a)) - 0.04));
+        S.fit = R.static ? null : fitSlope(moving);    // at rest there is nothing to fit, only noise
+      }
     },
 
     drawStage(S, g) {
       const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, R = S.R;
-      const cam = S.cam, F = R3.Frame(ctx, cam, { ambient: 0.26, floorZ: null });
+      const cam = S.cam, B = window.BENCH;
+      const F = R3.Frame(ctx, cam, { ambient: 0.28, floorZ: p.mode === 'lift' ? 0 : null });
       const acc = th.phys;
-      /* DEPTH POLICY (§14.6): only the bench and the floor carry F.GROUND.
-         Blocks, pulley and string sort on their own depth; vectors take a few
-         hundredths so they sit on their own body. */
+      const s = S.s || 0;
+      let hdl = null;
       const O = cam.project([0, 0, 0]);
       const away = (pt) => { const q = cam.project(pt); return (q.ok && O.ok && q.x < O.x) ? -1 : 1; };
-      const blockCol = ['#C08A4A', '#4A8AC0'];
+      /* DEPTH POLICY (§14.6): table, floor and road carry F.GROUND. Apparatus
+         sorts on true depth; strings and arrows take a few hundredths. */
 
-      /* a solid block with a label on it */
-      const drawBlock = (c, size, colour, tag, massKg) => {
-        R3.box(F, c, size, colour, { shadow: false, ambient: 0.40 });
-        R3.label(F, [c[0], c[1], c[2] + size[2] / 2 + 0.055], tag + ' = ' + massKg.toFixed(1) + ' kg',
-                 '#F0E4D0', { size: 9.5 });
+      /* ---------- apparatus pieces ---------- */
+      const blockTex = B.wood('#C99A62', 5);
+      const woodBlock = (c, size, axes, tag, mkg) => {
+        B.texBox(F, c, size, blockTex, { axes: axes || undefined, ambient: 0.45 });
+        if (tag) R3.label(F, [c[0], c[1] - size[1] / 2 - 0.01, c[2] + size[2] / 2 + 0.05],
+                          tag + ' = ' + mkg.toFixed(1) + ' kg', '#F6E7CE', { size: 9.5 });
+      };
+      /* a slotted-mass hanger: hook, rod, and brass discs whose stack grows with the mass */
+      const massStack = (top, m, tag) => {
+        const h = 0.05 + 0.02 * Math.pow(m, 0.75), n = Math.max(1, Math.min(12, Math.round(m)));
+        const rD = 0.036 + 0.006 * Math.cbrt(m);
+        R3.cylinder(F, top, [top[0], top[1], top[2] - 0.035], 0.003, '#C8D0DC', { segments: 6, shadow: false, caps: false });
+        let z = top[2] - 0.035;
+        for (let i = 0; i < n; i++) {
+          const dz = h / n;
+          R3.cylinder(F, [top[0], top[1], z], [top[0], top[1], z - dz * 0.92], rD,
+                      i % 2 ? '#C9A04A' : '#B8903F', { segments: 22, shadow: false, ambient: 0.42 });
+          z -= dz;
+        }
+        R3.cylinder(F, [top[0], top[1], z], [top[0], top[1], z - 0.008], rD * 1.05, '#8A6A2A',
+                    { segments: 22, shadow: false, ambient: 0.4 });
+        if (tag) R3.label(F, [top[0] + rD + 0.05, top[1], top[2] - h / 2], tag + ' = ' + m.toFixed(1) + ' kg',
+                          '#F2D79A', { size: 9.5, align: 'left' });
+        return z - 0.008;
+      };
+      /* an ultrasonic motion sensor: a dark box with a gold transducer */
+      const motionSensor = (at, dir, target) => {
+        const d = R3.norm(dir);
+        const ax = [d, R3.norm(R3.cross([0, 0, 1], d).map(v => v || 0)), [0, 0, 1]];
+        if (Math.abs(d[2]) > 0.9) { ax[1] = [0, 1, 0]; ax[2] = R3.norm(R3.cross(d, [0, 1, 0])); }
+        R3.box(F, at, [0.06, 0.09, 0.07], '#23293A', { shadow: false, ambient: 0.4, axes: ax });
+        R3.cylinder(F, R3.add(at, R3.scale(d, 0.03)), R3.add(at, R3.scale(d, 0.036)), 0.027, '#C9A04A',
+                    { segments: 20, shadow: false, ambient: 0.55 });
+        if (target) R3.polyline(F, [R3.add(at, R3.scale(d, 0.04)), target], '#7CF0B0',
+                                { alpha: .35, width: 1, dash: [3, 4], bias: -0.02 });
+      };
+      /* a meter standing on the bench, facing the student */
+      const standMeter = (x, y, z, title, value, unit, col) => {
+        R3.box(F, [x, y + 0.02, (z - 0.06) / 2 + 0.0], [0.03, 0.03, Math.max(0.02, z - 0.06)], '#3A4458',
+               { shadow: false, ambient: 0.35 });
+        B.meter(F, [x, y, z + 0.03], [0, -1, 0], 0.30, 0.14, { title: title, value: value, unit: unit, colour: col || '#7CF0B0' });
+      };
+      const aSensor = () => S.fit ? Math.abs(S.fit.m).toFixed(2) : (R.static ? '0.00' : '— —');
+      const rope = (pts) => B.string(F, pts, { r: 0.0035 });
+      const arc = (c, r, a0, a1, n) => {
+        const out = [];
+        for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; out.push([c[0] + r * Math.cos(a), c[1], c[2] + r * Math.sin(a)]); }
+        return out;
+      };
+      const handleAt = (pt, tip) => {
+        const q = cam.project(pt);
+        if (!q.ok) return;
+        hdl = { x: q.x, y: q.y, r: 14, tip: tip };
+        const qb = cam.project([pt[0], pt[1], pt[2] + 1]);
+        if (qb.ok) { const dx = qb.x - q.x, dy = qb.y - q.y, Lp = Math.hypot(dx, dy) || 1; S._axM = { ux: dx / Lp, uy: dy / Lp, perPx: 1 / Lp }; }
       };
 
-      if (p.mode === 'banking') {
-        /* ---- a banked section of road, with the car on it ---- */
-        const thr = p.theta * Math.PI / 180;
-        const Rr = 1.05, wRoad = 0.78;
-        const ring = (u, z0) => {
-          const pts = [];
-          for (let i = 0; i <= 72; i++) {
-            const a = i / 72 * TAU;
-            const rad = Rr + u * wRoad / 2;
-            pts.push([Math.cos(a) * rad, Math.sin(a) * rad,
-                      z0 + u * (wRoad / 2) * Math.tan(thr)]);
-          }
-          return pts;
-        };
-        const inner = ring(-1, 0), outer = ring(1, 0);
-        F.push([0, 0, 0], () => {
-          for (let i = 0; i < 72; i++) {
-            const q = [inner[i], outer[i], outer[i + 1], inner[i + 1]].map(v => cam.project(v));
-            if (q.some(x => !x.ok)) continue;
-            const shade = 0.22 + 0.16 * (1 + Math.sin(i / 72 * TAU)) / 2;
-            ctx.fillStyle = F.shade('#39435C', [0, 0, 1], { ambient: shade });
-            ctx.beginPath();
-            q.forEach((x, k) => k ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
-            ctx.closePath(); ctx.fill();
-          }
-        }, F.GROUND);
-        R3.polyline(F, inner, '#8FA4CE', { alpha: .55, width: 1.4, bias: F.GROUND });
-        R3.polyline(F, outer, '#8FA4CE', { alpha: .55, width: 1.4, bias: F.GROUND });
-        // the car, riding the bank
-        const a0 = S.carPhase;
-        const cx = Math.cos(a0) * Rr, cy = Math.sin(a0) * Rr;
-        const carCol = R.safe ? '#7CE0A8' : th.crit;
-        /* the car rides the camber, so it is tilted with the road */
-        const nrm = [-Math.cos(a0) * Math.sin(thr), -Math.sin(a0) * Math.sin(thr), Math.cos(thr)];
-        const tang = [-Math.sin(a0), Math.cos(a0), 0];
-        const side = [nrm[1] * tang[2] - nrm[2] * tang[1], nrm[2] * tang[0] - nrm[0] * tang[2],
-                      nrm[0] * tang[1] - nrm[1] * tang[0]];
-        R3.box(F, [cx + nrm[0] * 0.05, cy + nrm[1] * 0.05, nrm[2] * 0.05],
-               [0.26, 0.14, 0.09], carCol,
-               { shadow: false, ambient: 0.5, axes: [tang, side, nrm] });
-        R3.callout(F, [cx, cy, 0.12], away([cx, cy, 0]) * 26, -24,
-                   R.safe ? 'holds the curve at ' + p.speed.toFixed(1) + ' m/s'
-                          : R.slides === 'out' ? 'SLIDES OUTWARD — too fast'
-                                               : 'SLIDES INWARD — too slow', carCol);
-        // the ideal-speed marker on the road
-        R3.label(F, [0, 0, 0.16], 'r = ' + p.radius.toFixed(0) + ' m  ·  bank ' + p.theta.toFixed(1) + '°',
-                 th['text-2'], { size: 10 });
-        // the force triangle on a cross-section, drawn where the car is
-        const nDir = [-Math.cos(a0) * Math.sin(thr), -Math.sin(a0) * Math.sin(thr), Math.cos(thr)];
-        R3.arrow(F, [cx, cy, 0.09], [cx + nDir[0] * 0.42, cy + nDir[1] * 0.42, 0.09 + nDir[2] * 0.42],
-                 0.012, '#5AA9FF', { head: 0.05, shadow: false, ambient: 0.8, bias: -0.04 });
-        R3.arrow(F, [cx, cy, 0.09], [cx, cy, 0.09 - 0.34], 0.012, '#FFD36B',
-                 { head: 0.05, shadow: false, ambient: 0.8, bias: -0.04 });
-        R3.arrow(F, [cx, cy, 0.09], [cx * (1 - 0.30 / Rr), cy * (1 - 0.30 / Rr), 0.09], 0.012, th.crit,
-                 { head: 0.05, shadow: false, ambient: 0.8, bias: -0.04 });
-        R3.label(F, [cx + nDir[0] * 0.48, cy + nDir[1] * 0.48, 0.09 + nDir[2] * 0.48], 'N', '#5AA9FF', { size: 10 });
-        R3.label(F, [cx, cy, 0.09 - 0.40], 'mg', '#FFD36B', { size: 10 });
-        R3.label(F, [cx * (1 - 0.38 / Rr), cy * (1 - 0.38 / Rr), 0.12], 'mv²/r', th.crit, { size: 10 });
+      if (p.mode === 'table' || p.mode === 'contact') {
+        B.table(F, -1.05, 1.05, -0.42, 0.42, 0, { legH: 0.69 });
+        B.rule(F, [-0.95, -0.35, 0], [1, 0, 0], 1.9, { width: 0.05 });
+      }
+
+      if (p.mode === 'table') {
+        const k = clamp(Math.cbrt(p.m1 / 4), 0.7, 1.6);
+        const bl = [0.16 * k, 0.10 * k, 0.08 * k];
+        const xb = -0.45 + s, hookZ = bl[2] / 2, r = 0.045;
+        const px = 1.05 + r * 1.2, pz = hookZ - r;
+        woodBlock([xb, 0, bl[2] / 2], bl, null, 'm₁', p.m1);
+        R3.sphere(F, [xb + bl[0] / 2 + 0.008, 0, hookZ], 0.007, '#D0D8E4', { shadow: false });
+        // the pulley, clamped to the table edge
+        R3.box(F, [1.05 + 0.01, 0, -0.03], [0.05, 0.05, 0.06], '#3A4458', { shadow: false, ambient: 0.35 });
+        R3.box(F, [px - 0.01, 0.03, (pz - 0.03) / 2], [0.02, 0.01, Math.abs(pz + 0.03) + 0.02], '#3A4458', { shadow: false });
+        B.pulley(F, [px, 0, pz], [0, 1, 0], r, { phase: -s / r, width: 0.03 });
+        const zTop = pz - 0.16 - s;
+        rope([[xb + bl[0] / 2 + 0.008, 0, hookZ], [px, 0, pz + r]].concat(arc([px, 0, pz], r, Math.PI / 2, 0, 8))
+               .concat([[px + r, 0, zTop]]));
+        massStack([px + r, 0, zTop], p.m2, 'm₂');
+        handleAt([px + r, 0, zTop - 0.06], 'drag m₂');
+        // stop at the pulley end, sensor at the other
+        R3.box(F, [0.99, 0, 0.025], [0.03, 0.14, 0.05], '#1E1E22', { shadow: false, ambient: 0.3 });
+        motionSensor([-0.97, 0, hookZ], [1, 0, 0], [xb - bl[0] / 2, 0, hookZ]);
+        standMeter(-0.62, 0.36, 0.16, 'MOTION SENSOR a', aSensor(), 'm/s²');
+        standMeter(-0.32, 0.36, 0.16, 'FORCE T₁ (block)', R.T1.toFixed(2), 'N', '#FFD36B');
+        if (p.mp > 0) standMeter(-0.02, 0.36, 0.16, 'FORCE T₂ (hanger)', R.T2.toFixed(2), 'N', '#FFD36B');
+      }
+
+      else if (p.mode === 'incline') {
+        B.table(F, -1.05, 1.05, -0.42, 0.42, 0, { legH: 0.69 });
+        const thr = p.theta * Math.PI / 180, Lr = 1.2, tb = 0.03;
+        const e1 = [Math.cos(thr), 0, Math.sin(thr)], e3 = [-Math.sin(thr), 0, Math.cos(thr)];
+        const xTop = 0.95, H0 = [xTop - Lr * Math.cos(thr), 0, 0], T = [xTop, 0, Lr * Math.sin(thr)];
+        const at = (u, h) => [H0[0] + e1[0] * u + e3[0] * h, 0, H0[2] + e1[2] * u + e3[2] * h];
+        B.texBox(F, at(Lr / 2, -tb / 2), [Lr, 0.26, tb], B.wood('#9C6B3E', 3), { axes: [e1, [0, 1, 0], e3], ambient: 0.45 });
+        B.rule(F, [H0[0] + e1[0] * 0.05, -0.115, H0[2] + e1[2] * 0.05], e1, 1.0, { up: e3, width: 0.04 });
+        // hinge at the foot, a clamp stand propping the top
+        R3.cylinder(F, [H0[0], -0.14, 0.01], [H0[0], 0.14, 0.01], 0.012, '#6B7890', { segments: 12, shadow: false });
+        const rodTop = B.clampStand(F, [xTop - 0.10, 0.28, 0], Math.max(0.06, T[2] - 0.02));
+        B.bossClamp(F, [rodTop[0], 0.26, T[2] - 0.05]);
+        R3.cylinder(F, [rodTop[0], 0.26, T[2] - 0.05], [rodTop[0], 0.0, T[2] - 0.05], 0.008, '#B8C2D0', { segments: 10, shadow: false });
+        // the angle, on a protractor arc at the foot
+        const pa = [];
+        for (let i = 0; i <= 20; i++) { const a = thr * i / 20; pa.push([H0[0] + 0.24 * Math.cos(a), -0.14, 0.004 + 0.24 * Math.sin(a)]); }
+        R3.polyline(F, pa, acc, { alpha: .9, width: 1.8, bias: -0.02 });
+        R3.label(F, [H0[0] + 0.33 * Math.cos(thr / 2), -0.15, 0.33 * Math.sin(thr / 2)], 'θ = ' + p.theta.toFixed(1) + '°', acc, { size: 10 });
+        // the block on the ramp
+        const k = clamp(Math.cbrt(p.m1 / 4), 0.7, 1.5), bl = [0.15 * k, 0.10 * k, 0.075 * k];
+        const sb = clamp(Lr * 0.42 + s, bl[0] / 2 + 0.03, Lr - bl[0] / 2 - 0.08);
+        woodBlock(at(sb, bl[2] / 2), bl, [e1, [0, 1, 0], e3], 'm₁', p.m1);
+        const hook = at(sb + bl[0] / 2 + 0.008, bl[2] / 2);
+        const r = 0.045, C = at(Lr + 0.05, bl[2] / 2 - r);
+        R3.box(F, at(Lr + 0.025, -0.01), [0.07, 0.04, 0.03], '#3A4458', { axes: [e1, [0, 1, 0], e3], shadow: false });
+        B.pulley(F, C, [0, 1, 0], r, { phase: -s / r, width: 0.03 });
+        const aTan = Math.atan2(e3[2], e3[0]);
+        const zTop = C[2] - 0.16 - s;
+        rope([hook, [C[0] + e3[0] * r, 0, C[2] + e3[2] * r]].concat(arc(C, r, aTan, 0, 10)).concat([[C[0] + r, 0, zTop]]));
+        massStack([C[0] + r, 0, zTop], p.m2, 'm₂');
+        handleAt([C[0] + r, 0, zTop - 0.06], 'drag m₂');
+        motionSensor(at(0.04, 0.045), e1, at(sb - bl[0] / 2, 0.045));
+        standMeter(-0.70, 0.36, 0.16, 'MOTION SENSOR a', aSensor(), 'm/s²');
+        standMeter(-0.40, 0.36, 0.16, 'FORCE T₁ (block)', R.T1.toFixed(2), 'N', '#FFD36B');
+        standMeter(-0.10, 0.36, 0.16, R.static ? 'FRICTION (static)' : 'FRICTION μₖN', Math.abs(R.f || 0).toFixed(2), 'N', '#FF8B8B');
+      }
+
+      else if (p.mode === 'atwood') {
+        B.table(F, -0.75, 0.75, -0.42, 0.42, 0, { legH: 0.69 });
+        const r = 0.07, pz = 1.22;
+        // the stand beside the machine, not behind a string; an arm reaches the axle
+        const rodTop = B.clampStand(F, [0.30, 0.20, 0], 1.30);
+        B.bossClamp(F, [rodTop[0], 0.20, pz]);
+        R3.cylinder(F, [rodTop[0], 0.20, pz], [0, 0.05, pz], 0.009, '#B8C2D0', { segments: 10, shadow: false });
+        B.pulley(F, [0, 0, pz], [0, 1, 0], r, { phase: s / r, width: 0.035, spokes: 6 });
+        const z1 = 0.78 - s, z2 = 0.78 + s;
+        rope([[-r, 0, z1]].concat(arc([0, 0, pz], r, Math.PI, 0, 16)).concat([[r, 0, z2]]));
+        massStack([-r, 0, z1], p.m1, 'm₁');
+        massStack([r, 0, z2], p.m2, 'm₂');
+        handleAt([r, 0, z2 - 0.06], 'drag m₂');
+        motionSensor([-r, 0, 0.04], [0, 0, 1], [-r, 0, z1 - 0.12]);
+        standMeter(-0.48, 0.30, 0.16, 'MOTION SENSOR a', aSensor(), 'm/s²');
+        standMeter(0.52, 0.30, 0.16, 'T₁ (m₁ side)', R.T1.toFixed(2), 'N', '#FFD36B');
+        standMeter(0.52, 0.30, 0.36, 'T₂ (m₂ side)', R.T2.toFixed(2), 'N', '#FFD36B');
+      }
+
+      else if (p.mode === 'wedge') {
+        B.table(F, -1.05, 1.05, -0.42, 0.42, 0, { legH: 0.69 });
+        B.texBox(F, [0, 0, 0.01], [1.95, 0.30, 0.02], B.metal('#9AA6B8', 4), { ambient: 0.5, bias: -0.001 });
+        const thr = p.theta * Math.PI / 180, Lw = 0.62, Hw = Lw * Math.tan(thr), wW = 0.24, zb = 0.045;
+        const xw = -0.25 - (S.sW || 0);
+        const P0 = [xw, 0, zb], P1 = [xw + Lw, 0, zb], P2 = [xw, 0, zb + Hw];
+        const Y = (pt, y) => [pt[0], y, pt[2]];
+        const wtex = B.wood('#A8743F', 9);
+        const d = [Math.cos(thr), 0, -Math.sin(thr)], nrm = [Math.sin(thr), 0, Math.cos(thr)];
+        // the wedge: slope face and back face textured, the triangular ends shaded
+        F.push([xw + Lw * 0.45, 0, zb + Hw * 0.5 + 0.02], () => B.faceTex(ctx, cam, wtex, Y(P2, -wW / 2), Y(P1, -wW / 2), Y(P2, wW / 2), 2, B.shadeOverlay(F, nrm, 0.45)));
+        F.push([xw, 0, zb + Hw / 2], () => B.faceTex(ctx, cam, wtex, Y(P0, -wW / 2), Y(P2, -wW / 2), Y(P0, wW / 2), 1, B.shadeOverlay(F, [-1, 0, 0], 0.45)));
+        [-1, 1].forEach(sg => {
+          const tri = [Y(P0, sg * wW / 2), Y(P1, sg * wW / 2), Y(P2, sg * wW / 2)];
+          F.push([xw + Lw / 3, sg * wW / 2, zb + Hw / 3], () => {
+            const q = tri.map(v => cam.project(v));
+            if (q.some(x => !x.ok)) return;
+            ctx.save();
+            ctx.beginPath(); q.forEach((x, i) => i ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y)); ctx.closePath();
+            ctx.clip();
+            const bb = { x0: Math.min(...q.map(v => v.x)), y0: Math.min(...q.map(v => v.y)), x1: Math.max(...q.map(v => v.x)), y1: Math.max(...q.map(v => v.y)) };
+            ctx.drawImage(wtex, 0, 0, 256, 64, bb.x0, bb.y0, bb.x1 - bb.x0, bb.y1 - bb.y0);
+            ctx.fillStyle = B.shadeOverlay(F, [0, sg, 0], 0.45); ctx.fill();
+            ctx.restore();
+          });
+        });
+        [[0.08, -1], [0.08, 1], [Lw - 0.08, -1], [Lw - 0.08, 1]].forEach(w =>
+          R3.cylinder(F, [xw + w[0], w[1] * (wW / 2 + 0.005), 0.032], [xw + w[0], w[1] * (wW / 2 + 0.02), 0.032], 0.012, '#2A2E36',
+                      { segments: 14, shadow: false, ambient: 0.4 }));
+        if (p.fixWedge) R3.box(F, [xw - 0.03, 0, 0.05], [0.04, 0.2, 0.08], '#C9A04A', { shadow: false });
+        // the block on the face
+        const k = clamp(Math.cbrt(p.m1 / 2), 0.6, 1.5), bl = [0.10 * k, 0.09 * k, 0.07 * k];
+        const sb = 0.06 + bl[0] / 2 + s;
+        const cB = [P2[0] + d[0] * sb + nrm[0] * bl[2] / 2, 0, P2[2] + d[2] * sb + nrm[2] * bl[2] / 2];
+        woodBlock(cB, bl, [d, [0, 1, 0], nrm], 'm', p.m1);
+        // where the block really goes, in the ground frame — not along the face
+        const c0 = [-0.25 + P2[0] - xw + d[0] * (0.06 + bl[0] / 2) + nrm[0] * bl[2] / 2, 0, zb + Hw + d[2] * (0.06 + bl[0] / 2) + nrm[2] * bl[2] / 2];
+        const gd = R3.norm([R.ax, 0, R.az]);
+        R3.polyline(F, [c0, [c0[0] + gd[0] * 0.8, 0, c0[2] + gd[2] * 0.8]], '#FFD36B', { alpha: .8, width: 1.6, dash: [5, 4], bias: -0.03 });
+        R3.label(F, [c0[0] + gd[0] * 0.45 + 0.06, -0.14, c0[2] + gd[2] * 0.45], 'real path ' + R.pathAngle.toFixed(1) + '° below horizontal',
+                 '#FFD36B', { size: 9.5, align: 'left' });
+        motionSensor([-0.97, 0, 0.12], [1, 0, 0], [xw, 0, 0.12]);
+        standMeter(-0.86, 0.34, 0.20, 'SENSOR: wedge A', aSensor(), 'm/s²');
+        standMeter(0.62, 0.34, 0.20, 'NORMAL FORCE N', R.N.toFixed(2), 'N', '#FFD36B');
+        standMeter(0.62, 0.34, 0.40, 'FLOOR ON WEDGE', R.Nfloor.toFixed(1), 'N', '#9AD0FF');
+      }
+
+      else if (p.mode === 'lift') {
+        const L = S.liftTrip, span = Math.max(L.zMax - L.zMin, 1e-6);
+        B.texBox(F, [0, 0, -0.03], [2.6, 1.8, 0.06], B.metal('#454B57', 8), { bias: F.GROUND, tiles: 3, ambient: 0.45 });
+        [[-0.48, -0.42], [0.48, -0.42], [-0.48, 0.42], [0.48, 0.42]].forEach(q =>
+          R3.box(F, [q[0], q[1], 1.4], [0.05, 0.05, 2.8], '#5A6478', { shadow: false, ambient: 0.35 }));
+        R3.box(F, [0, 0.42, 2.82], [1.0, 0.06, 0.06], '#5A6478', { shadow: false });
+        R3.box(F, [0, -0.42, 2.82], [1.0, 0.06, 0.06], '#5A6478', { shadow: false });
+        const zc = 0.12 + (s - L.zMin) / span * 1.35;
+        const drumPh = -s / 0.12;
+        B.pulley(F, [0, 0, 2.95], [0, 1, 0], 0.12, { phase: drumPh, width: 0.1, spokes: 6, colour: '#8A96AA' });
+        R3.box(F, [0, 0, 2.86], [0.3, 0.3, 0.04], '#2A3040', { shadow: false });
+        // the car
+        const cut = p.trip === 'cut' && S.tRun > 0.8;
+        B.texBox(F, [0, 0, zc], [0.84, 0.74, 0.05], B.metal('#7E8898', 2), { ambient: 0.45 });
+        B.texBox(F, [0, 0.35, zc + 0.5], [0.84, 0.03, 0.95], B.metal('#6A7486', 6), { ambient: 0.45 });
+        [-0.41, 0.41].forEach(x => R3.box(F, [x, 0, zc + 0.5], [0.03, 0.74, 0.95], '#55607A', { shadow: false, ambient: 0.35 }));
+        R3.box(F, [0, 0, zc + 0.98], [0.84, 0.74, 0.04], '#55607A', { shadow: false, ambient: 0.35 });
+        if (!cut) B.string(F, [[0, 0, zc + 1.0], [0, 0, 2.95 - 0.12]], { r: 0.006, colour: '#B8C2D0' });
+        else B.string(F, [[0, 0, zc + 1.0], [0, 0, zc + 1.25]], { r: 0.006, colour: '#B8C2D0' });
+        // the bathroom scale, and what stands on it
+        R3.box(F, [0, -0.05, zc + 0.045], [0.34, 0.3, 0.04], '#E6E9EF', { shadow: false, ambient: 0.5 });
+        B.meter(F, [0, -0.205, zc + 0.055], [0, -1, 0], 0.16, 0.035, { title: '', value: R.reading.toFixed(1), unit: 'kg', colour: '#7CF0B0', depth: 0.02 });
+        const k = clamp(Math.cbrt(p.m1 / 60), 0.5, 1.4), bl = [0.2 * k, 0.16 * k, 0.32 * k];
+        woodBlock([0, -0.05, zc + 0.065 + bl[2] / 2], bl, null, 'm', p.m1);
+        // acceleration arrow beside the car
+        if (Math.abs(R.aLift) > 0.01) {
+          const sg = Math.sign(R.aLift), len = clamp(Math.abs(R.aLift) / G, 0.15, 1) * 0.5;
+          R3.arrow(F, [0.62, -0.2, zc + 0.5], [0.62, -0.2, zc + 0.5 + sg * len], 0.014, sg > 0 ? th.ok : th.crit,
+                   { head: 0.06, shadow: false, ambient: 0.85, bias: -0.04 });
+          R3.label(F, [0.72, -0.2, zc + 0.5 + sg * len / 2], 'a = ' + R.aLift.toFixed(2) + ' m/s²', sg > 0 ? th.ok : th.crit,
+                   { size: 10, align: 'left' });
+        }
+        // a control-room panel beside the shaft, big enough to read
+        R3.box(F, [-0.98, -0.30, 1.05], [0.62, 0.04, 1.0], '#1E2433', { shadow: false, ambient: 0.35 });
+        B.meter(F, [-0.98, -0.33, 1.40], [0, -1, 0], 0.52, 0.24, { title: 'SCALE READS', value: R.reading.toFixed(1), unit: 'kg' });
+        B.meter(F, [-0.98, -0.33, 1.10], [0, -1, 0], 0.52, 0.24, { title: 'CABLE TENSION', value: (R.Tcable / 1000).toFixed(2), unit: 'kN', colour: '#FFD36B' });
+        B.meter(F, [-0.98, -0.33, 0.80], [0, -1, 0], 0.52, 0.24, { title: 'CAR SPEED', value: Math.abs(R.vLift).toFixed(2), unit: 'm/s', colour: '#9AD0FF' });
+        if (cut && Math.abs(R.aLift + G) < 1e-6)
+          R3.label(F, [0, -0.3, zc + 1.18], 'CABLE CUT — free fall: the scale reads zero', th.crit, { size: 11 });
       }
 
       else if (p.mode === 'contact') {
-        /* ---- two blocks in contact on a rough floor ---- */
-        const x0 = -0.95 + S.s, yF = 0;
-        R3.box(F, [0, 0, -0.10], [3.0, 0.62, 0.06], '#242E46',
-               { shadow: false, ambient: 0.16, bias: F.GROUND });
-        const s1 = 0.18 + p.m1 * 0.026, s2 = 0.18 + p.m2 * 0.026;
-        const c1 = [x0, 0, -0.07 + s1 / 2], c2 = [x0 + s1 / 2 + s2 / 2, 0, -0.07 + s2 / 2];
-        R3.box(F, c1, [s1, s1, s1], blockCol[0], { shadow: false, ambient: 0.40 });
-        R3.box(F, c2, [s2, s2, s2], blockCol[1], { shadow: false, ambient: 0.40 });
-        // stagger the two labels, or they land on each other
-        R3.label(F, [c1[0], 0, c1[2] + s1 / 2 + 0.16], 'm₁ = ' + p.m1.toFixed(1) + ' kg',
-                 '#F0E4D0', { size: 9.5 });
-        R3.label(F, [c2[0], 0, c2[2] + s2 / 2 + 0.05], 'm₂ = ' + p.m2.toFixed(1) + ' kg',
-                 '#DCE8F8', { size: 9.5 });
-        // the applied force, pushing on the back of m1
-        R3.arrow(F, [x0 - s1 / 2 - 0.34, 0, c1[2]], [x0 - s1 / 2 - 0.03, 0, c1[2]],
-                 0.016, th.warn, { head: 0.06, shadow: false, ambient: 0.85, bias: -0.04 });
-        R3.label(F, [x0 - s1 / 2 - 0.40, 0, c1[2] + 0.07], 'F = ' + p.F.toFixed(1) + ' N',
-                 th.warn, { size: 10 });
-        // the contact force pair at the interface
-        const xi = x0 + s1 / 2;
-        if (R.Nc > 0.01) {
-          R3.arrow(F, [xi, 0.16, c1[2]], [xi + 0.24, 0.16, c1[2]], 0.010, '#7CE0A8',
-                   { head: 0.045, shadow: false, ambient: 0.85, bias: -0.05 });
-          R3.arrow(F, [xi, -0.16, c1[2]], [xi - 0.24, -0.16, c1[2]], 0.010, '#7CE0A8',
-                   { head: 0.045, shadow: false, ambient: 0.85, bias: -0.05 });
-          R3.label(F, [xi + 0.32, 0.16, c1[2] - 0.13], 'N₁₂ = ' + R.Nc.toFixed(2) + ' N',
-                   '#7CE0A8', { size: 9.5 });
-          R3.label(F, [xi - 0.32, -0.16, c1[2] - 0.13], 'equal and opposite', '#7CE0A8', { size: 9 });
-        }
+        const k1 = clamp(Math.cbrt(p.m1 / 3), 0.6, 1.6), k2 = clamp(Math.cbrt(p.m2 / 3), 0.6, 1.6);
+        const b1 = [0.16 * k1, 0.12 * k1, 0.12 * k1], b2 = [0.16 * k2, 0.12 * k2, 0.12 * k2];
+        const x1 = -0.40 + s, x2 = x1 + b1[0] / 2 + b2[0] / 2;
+        woodBlock([x1, 0, b1[2] / 2], b1, null, 'm₁', p.m1);
+        woodBlock([x2, 0, b2[2] / 2], b2, null, 'm₂', p.m2);
+        // a hand-held force probe pushing on m1
+        const pzz = Math.min(b1[2], 0.08) * 0.6, xp = x1 - b1[0] / 2;
+        R3.cylinder(F, [xp - 0.30, 0, pzz], [xp - 0.06, 0, pzz], 0.022, '#2B3550', { segments: 16, shadow: false });
+        R3.cylinder(F, [xp - 0.06, 0, pzz], [xp, 0, pzz], 0.006, '#D0D8E4', { segments: 8, shadow: false });
+        B.meter(F, [xp - 0.18, -0.03, pzz + 0.06], [0, -1, 0], 0.16, 0.06, { title: 'F', value: p.F.toFixed(1), unit: 'N', colour: '#FFD36B', depth: 0.02 });
+        handleAt([xp - 0.2, 0, pzz], 'drag to push harder');
+        R3.box(F, [0.99, 0, 0.04], [0.03, 0.2, 0.08], '#1E1E22', { shadow: false });
+        standMeter(-0.62, 0.36, 0.16, 'MOTION SENSOR a', aSensor(), 'm/s²');
+        standMeter(-0.30, 0.36, 0.16, 'CONTACT FORCE', R.static ? 'indet.' : R.Nc.toFixed(2), R.static ? '' : 'N', '#9AD0FF');
+        motionSensor([0.97, 0, 0.06], [-1, 0, 0], [x2 + b2[0] / 2, 0, 0.06]);
       }
 
-      else {
-        /* ---- one rig serves the Atwood machine, the table and the incline:
-                a table is an incline of zero degrees, which is not a trick but
-                the same free-body diagram with sin θ = 0. ---- */
-        const atwood = p.mode === 'atwood';
-        const thr = atwood ? 0 : p.theta * Math.PI / 180;
-        const px = 0.52, pz = atwood ? 0.62 : 0.06 + Math.tan(thr) * 0;
-        // the wedge (or table)
-        if (!atwood) {
-          const wide = 0.42;
-          const len = 1.25, hh = Math.tan(thr) * len;
-          F.push([-0.2, 0, 0], () => {
-            const quad = (v) => {
-              const q = v.map(x => cam.project(x));
-              if (q.some(x => !x.ok)) return;
-              ctx.fillStyle = F.shade('#2A3552', [0, 0, 1], { ambient: 0.30 });
-              ctx.beginPath();
-              q.forEach((x, k) => k ? ctx.lineTo(x.x, x.y) : ctx.moveTo(x.x, x.y));
-              ctx.closePath(); ctx.fill();
-              ctx.strokeStyle = g.alpha('#9FB4DE', .35); ctx.lineWidth = 1.1; ctx.stroke();
-            };
-            // the sloping top face
-            quad([[px - len, -wide / 2, 0], [px, -wide / 2, hh],
-                  [px, wide / 2, hh], [px - len, wide / 2, 0]]);
-            // the two triangular sides and the back
-            [-1, 1].forEach(sg => quad([[px - len, sg * wide / 2, 0], [px, sg * wide / 2, hh],
-                                        [px, sg * wide / 2, -0.10], [px - len, sg * wide / 2, -0.10]]));
-            quad([[px, -wide / 2, hh], [px, wide / 2, hh],
-                  [px, wide / 2, -0.10], [px, -wide / 2, -0.10]]);
-          }, F.GROUND);
-          // the angle, marked at the toe where the slope meets the horizontal
-          if (thr > 0.02) {
-            const arc = [];
-            for (let i = 0; i <= 16; i++) {
-              const a = thr * i / 16;
-              arc.push([px - len + Math.cos(a) * 0.34, -wide / 2 - 0.02, Math.sin(a) * 0.34]);
-            }
-            R3.polyline(F, arc, acc, { alpha: .9, width: 1.8, bias: -0.03 });
-            R3.label(F, [px - len + Math.cos(thr / 2) * 0.42, -wide / 2 - 0.02, Math.sin(thr / 2) * 0.42],
-                     'θ = ' + p.theta.toFixed(1) + '°', acc, { size: 10 });
-          }
+      else if (p.mode === 'banking') {
+        /* a banked ring of road: asphalt, a painted centre line, kerbs */
+        const thr = p.theta * Math.PI / 180, Rr = 1.05, wRoad = 0.78, nSeg = 60;
+        const pt = (a, u) => { const rad = Rr + u * wRoad / 2; return [Math.cos(a) * rad, Math.sin(a) * rad, u * (wRoad / 2) * Math.tan(thr)]; };
+        const asphalt = B.metal('#3A3D44', 21);
+        for (let i = 0; i < nSeg; i++) {
+          const a0 = i / nSeg * TAU, a1 = (i + 1) / nSeg * TAU, am = (a0 + a1) / 2;
+          const nrm = [-Math.cos(am) * Math.sin(thr), -Math.sin(am) * Math.sin(thr), Math.cos(thr)];
+          F.push(pt(am, 0), () => B.faceTex(ctx, cam, asphalt, pt(a0, -1), pt(a1, -1), pt(a0, 1), 1, B.shadeOverlay(F, nrm, 0.5)), F.GROUND);
         }
-        // the pulley, at the top of the slope (or high up, for an Atwood machine)
-        const len = 1.25, hh = atwood ? 0 : Math.tan(thr) * len;
-        const pulR = 0.10;
-        const pz2 = atwood ? 0.72 : hh + 0.13;
-        R3.cylinder(F, [px, -0.028, pz2], [px, 0.028, pz2], pulR, '#8FA3C0',
-                    { segments: 26, shadow: false, ambient: 0.42 });
-        R3.cylinder(F, [px, -0.032, pz2], [px, 0.032, pz2], pulR * 0.22, '#55658C',
-                    { segments: 12, shadow: false, ambient: 0.32 });
-        R3.cylinder(F, [px, 0, -0.10], [px, 0, pz2 - pulR * 0.3], 0.03, '#55658C',
-                    { segments: 12, shadow: false, ambient: 0.28, bias: F.GROUND });
-
-        /* Block 1 rides the slope, measured ALONG it from the top; block 2
-           always hangs. The string is inextensible, so one displacement S.s
-           moves both — that is the constraint, drawn. */
-        const s1 = 0.15 + p.m1 * 0.014, s2 = 0.15 + p.m2 * 0.014;
-        let c1, anchor1, axes1 = null;
-        if (atwood) {
-          c1 = [px - pulR, 0, pz2 - 0.34 - S.s];
-          anchor1 = [px - pulR, 0, c1[2] + s1 / 2];
-        } else {
-          /* A block on a slope has to be ROTATED to the slope: an axis-aligned
-             cube on an incline touches at one corner and reads as floating.
-             e1 runs up the slope, e3 is the surface normal. */
-          const e1 = [Math.cos(thr), 0, -Math.sin(thr)];      // down-slope
-          const e3 = [Math.sin(thr), 0, Math.cos(thr)];       // outward normal
-          axes1 = [e1, [0, 1, 0], e3];
-          const along = clamp(0.56 + S.s, 0.20, len / Math.cos(thr) - 0.14);
-          const sx = px - along * Math.cos(thr);
-          const sz = hh - along * Math.sin(thr);
-          c1 = [sx + e3[0] * s1 / 2, 0, sz + e3[2] * s1 / 2];
-          anchor1 = [c1[0] - e1[0] * s1 / 2, 0, c1[2] - e1[2] * s1 / 2];
+        const ring = (u, z) => { const o = []; for (let i = 0; i <= 96; i++) { const q = pt(i / 96 * TAU, u); q[2] += z || 0; o.push(q); } return o; };
+        R3.polyline(F, ring(-0.97, 0.002), '#E8E8E8', { alpha: .9, width: 1.6, bias: F.GROUND - 1 });
+        R3.polyline(F, ring(0.97, 0.002), '#E8E8E8', { alpha: .9, width: 1.6, bias: F.GROUND - 1 });
+        R3.polyline(F, ring(0, 0.002), '#F2C94C', { alpha: .9, width: 1.4, dash: [8, 8], bias: F.GROUND - 1 });
+        for (let i = 0; i < 96; i++) {
+          if (i % 2) continue;
+          const a0 = i / 96 * TAU, a1 = (i + 1) / 96 * TAU;
+          R3.polyline(F, [pt(a0, 1.05), pt(a1, 1.05)], '#E0453A', { alpha: 1, width: 3, bias: F.GROUND - 2 });
         }
-        R3.box(F, c1, [s1, s1, s1], blockCol[0],
-               { shadow: false, ambient: 0.40, axes: axes1 || undefined });
-        R3.label(F, [c1[0], 0, c1[2] + s1 * 0.75], 'm₁ = ' + p.m1.toFixed(1) + ' kg',
-                 '#F0E4D0', { size: 9.5 });
-        const c2 = [px + pulR + 0.16, 0, pz2 - 0.40 + S.s];
-        R3.box(F, c2, [s2, s2, s2], blockCol[1], { shadow: false, ambient: 0.40 });
-        R3.label(F, [c2[0] + s2 / 2 + 0.24, 0, c2[2] + 0.06],
-                 'm₂ = ' + p.m2.toFixed(1) + ' kg', '#DCE8F8', { size: 9.5 });
-
-        // the string, over the pulley
-        R3.polyline(F, [anchor1, [px - pulR, 0, pz2], [px + pulR, 0, pz2],
-                        [px + pulR, 0, c2[2] + s2 / 2], [c2[0], 0, c2[2] + s2 / 2]],
-                    '#D8E2F5', { alpha: .95, width: 2, bias: -0.04 });
-        R3.label(F, [px, 0, pz2 + pulR + 0.09], 'T = ' + R.T.toFixed(2) + ' N', acc, { size: 10 });
-
-        // which way it is actually going, if it is going
-        if (!R.static && Math.abs(R.a) > 1e-6) {
-          const dir = Math.sign(R.a);
-          R3.arrow(F, [c2[0], 0, c2[2] - s2 / 2 - 0.05],
-                      [c2[0], 0, c2[2] - s2 / 2 - 0.05 - dir * 0.22],
-                   0.011, th.ok, { head: 0.05, shadow: false, ambient: 0.85, bias: -0.05 });
-          R3.label(F, [c2[0], 0, c2[2] - s2 / 2 - 0.34],
-                   'a = ' + Math.abs(R.a).toFixed(2) + ' m/s²', th.ok, { size: 9.5 });
-        } else {
-          R3.label(F, [c2[0], 0, c2[2] - s2 / 2 - 0.16], 'a = 0 — it holds', th.crit, { size: 9.5 });
-        }
-
-        // the drag handle lives on the hanging mass
-        const q2 = cam.project([c2[0], 0, c2[2]]);
-        if (q2.ok) {
-          const on = g.dragging === 'm2';
-          ctx.save();
-          ctx.strokeStyle = on ? th.text : g.alpha(acc, .75);
-          ctx.lineWidth = on ? 2.2 : 1.6;
-          ctx.beginPath(); ctx.arc(q2.x, q2.y, 13, 0, TAU); ctx.stroke();
-          ctx.restore();
-          PA.lbl(ctx, q2.x + 26, q2.y - 16, 'drag m₂',
-                 on ? th.text : g.alpha(th['text-3'], .95), 'left', 9);
-          g.handle(q2.x, q2.y, 16, 'm2');
-          const qa = cam.project([c2[0], 0, c2[2]]), qb = cam.project([c2[0], 0, c2[2] + 1]);
-          if (qa.ok && qb.ok) {
-            const dx = qb.x - qa.x, dy = qb.y - qa.y, Lp = Math.hypot(dx, dy) || 1;
-            S._axM = { ux: dx / Lp, uy: dy / Lp, perPx: 1 / Lp };
-          }
-        }
+        // the car, tilted with the camber: body, cabin, four wheels
+        const a0 = S.carPhase, cx = Math.cos(a0) * Rr, cy = Math.sin(a0) * Rr;
+        const nrm = [-Math.cos(a0) * Math.sin(thr), -Math.sin(a0) * Math.sin(thr), Math.cos(thr)];
+        const tang = [-Math.sin(a0), Math.cos(a0), 0];
+        const side = R3.cross(nrm, tang);
+        const base = [cx, cy, 0];
+        const up = (h) => R3.add(base, R3.scale(nrm, h));
+        const carCol = R.safe ? '#3F8FE0' : '#E0453A';
+        R3.box(F, up(0.06), [0.30, 0.15, 0.06], carCol, { shadow: false, ambient: 0.5, axes: [tang, side, nrm] });
+        R3.box(F, R3.add(up(0.11), R3.scale(tang, -0.02)), [0.15, 0.13, 0.05], RX.mix(carCol, '#0B1020', 0.35), { shadow: false, ambient: 0.5, axes: [tang, side, nrm] });
+        [[0.10, 1], [0.10, -1], [-0.10, 1], [-0.10, -1]].forEach(w => {
+          const c = R3.add(R3.add(up(0.03), R3.scale(tang, w[0])), R3.scale(side, w[1] * 0.075));
+          R3.cylinder(F, R3.add(c, R3.scale(side, -0.012)), R3.add(c, R3.scale(side, 0.012)), 0.028, '#1A1C22',
+                      { segments: 14, shadow: false, ambient: 0.4, spokes: 4, phase: S.carPhase * 30 });
+        });
+        R3.callout(F, up(0.16), away([cx, cy, 0]) * 26, -24,
+                   R.safe ? 'holds the curve at ' + p.speed.toFixed(1) + ' m/s'
+                          : R.slides === 'out' ? 'SLIDES OUTWARD — too fast' : 'SLIDES INWARD — too slow',
+                   R.safe ? th.ok : th.crit);
+        R3.arrow(F, up(0.09), R3.add(up(0.09), R3.scale(nrm, 0.42)), 0.012, '#5AA9FF', { head: 0.05, shadow: false, ambient: 0.8, bias: -0.04 });
+        R3.arrow(F, up(0.09), R3.add(up(0.09), [0, 0, -0.34]), 0.012, '#FFD36B', { head: 0.05, shadow: false, ambient: 0.8, bias: -0.04 });
+        R3.arrow(F, up(0.09), R3.add(up(0.09), [-cx * 0.3 / Rr, -cy * 0.3 / Rr, 0]), 0.012, th.crit, { head: 0.05, shadow: false, ambient: 0.8, bias: -0.04 });
+        R3.label(F, R3.add(up(0.09), R3.scale(nrm, 0.50)), 'N', '#5AA9FF', { size: 10 });
+        R3.label(F, R3.add(up(0.09), [0, 0, -0.42]), 'mg', '#FFD36B', { size: 10 });
+        R3.label(F, R3.add(up(0.09), [-cx * 0.4 / Rr, -cy * 0.4 / Rr, 0.02]), 'mv²/r', th.crit, { size: 10 });
+        R3.label(F, [0, 0, 0.16], 'r = ' + p.radius.toFixed(0) + ' m  ·  bank ' + p.theta.toFixed(1) + '°', th['text-2'], { size: 10 });
       }
 
       F.render();
 
+      if (hdl) {
+        const on = g.dragging === 'm2';
+        ctx.save();
+        ctx.strokeStyle = on ? th.text : g.alpha(acc, .75); ctx.lineWidth = on ? 2.2 : 1.6;
+        ctx.beginPath(); ctx.arc(hdl.x, hdl.y, hdl.r, 0, TAU); ctx.stroke(); ctx.restore();
+        PA.lbl(ctx, hdl.x, hdl.y + hdl.r + 11, hdl.tip, on ? th.text : g.alpha(th['text-3'], .95), 'center', 9);
+        g.handle(hdl.x, hdl.y, hdl.r + 3, 'm2');
+      }
       /* ---------------- the free-body diagram ----------------
          Every arrow is drawn to the magnitude the solver returned, so the
          picture the exam asks you to draw is the picture the lab computed. */
@@ -471,76 +688,112 @@
       S._panelTop = null;
       if (p.showFBD) {
         const bw = narrow ? Math.min(W - 24, 348) : Math.min(W * 0.40, 348);
-        const bh = 150, bx = 12, by = H - bh - 22;
+        const bh = narrow ? 138 : 172, bx = 12, by = H - bh - 22;
         S._panelTop = by;
         ctx.fillStyle = g.alpha('#0B1020', .92);
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
         PA.lbl(ctx, bx + 10, by + 13, 'FREE-BODY DIAGRAM · drawn to scale', th['text-3'], 'left', 8.5);
 
-        const bods = R.bodies.slice(0, 2);
+        /* The forces on each body, as screen directions (x right, y DOWN),
+           written out rig by rig so every arrow points where the physics
+           says: the normal perpendicular to the surface the body rests on,
+           friction along that surface against the motion (or the tendency
+           to move), tension along its own string. */
+        const thb = R.theta || (p.theta * Math.PI / 180);
+        const sn = Math.sin(thb), cs = Math.cos(thb);
+        const FT = '#7CE0A8', FN = '#5AA9FF', FW = '#FFD36B', FF = th.crit, FP = th.warn;
+        const bods = [];
+        if (p.mode === 'table' || p.mode === 'incline') {
+          const t = p.mode === 'table' ? 0 : thb, st = Math.sin(t), ct = Math.cos(t);
+          const fd = -Math.sign(R.drive || 1);            // friction against the pull (static) or the motion (kinetic)
+          bods.push({ tag: 'm₁', col: '#C99A62', f: [
+            [0, 1, p.m1 * G, FW, 'mg'], [-st, -ct, R.N, FN, 'N'], [ct, -st, R.T1, FT, 'T₁'],
+            [fd * ct, -fd * st, Math.abs(R.f || 0), FF, R.static ? 'fₛ' : 'fₖ']] });
+          bods.push({ tag: 'm₂', col: '#C9A04A', f: [[0, 1, p.m2 * G, FW, 'm₂g'], [0, -1, R.T2, FT, 'T₂']] });
+        } else if (p.mode === 'atwood') {
+          bods.push({ tag: 'm₁', col: '#C9A04A', f: [[0, 1, p.m1 * G, FW, 'm₁g'], [0, -1, R.T1, FT, 'T₁']] });
+          bods.push({ tag: 'm₂', col: '#C9A04A', f: [[0, 1, p.m2 * G, FW, 'm₂g'], [0, -1, R.T2, FT, 'T₂']] });
+        } else if (p.mode === 'wedge') {
+          // the face descends to the right; its outward normal points up and right
+          bods.push({ tag: 'm', col: '#C99A62', f: [[0, 1, p.m1 * G, FW, 'mg'], [sn, -cs, R.N, FN, 'N']] });
+          bods.push({ tag: 'M', col: '#A8743F', f: [[0, 1, p.M * G, FW, 'Mg'], [0, -1, R.Nfloor, FN, 'N_floor'],
+                                                   [-sn, cs, R.N, FT, 'N (block)']] });
+        } else if (p.mode === 'lift') {
+          bods.push({ tag: 'm', col: '#C99A62', f: [[0, 1, p.m1 * G, FW, 'mg'], [0, -1, R.Nscale, FN, 'N (scale)']] });
+        } else if (p.mode === 'contact') {
+          const nc = R.static ? 0 : R.Nc, fk1 = R.static ? 0 : p.muK * p.m1 * G, fk2 = R.static ? 0 : p.muK * p.m2 * G;
+          bods.push({ tag: 'm₁', col: '#C99A62', f: [[0, 1, p.m1 * G, FW, 'mg'], [0, -1, p.m1 * G, FN, 'N'],
+                                                    [1, 0, p.F, FP, 'F'], [-1, 0, nc, FT, 'N₁₂'], [-1, 0.35, fk1, FF, 'f']] });
+          bods.push({ tag: 'm₂', col: '#C99A62', f: [[0, 1, p.m2 * G, FW, 'mg'], [0, -1, p.m2 * G, FN, 'N'],
+                                                    [1, 0, nc, FT, 'N₂₁'], [-1, 0.35, fk2, FF, 'f']] });
+        } else {
+          // banking, in cross-section: the road rises away from the centre (to the right)
+          const fs = R.fNeed, fd = Math.sign(fs);
+          bods.push({ tag: 'car', col: '#3F8FE0', f: [[0, 1, p.m1 * G, FW, 'mg'], [-sn, -cs, R.bodies[0].N, FN, 'N'],
+                                                     [-fd * cs, fd * sn, Math.min(Math.abs(fs), R.fMax), FF, 'f']] });
+        }
         const cellW = bw / bods.length;
-        const scale = (function () {
-          let mx = 0;
-          bods.forEach(b => { mx = Math.max(mx, b.W, Math.abs(b.T), b.N, Math.abs(b.f), b.push || 0); });
-          /* 36 px, not 44: the longest arrow plus its label must clear the
-             caption line at by + bh − 9, or the weight label lands on top of
-             it at phone width. */
-          return 36 / Math.max(mx, 1e-6);
-        })();
+        let mx = 1e-9;
+        bods.forEach(b => b.f.forEach(q => { if (q[2] > mx) mx = q[2]; }));
+        const scale = (narrow ? 34 : 46) / mx;
         bods.forEach((b, i) => {
-          const cx = bx + cellW * (i + 0.5), cy = by + bh * 0.49;
-          ctx.fillStyle = g.alpha(blockCol[i], .85);
+          const cx = bx + cellW * (i + 0.5), cy = by + bh * 0.50;
+          ctx.fillStyle = g.alpha(b.col, .9);
           ctx.beginPath(); ctx.roundRect(cx - 13, cy - 13, 26, 26, 4); ctx.fill();
           PA.lbl(ctx, cx, cy, b.tag, '#0B1020', 'center', 10);
-          const arrow = (dx, dy, mag, colour, tag) => {
-            if (mag < 0.01) return;
-            const L = Math.max(10, mag * scale);
-            const x1 = cx + dx * L, y1 = cy + dy * L;
-            ctx.strokeStyle = colour; ctx.lineWidth = 1.8;
+          b.f.forEach(q => {
+            const mag = q[2];
+            if (!(mag > 0.01)) return;
+            const n = Math.hypot(q[0], q[1]), dx = q[0] / n, dy = q[1] / n;
+            const Lr = Math.max(10, mag * scale);
+            const x1 = cx + dx * Lr, y1 = cy + dy * Lr;
+            ctx.strokeStyle = q[3]; ctx.lineWidth = 1.8;
             ctx.beginPath(); ctx.moveTo(cx + dx * 14, cy + dy * 14); ctx.lineTo(x1, y1); ctx.stroke();
             const an = Math.atan2(dy, dx);
             ctx.beginPath(); ctx.moveTo(x1, y1);
             ctx.lineTo(x1 - 6 * Math.cos(an - 0.45), y1 - 6 * Math.sin(an - 0.45));
             ctx.lineTo(x1 - 6 * Math.cos(an + 0.45), y1 - 6 * Math.sin(an + 0.45));
-            ctx.closePath(); ctx.fillStyle = colour; ctx.fill();
-            PA.lbl(ctx, x1 + dx * 12, y1 + dy * 11, tag, colour, 'center', 8.5);
-          };
-          const thb = b.theta || 0;
-          // weight always straight down
-          arrow(0, 1, b.W, '#FFD36B', b.W.toFixed(1) + ' N');
-          if (b.N > 0.01) {
-            // normal, perpendicular to the surface
-            arrow(Math.sin(thb), -Math.cos(thb), b.N, '#5AA9FF', 'N ' + b.N.toFixed(1));
-          }
-          if (Math.abs(b.T) > 0.01) {
-            // tension along the string: up the slope for the block, up for the hanger
-            const tx = i === 0 && !b.push ? Math.cos(thb) : 0;
-            const ty = i === 0 && !b.push ? -Math.sin(thb) : -1;
-            arrow(tx || (b.push ? 1 : 0), b.push ? 0 : ty, Math.abs(b.T),
-                  '#7CE0A8', 'T ' + Math.abs(b.T).toFixed(1));
-          }
-          if (b.push) arrow(-1, 0, b.push, th.warn, 'F ' + b.push.toFixed(0));
-          if (Math.abs(b.f) > 0.01) {
-            const dir = -Math.sign(R.a || R.drive || 1);
-            arrow(dir * Math.cos(thb), -dir * Math.sin(thb) * 0 + 0, Math.abs(b.f),
-                  th.crit, 'f ' + Math.abs(b.f).toFixed(1));
-          }
+            ctx.closePath(); ctx.fillStyle = q[3]; ctx.fill();
+            // labels sit beyond the arrowhead; horizontal ones need more room than vertical ones
+            PA.lbl(ctx, x1 + dx * (8 + 22 * Math.abs(dx)), y1 + dy * 10, q[4] + ' ' + mag.toFixed(1), q[3],
+                   dx > 0.5 ? 'left' : dx < -0.5 ? 'right' : 'center', 8.5);
+          });
         });
         PA.lbl(ctx, bx + 10, by + bh - 9,
                p.mode === 'banking'
-                 ? 'needs ' + Math.abs(R.fNeed).toFixed(0) + ' N of friction along the slope, of the ' +
-                   R.fMax.toFixed(0) + ' N available'
-                 : R.static
-                 ? 'static: friction supplies ' + Math.abs(R.fNeed || 0).toFixed(1) +
-                   ' N of the ' + (R.fMax || 0).toFixed(1) + ' N it could'
-                 : 'sliding: friction is now μₖN = ' +
-                   Math.abs(R.f != null ? R.f : (R.bodies[0].f || 0)).toFixed(1) + ' N, fixed',
+                 ? 'needs ' + Math.abs(R.fNeed).toFixed(0) + ' N of friction along the slope, of the ' + R.fMax.toFixed(0) + ' N available'
+               : p.mode === 'atwood' ? (p.mp > 0 ? 'a heavy pulley: T₁ − T₂ = (I/r²)a turns it' : 'light pulley: the tension is the same on both sides')
+               : p.mode === 'wedge' ? 'the wedge is pushed back by the block: MA = N sinθ'
+               : p.mode === 'lift' ? 'the scale shows N, not mg: N = m(g + a)'
+               : p.mode === 'contact' ? (R.static ? 'static: how friction is shared is indeterminate' : 'N₁₂ and N₂₁: equal and opposite, a third-law pair')
+               : R.static ? 'static: friction supplies ' + Math.abs(R.fNeed || 0).toFixed(1) + ' N of the ' + (R.fMax || 0).toFixed(1) + ' N it could'
+               : 'sliding: friction is now μₖN = ' + Math.abs(R.f || 0).toFixed(1) + ' N, fixed',
                R.static ? th.ok : th.warn, 'left', 8.5);
       }
 
-      /* ---------------- the verdict panel ---------------- */
-      {
+      /* ---------------- the verdict panel ----------------
+         On a phone it shrinks to a two-line strip at the top of the stage,
+         so the bench stays visible between it and the force diagram. */
+      if (narrow) {
+        const bw = W - 24, bh = 40, bx = 12, by = 44;
+        ctx.fillStyle = g.alpha('#0B1020', .92);
+        ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+        const aM = S.fit ? Math.abs(S.fit.m).toFixed(3) : (R.static ? '0.000' : '…');
+        const l1 = p.mode === 'lift' ? 'scale ' + R.reading.toFixed(1) + ' kg  ·  a ' + R.aLift.toFixed(2) + ' m/s²'
+          : p.mode === 'banking' ? 'safe band ' + R.vMin.toFixed(1) + ' – ' + (isFinite(R.vMax) ? R.vMax.toFixed(1) : '∞') + ' m/s'
+          : p.mode === 'wedge' ? 'wedge A ' + R.A.toFixed(3) + '  ·  sensor ' + aM + ' m/s²'
+          : 'a solved ' + Math.abs(R.a).toFixed(3) + '  ·  sensor ' + aM + ' m/s²';
+        const l2 = p.mode === 'lift' ? 'N = m(g + a) = ' + R.Nscale.toFixed(0) + ' N'
+          : p.mode === 'banking' ? (R.safe ? 'holds the curve' : 'slides ' + R.slides)
+          : p.mode === 'wedge' ? 'N = ' + R.N.toFixed(2) + ' N  (less than mg cosθ)'
+          : p.mode === 'atwood' ? 'T₁ ' + R.T1.toFixed(2) + ' N  ·  T₂ ' + R.T2.toFixed(2) + ' N'
+          : p.mode === 'contact' ? (R.static ? 'nothing moves' : 'N₁₂ = ' + R.Nc.toFixed(2) + ' N')
+          : (R.static ? 'HOLDS: friction ' + Math.abs(R.fNeed).toFixed(1) + ' of ' + R.fMax.toFixed(1) + ' N' : 'SLIDES: friction μₖN = ' + Math.abs(R.f || 0).toFixed(1) + ' N');
+        PA.lbl(ctx, bx + 10, by + 13, l1, acc, 'left', 9);
+        PA.lbl(ctx, bx + 10, by + 28, l2, R.static ? th.ok : th.warn, 'left', 9);
+      } else {
         const bw = narrow ? Math.min(W - 24, 268) : Math.min(W * 0.30, 268);
         const bh = 104;
         const bx = narrow ? 12 : W - bw - 14;
@@ -549,7 +802,8 @@
         ctx.fillStyle = g.alpha('#0B1020', .92);
         ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
-        PA.lbl(ctx, bx + 10, by + 13, p.mode === 'banking' ? 'THE SPEED BAND' : 'THE FRICTION TEST',
+        PA.lbl(ctx, bx + 10, by + 13, p.mode === 'banking' ? 'THE SPEED BAND' : p.mode === 'atwood' ? 'THE TWO TENSIONS'
+               : p.mode === 'wedge' ? 'THE WEDGE' : p.mode === 'lift' ? 'THE SCALE' : 'THE FRICTION TEST',
                th['text-3'], 'left', 8.5);
         const row = (i, k, v, c) => {
           PA.lbl(ctx, bx + 10, by + 30 + i * 15, k, th['text-3'], 'left', 9);
@@ -567,14 +821,32 @@
           row(0, 'applied F', p.F.toFixed(1) + ' N');
           row(1, 'friction available μₛ(m₁+m₂)g', R.fMax.toFixed(1) + ' N');
           row(2, 'acceleration', R.a.toFixed(3) + ' m/s²', acc);
-          row(3, 'contact force N₁₂', R.Nc.toFixed(2) + ' N', th.ok);
-          row(4, 'verdict', R.static ? 'NOTHING MOVES' : 'both accelerate together',
-              R.static ? th.crit : th.ok);
+          row(3, 'contact force N₁₂', R.static ? '0 – ' + R.NcMax.toFixed(1) + ' N, indeterminate' : R.Nc.toFixed(2) + ' N', th.ok);
+          row(4, 'verdict', R.static ? 'NOTHING MOVES' : 'both accelerate together', R.static ? th.crit : th.ok);
+        } else if (p.mode === 'atwood') {
+          row(0, 'acceleration (solved)', R.a.toFixed(3) + ' m/s²', acc);
+          row(1, 'acceleration (motion sensor)', S.fit ? Math.abs(S.fit.m).toFixed(3) + ' m/s²' : 'measuring…', th.ok);
+          row(2, 'T₁ on the heavy side', R.T1.toFixed(2) + ' N');
+          row(3, 'T₂ on the light side', R.T2.toFixed(2) + ' N');
+          row(4, 'T₁ − T₂ turns the pulley', (R.T1 - R.T2).toFixed(2) + ' N', p.mp > 0 ? th.warn : th['text-3']);
+        } else if (p.mode === 'wedge') {
+          row(0, 'wedge slides back at A', R.A.toFixed(3) + ' m/s²', acc);
+          row(1, 'measured by the sensor', S.fit ? Math.abs(S.fit.m).toFixed(3) + ' m/s²' : 'measuring…', th.ok);
+          row(2, 'block, relative to the wedge', R.ar.toFixed(3) + ' m/s²');
+          row(3, 'block, as the floor sees it', R.a.toFixed(3) + ' m/s²');
+          row(4, 'N (a fixed wedge would give mg cosθ)', R.N.toFixed(2) + ' vs ' + (p.m1 * G * Math.cos(R.theta)).toFixed(2) + ' N');
+        } else if (p.mode === 'lift') {
+          row(0, 'lift acceleration now', R.aLift.toFixed(2) + ' m/s²', acc);
+          row(1, 'true weight mg', (p.m1 * G).toFixed(1) + ' N');
+          row(2, 'scale pushes up, N = m(g + a)', R.Nscale.toFixed(1) + ' N', th.ok);
+          row(3, 'so the scale shows', R.reading.toFixed(1) + ' kg', th.ok);
+          row(4, 'feels', R.reading > p.m1 + 0.05 ? 'HEAVIER' : R.reading < p.m1 - 0.05 ? (R.reading < 0.05 ? 'WEIGHTLESS' : 'LIGHTER') : 'normal',
+              R.reading > p.m1 + 0.05 ? th.warn : R.reading < p.m1 - 0.05 ? th.crit : th.ok);
         } else {
           row(0, 'friction needed to hold it', Math.abs(R.fNeed || 0).toFixed(2) + ' N');
           row(1, 'most static friction can give', (R.fMax || 0).toFixed(2) + ' N', acc);
           row(2, 'acceleration', R.a.toFixed(3) + ' m/s²', R.static ? th['text-2'] : acc);
-          row(3, 'tension', R.T.toFixed(2) + ' N');
+          row(3, 'acceleration (motion sensor)', S.fit ? Math.abs(S.fit.m).toFixed(3) + ' m/s²' : (R.static ? '0 — at rest' : 'measuring…'), th.ok);
           row(4, 'verdict', R.static ? 'IT HOLDS — static' : 'IT SLIDES — kinetic',
               R.static ? th.ok : th.warn);
         }
@@ -590,264 +862,224 @@
                               ' at ' + p.speed.toFixed(1) + ' m/s', 14, 8);
       } else {
         ctx.fillStyle = R.static ? th.ok : th.warn;
-        ctx.fillText(R.static ? 'STATIC — nothing moves'
-                              : 'a = ' + Math.abs(R.a).toFixed(3) + ' m/s²   ·   T = ' +
-                                R.T.toFixed(2) + ' N', 14, 8);
+        ctx.fillText(p.mode === 'lift' ? 'scale reads ' + R.reading.toFixed(1) + ' kg   ·   a = ' + R.aLift.toFixed(2) + ' m/s²'
+          : p.mode === 'wedge' ? 'wedge A = ' + R.A.toFixed(3) + ' m/s²   ·   block ' + R.a.toFixed(3) + ' m/s²'
+          : p.mode === 'contact' ? (R.static ? 'STATIC — nothing moves' : 'a = ' + R.a.toFixed(3) + ' m/s²   ·   N₁₂ = ' + R.Nc.toFixed(2) + ' N')
+          : R.static ? 'STATIC — nothing moves'
+          : 'a = ' + Math.abs(R.a).toFixed(3) + ' m/s²   ·   T₁ = ' + R.T1.toFixed(2) + ' N' + (p.mp > 0 ? ', T₂ = ' + R.T2.toFixed(2) + ' N' : ''), 14, 8);
       }
       ctx.font = '500 10px "IBM Plex Mono",monospace'; ctx.fillStyle = th['text-3'];
       ctx.fillText(p.mode === 'banking'
         ? 'r = ' + p.radius.toFixed(0) + ' m · bank ' + p.theta.toFixed(1) + '° · μₛ = ' +
           p.muS.toFixed(2) + ' — the band, not a single speed'
+        : p.mode === 'lift' ? 'lift car ' + p.liftM.toFixed(0) + ' kg · the shaft is drawn shortened; the trip is to scale in time'
+        : p.mode === 'wedge' ? 'smooth face, smooth floor · ' + (p.fixWedge ? 'wedge clamped' : 'wedge free to slide')
+        : p.mode === 'atwood' ? 'pulley ' + p.mp.toFixed(1) + ' kg, a uniform disc: I = ½Mr²'
         : 'μₛ = ' + p.muS.toFixed(2) + ', μₖ = ' + p.muK.toFixed(2) +
           ' · friction is tested against μₛN every frame, never assumed', 14, 31);
     },
 
+
     onDrag(S, e) {
       if (e.id !== 'm2' || !S._axM) return;
+      const p = S.p;
+      if (p.mode === 'contact') { p.F = clamp(p.F + e.dx * 0.25, 0, 120); this.setup(S); return; }
       const along = e.dx * S._axM.ux + e.dy * S._axM.uy;
-      // dragging the hanging mass DOWN makes it heavier
-      S.p.m2 = clamp(S.p.m2 - along * S._axM.perPx * 16, 0.5, 20);
+      // dragging the hanging mass DOWN makes it heavier: a fixed gain per pixel (§2.13)
+      p.m2 = clamp(p.m2 - along * 0.05, 0.5, 20);
       this.setup(S);
     },
 
     plots: [
-      { title: 'The friction test — what is needed against what is available',
-        legend: [{ c: '#FB7185', label: 'friction needed' }, { c: '#4ADE80', label: 'μₛN available' }],
+      { title: 'What the answer depends on — sweep one quantity, hold the rest',
+        legend: [{ c: '#FFB454', label: 'first quantity' }, { c: '#4ADE80', label: 'second quantity' },
+                 { c: '#9AA8C0', label: 'reference' }],
         draw(S, g) {
-          const p = S.p;
+          const p = S.p, R = S.R, c1 = '#FFB454', c2 = '#4ADE80', cr = '#9AA8C0', th = g.theme;
+          const frame = (o) => g.Plot(Object.assign({ xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) }, o)).frame();
+          if (p.mode === 'atwood') {
+            const t1 = [], t2 = [], aa = [];
+            for (let i = 0; i <= 60; i++) {
+              const mp = 6 * i / 60, Ip = 0.5 * mp;
+              const x = SV.lin([[p.m1, 1, 0], [p.m2, 0, -1], [Ip, -1, 1]], [p.m1 * G, -p.m2 * G, 0]);
+              t1.push([mp, x[1]]); t2.push([mp, x[2]]); aa.push([mp, x[0]]);
+            }
+            const all = t1.concat(t2).map(q => q[1]);
+            const P = frame({ xmin: 0, xmax: 6, ymin: Math.min(...all) * 0.95, ymax: Math.max(...all) * 1.05,
+              xlabel: 'pulley mass (kg)', ylabel: 'tension (N)' });
+            P.clip(() => { P.line(t1, c1, 2.2); P.line(t2, c2, 2.2); P.vline(p.mp, g.alpha(th.text, .5), [3, 3]);
+                           P.dot(p.mp, R.T1, 4.5, c1, th['ink-950']); P.dot(p.mp, R.T2, 4.5, c2, th['ink-950']); });
+            P.tag(0.1, t1[0][1], 'equal only for a massless pulley', cr, 'left', -10);
+            return;
+          }
+          if (p.mode === 'wedge') {
+            const A = [], ab = [], ref = [], th0 = p.theta * Math.PI / 180, s = Math.sin(th0), c = Math.cos(th0);
+            for (let i = 0; i <= 80; i++) {
+              const r = 0.2 + 9.8 * i / 80, M = r * p.m1;
+              const x = SV.lin([[-p.m1, p.m1 * c, -s], [0, -p.m1 * s, -c], [M, 0, -s]], [0, -p.m1 * G, 0]);
+              A.push([r, x[0]]); ab.push([r, Math.hypot(x[1] * c - x[0], x[1] * s)]); ref.push([r, G * s]);
+            }
+            const P = frame({ xmin: 0.2, xmax: 10, ymin: 0, ymax: Math.max(...ab.map(q => q[1])) * 1.1,
+              xlabel: 'wedge mass ÷ block mass (M/m)', ylabel: 'acceleration (m/s²)' });
+            P.clip(() => { P.line(ref, cr, 1.4, [5, 4]); P.line(A, c1, 2.2); P.line(ab, c2, 2.2);
+                           P.vline(p.M / p.m1, g.alpha(th.text, .5), [3, 3]); });
+            P.tag(9.8, G * s, 'g sinθ: a clamped wedge', cr, 'right', -9);
+            P.tag(0.4, A[2][1], 'wedge recoil A', c1, 'left', -9);
+            return;
+          }
+          if (p.mode === 'lift') {
+            const L = S.liftTrip, pts = [];
+            for (let i = 0; i <= 300; i++) { const t = L.T * i / 300; pts.push([t, p.m1 * (G + liftAt(L, t).a) / G]); }
+            const P = frame({ xmin: 0, xmax: L.T, ymin: 0, ymax: Math.max(p.m1 * 1.2, ...pts.map(q => q[1])) * 1.08,
+              xlabel: 'time into the trip (s)', ylabel: 'scale reading (kg)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) });
+            P.clip(() => { P.line([[0, p.m1], [L.T, p.m1]], cr, 1.3, [5, 4]); P.line(pts, c1, 2.4);
+                           P.vline(Math.min(S.tRun, L.T), g.alpha(th.text, .5), [3, 3]); });
+            P.tag(0.05, p.m1, 'true mass', cr, 'left', -8);
+            return;
+          }
+          if (p.mode === 'contact') {
+            const as = [], ns = [], fT = p.muS * (p.m1 + p.m2) * G;
+            for (let i = 0; i <= 120; i++) {
+              const Fv = 120 * i / 120;
+              if (Fv <= fT) { as.push([Fv, 0]); ns.push([Fv, NaN]); continue; }
+              const a = (Fv - p.muK * (p.m1 + p.m2) * G) / (p.m1 + p.m2);
+              as.push([Fv, a]); ns.push([Fv, p.m2 * a + p.muK * p.m2 * G]);
+            }
+            const mx = Math.max(1, ...ns.filter(q => isFinite(q[1])).map(q => q[1]), ...as.map(q => q[1])) * 1.1;
+            const P = frame({ xmin: 0, xmax: 120, ymin: 0, ymax: mx, xlabel: 'applied force F (N)',
+              ylabel: 'a (m/s²)  ·  N₁₂ (N)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) });
+            P.clip(() => { P.line(as, c1, 2.2); P.line(ns.filter(q => isFinite(q[1])), c2, 2.2);
+                           P.vline(fT, cr, [4, 4]); P.vline(p.F, g.alpha(th.text, .5), [3, 3]); });
+            P.tag(fT, mx * 0.9, 'friction beaten', cr, 'left', 0);
+            return;
+          }
           if (p.mode === 'banking') {
-            /* the safe band against bank angle: two curves that open out from
-               the frictionless single speed */
             const lo = [], hi = [], id = [];
             for (let i = 0; i <= 120; i++) {
               const a = 1 + 59 * i / 120, t = Math.tan(a * Math.PI / 180);
               id.push([a, Math.sqrt(p.radius * G * t)]);
-              const n2 = t - p.muS, d2 = 1 + p.muS * t;
+              const n2 = t - p.muS, d2 = 1 + p.muS * t, n1 = t + p.muS, d1 = 1 - p.muS * t;
               lo.push([a, n2 > 0 ? Math.sqrt(p.radius * G * n2 / d2) : 0]);
-              const n1 = t + p.muS, d1 = 1 - p.muS * t;
               hi.push([a, d1 > 0.02 ? Math.min(Math.sqrt(p.radius * G * n1 / d1), 90) : 90]);
             }
-            const P = g.Plot({ xmin: 1, xmax: 60, ymin: 0, ymax: 60,
-              xlabel: 'bank angle θ (°)', ylabel: 'speed (m/s)',
-              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
-            P.clip(() => {
-              P.area(hi, 0, g.alpha(g.theme.ok, .10));
-              P.area(lo, 0, g.alpha(g.theme['ink-950'], 1));
-              P.line(hi, g.theme.ok, 1.8);
-              P.line(lo, g.theme.crit, 1.8);
-              P.line(id, g.alpha(g.theme['text-3'], .95), 1.5, [4, 3]);
-              P.vline(p.theta, g.alpha(g.theme.text, .5), [3, 3]);
-              P.dot(p.theta, p.speed, 4.5, S.R.safe ? g.theme.ok : g.theme.crit, g.theme['ink-950']);
-            });
-            P.tag(30, Math.sqrt(p.radius * G * Math.tan(30 * Math.PI / 180)),
-                  'frictionless: one speed only', g.theme['text-3'], 'left', -9);
+            const P = frame({ xmin: 1, xmax: 60, ymin: 0, ymax: 60, xlabel: 'bank angle θ (°)', ylabel: 'speed (m/s)',
+              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) });
+            P.clip(() => { P.area(hi, 0, g.alpha(th.ok, .10)); P.area(lo, 0, g.alpha(th['ink-950'], 1));
+                           P.line(hi, c2, 1.8); P.line(lo, c1, 1.8); P.line(id, cr, 1.5, [4, 3]);
+                           P.dot(p.theta, p.speed, 4.5, R.safe ? th.ok : th.crit, th['ink-950']); });
+            P.tag(30, Math.sqrt(p.radius * G * Math.tan(30 * Math.PI / 180)), 'frictionless: one speed only', cr, 'left', -9);
             return;
           }
-          if (p.mode === 'contact') {
-            const need = [], have = [];
-            for (let i = 0; i <= 120; i++) {
-              const Fv = 120 * i / 120;
-              need.push([Fv, Fv]);
-              have.push([Fv, p.muS * (p.m1 + p.m2) * G]);
-            }
-            const P = g.Plot({ xmin: 0, xmax: 120, ymin: 0, ymax: 120,
-              xlabel: 'applied force F (N)', ylabel: 'force (N)',
-              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
-            P.clip(() => {
-              P.line(have, g.theme.ok, 2);
-              P.line(need, g.theme.crit, 2);
-              P.vline(p.F, g.alpha(g.theme.text, .5), [3, 3]);
-              P.dot(p.F, p.F, 4.5, g.theme.text, g.theme['ink-950']);
-            });
-            P.tag(p.muS * (p.m1 + p.m2) * G, p.muS * (p.m1 + p.m2) * G,
-                  'breaks free here', g.theme.warn, 'left', -10);
-            return;
-          }
-          /* sweep the hanging mass: friction needed rises with it, available
-             does not — the crossing is where the system lets go */
+          // table / ramp: sweep the hanging mass; friction needed against what is available
           const thr = p.mode === 'incline' ? p.theta * Math.PI / 180 : 0;
-          const N = p.m1 * G * Math.cos(thr), fMax = p.muS * N;
-          const need = [], have = [];
-          for (let i = 0; i <= 160; i++) {
-            const m = 0.5 + 19.5 * i / 160;
-            need.push([m, Math.abs(m * G - p.m1 * G * Math.sin(thr))]);
-            have.push([m, fMax]);
-          }
-          const ymax = Math.max(fMax * 1.6, Math.max.apply(null, need.map(q => q[1])) * 1.05, 1);
-          const P = g.Plot({ xmin: 0.5, xmax: 20, ymin: 0, ymax: ymax,
-            xlabel: 'hanging mass m₂ (kg)', ylabel: 'friction force (N)',
-            xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
-          P.clip(() => {
-            P.area(have, 0, g.alpha(g.theme.ok, .10));
-            P.line(have, g.theme.ok, 2);
-            P.line(need, g.theme.crit, 2);
-            P.vline(p.m2, g.alpha(g.theme.text, .5), [3, 3]);
-            P.dot(p.m2, Math.abs(S.R.fNeed || 0), 4.5,
-                  S.R.static ? g.theme.ok : g.theme.crit, g.theme['ink-950']);
-          });
-          // where they cross
-          const mCross = (fMax + p.m1 * G * Math.sin(thr)) / G;
-          if (mCross > 0.5 && mCross < 20)
-            P.tag(mCross, fMax, 'lets go at m₂ = ' + mCross.toFixed(2) + ' kg',
-                  g.theme.warn, 'left', -10);
-        },
-        hover(S, x) {
-          const p = S.p;
-          if (p.mode === 'banking' || p.mode === 'contact') return null;
-          const thr = p.mode === 'incline' ? p.theta * Math.PI / 180 : 0;
-          const need = Math.abs(x * G - p.m1 * G * Math.sin(thr));
-          const fMax = p.muS * p.m1 * G * Math.cos(thr);
-          return [{ label: 'm₂', value: x.toFixed(2) + ' kg' },
-                  { label: 'needed', value: need.toFixed(2) + ' N', color: '#FB7185' },
-                  { label: 'available', value: fMax.toFixed(2) + ' N', color: '#4ADE80' },
-                  { label: 'state', value: need <= fMax ? 'holds' : 'slides' }];
+          const N = p.m1 * G * Math.cos(thr), fMax = p.muS * N, need = [];
+          for (let i = 0; i <= 160; i++) { const m = 0.5 + 19.5 * i / 160; need.push([m, Math.abs(m * G - p.m1 * G * Math.sin(thr))]); }
+          const ymax = Math.max(fMax * 1.6, Math.max(...need.map(q => q[1])) * 1.05, 1);
+          const P = frame({ xmin: 0.5, xmax: 20, ymin: 0, ymax: ymax, xlabel: 'hanging mass m₂ (kg)',
+            ylabel: 'friction force (N)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) });
+          P.clip(() => { P.line([[0.5, fMax], [20, fMax]], c2, 2.2); P.line(need, c1, 2.2);
+                         P.vline(p.m2, g.alpha(th.text, .5), [3, 3]); });
+          P.tag(0.7, fMax, 'most static friction can give: μₛN', c2, 'left', -9);
         } },
 
-      { title: 'Acceleration and tension across the threshold',
-        legend: [{ c: '#3DD6F5', label: 'acceleration' }, { c: '#4ADE80', label: 'tension' }],
+      { title: 'The motion sensor\'s record — the acceleration, measured',
+        legend: [{ c: '#7CF0B0', label: 'sensor readings (v from Δs/Δt)' }, { c: '#FFB454', label: 'straight-line fit' },
+                 { c: '#9AA8C0', label: 'what the equations predict' }],
         draw(S, g) {
-          const p = S.p;
+          const p = S.p, R = S.R, th = g.theme;
           if (p.mode === 'banking') {
-            /* the friction actually needed at each speed, against what the
-               tyres can give */
-            const need = [], have = [];
-            const thr = p.theta * Math.PI / 180;
+            const need = [], have = [], thr = p.theta * Math.PI / 180;
             for (let i = 0; i <= 160; i++) {
               const v = 60 * i / 160;
               const Nn = p.m1 * (G * Math.cos(thr) + v * v / p.radius * Math.sin(thr));
-              const fn = p.m1 * (v * v / p.radius * Math.cos(thr) - G * Math.sin(thr));
-              need.push([v, Math.abs(fn)]);
-              have.push([v, p.muS * Nn]);
+              need.push([v, Math.abs(p.m1 * (v * v / p.radius * Math.cos(thr) - G * Math.sin(thr)))]); have.push([v, p.muS * Nn]);
             }
-            const P = g.Plot({ xmin: 0, xmax: 60, ymin: 0,
-              ymax: Math.max.apply(null, have.map(q => q[1])) * 1.1,
-              xlabel: 'speed (m/s)', ylabel: 'friction along the slope (N)',
-              xfmt: v => v.toFixed(0), yfmt: v => (v / 1000).toFixed(1) + 'k' }).frame();
-            P.clip(() => {
-              P.area(have, 0, g.alpha(g.theme.ok, .10));
-              P.line(have, g.theme.ok, 2);
-              P.line(need, g.theme.crit, 2);
-              P.vline(S.R.vIdeal, g.alpha(g.theme['text-3'], .8), [4, 3]);
-              P.vline(p.speed, g.alpha(g.theme.text, .5), [3, 3]);
-            });
-            P.tag(S.R.vIdeal, 0, 'ideal speed — no friction needed at all',
-                  g.theme['text-2'], 'left', -10);
+            const P = g.Plot({ xmin: 0, xmax: 60, ymin: 0, ymax: Math.max(...have.map(q => q[1])) * 1.1,
+              xlabel: 'speed (m/s)', ylabel: 'friction along the slope (N)', xfmt: v => v.toFixed(0), yfmt: v => (v / 1000).toFixed(1) + 'k' }).frame();
+            P.clip(() => { P.area(have, 0, g.alpha(th.ok, .10)); P.line(have, '#4ADE80', 2); P.line(need, '#FFB454', 2);
+                           P.vline(R.vIdeal, '#9AA8C0', [4, 3]); P.vline(p.speed, g.alpha(th.text, .5), [3, 3]); });
+            P.tag(R.vIdeal, 0, 'ideal speed — no friction needed', '#9AA8C0', 'left', -10);
             return;
           }
-          if (p.mode === 'contact') {
-            const as = [], ns = [];
-            for (let i = 0; i <= 160; i++) {
-              const Fv = 120 * i / 160;
-              const fTot = p.muS * (p.m1 + p.m2) * G;
-              if (Fv <= fTot) { as.push([Fv, 0]); ns.push([Fv, 0]); continue; }
-              const a = (Fv - p.muK * (p.m1 + p.m2) * G) / (p.m1 + p.m2);
-              as.push([Fv, a]); ns.push([Fv, p.m2 * a + p.muK * p.m2 * G]);
-            }
-            const mx = Math.max(Math.max.apply(null, as.map(q => q[1])),
-                                Math.max.apply(null, ns.map(q => q[1]))) * 1.1 || 1;
-            const P = g.Plot({ xmin: 0, xmax: 120, ymin: 0, ymax: mx,
-              xlabel: 'applied force F (N)', ylabel: 'a (m/s²)  /  N₁₂ (N)',
-              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
-            P.clip(() => {
-              P.line(ns, g.theme.ok, 2);
-              P.line(as, g.theme.phys, 2.2);
-              P.vline(p.F, g.alpha(g.theme.text, .5), [3, 3]);
-            });
-            P.tag(0, 0, 'flat until friction is beaten', g.theme['text-3'], 'left', -9);
-            return;
-          }
-          const thr = p.mode === 'incline' ? p.theta * Math.PI / 180 : 0;
-          const N = p.m1 * G * Math.cos(thr), fMax = p.muS * N;
-          const as = [], Ts = [];
-          for (let i = 0; i <= 200; i++) {
-            const m = 0.5 + 19.5 * i / 200;
-            const drive = m * G - p.m1 * G * Math.sin(thr);
-            if (Math.abs(drive) <= fMax) { as.push([m, 0]); Ts.push([m, m * G]); continue; }
-            const fk = p.muK * N * Math.sign(drive);
-            const x = SV.lin([[m, 1], [p.m1, -1]],
-                             [m * G, -p.m1 * G * Math.sin(thr) - fk]);
-            as.push([m, x[0]]); Ts.push([m, x[1]]);
-          }
-          const mxT = Math.max.apply(null, Ts.map(q => q[1])) * 1.1 || 1;
-          const P = g.Plot({ xmin: 0.5, xmax: 20, ymin: 0, ymax: mxT,
-            xlabel: 'hanging mass m₂ (kg)', ylabel: 'tension (N)  ·  a scaled',
-            xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+          const vs = p.mode === 'lift'
+            ? (S.log || []).slice(1, -1).map((q, i, arr) => { const a = S.log[i], b = S.log[i + 2]; return [q[0], (b[1] - a[1]) / (b[0] - a[0])]; })
+            : (S.vlog || []);
+          const tmax = p.mode === 'lift' ? S.liftTrip.T : Math.max(1.5, ...vs.map(q => q[0]), 0.35 + Math.sqrt(2 * S.travel / Math.max(Math.abs(p.mode === 'wedge' ? R.A : R.a) || 1e-6, 1e-6)) + 0.3);
+          const vv = vs.map(q => Math.abs(q[1]));
+          const vmax = Math.max(0.2, ...vv) * 1.15;
+          const P = g.Plot({ xmin: 0, xmax: tmax, ymin: 0, ymax: vmax, xlabel: 'time (s)', ylabel: 'speed (m/s)',
+            xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(2) }).frame();
           P.clip(() => {
-            P.line(Ts, g.theme.ok, 2);
-            P.line(as.map(q => [q[0], q[1] * mxT / 12]), g.theme.phys, 2.2);
-            P.vline(p.m2, g.alpha(g.theme.text, .5), [3, 3]);
-            P.dot(p.m2, S.R.T, 4.5, g.theme.text, g.theme['ink-950']);
+            // theory
+            const th0 = 0.35, aTh = Math.abs(p.mode === 'wedge' ? R.A : R.a) || 0;
+            if (p.mode === 'lift') {
+              const tl = []; for (let i = 0; i <= 200; i++) { const t = S.liftTrip.T * i / 200; tl.push([t, Math.abs(liftAt(S.liftTrip, t).v)]); }
+              P.line(tl, '#9AA8C0', 1.4, [5, 4]);
+            } else if (!R.static) {
+              const tStop = th0 + Math.sqrt(2 * S.travel / Math.max(aTh, 1e-9));
+              P.line([[0, 0], [th0, 0], [tStop, aTh * (tStop - th0)]], '#9AA8C0', 1.4, [5, 4]);
+            }
+            vs.forEach(q => P.dot(q[0], Math.abs(q[1]), 2.2, '#7CF0B0'));
+            if (S.fit && p.mode !== 'lift') {
+              const f = S.fit, t0 = -f.c / (f.m || 1e-9), t1 = Math.min(tmax, t0 + vmax / Math.max(Math.abs(f.m), 1e-9));
+              P.line([[t0, 0], [t1, Math.abs(f.m * t1 + f.c)]], '#FFB454', 2);
+            }
           });
-          P.tag(0.6, 0, 'a stays exactly zero while static', g.theme['text-3'], 'left', -9);
-        },
-        hover(S, x) {
-          const p = S.p;
-          if (p.mode !== 'atwood' && p.mode !== 'table' && p.mode !== 'incline') return null;
-          const thr = p.mode === 'incline' ? p.theta * Math.PI / 180 : 0;
-          const N = p.m1 * G * Math.cos(thr), fMax = p.muS * N;
-          const drive = x * G - p.m1 * G * Math.sin(thr);
-          if (Math.abs(drive) <= fMax)
-            return [{ label: 'm₂', value: x.toFixed(2) + ' kg' },
-                    { label: 'a', value: '0 — static', color: '#3DD6F5' },
-                    { label: 'T', value: (x * G).toFixed(2) + ' N', color: '#4ADE80' }];
-          const fk = p.muK * N * Math.sign(drive);
-          const sol = SV.lin([[x, 1], [p.m1, -1]], [x * G, -p.m1 * G * Math.sin(thr) - fk]);
-          return [{ label: 'm₂', value: x.toFixed(2) + ' kg' },
-                  { label: 'a', value: sol[0].toFixed(3) + ' m/s²', color: '#3DD6F5' },
-                  { label: 'T', value: sol[1].toFixed(2) + ' N', color: '#4ADE80' }];
+          if (S.fit && p.mode !== 'lift')
+            P.tag(tmax * 0.04, vmax * 0.9, 'fitted slope ' + Math.abs(S.fit.m).toFixed(3) + ' m/s²  ·  predicted ' +
+                  Math.abs(p.mode === 'wedge' ? R.A : R.a).toFixed(3), '#FFB454', 'left', 0);
+          else if (R.static && p.mode !== 'lift') P.tag(tmax * 0.04, vmax * 0.5, 'nothing moves: the record stays flat', th.ok, 'left', 0);
         } }
     ],
 
     readouts(S) {
       const p = S.p, R = S.R;
-      if (p.mode === 'banking') {
-        return [
-          { label: 'Ideal speed √(rg tanθ)', value: R.vIdeal.toFixed(2), unit: 'm/s', flag: 'accent',
-            hint: 'no friction needed at all' },
-          { label: 'Slowest safe speed', value: R.vMin.toFixed(2), unit: 'm/s',
-            hint: R.vMin < 0.01 ? 'it can stand still' : 'below this it slides in' },
-          { label: 'Fastest safe speed', value: isFinite(R.vMax) ? R.vMax.toFixed(2) : '∞', unit: 'm/s',
-            flag: 'accent' },
-          { label: 'Driving at', value: p.speed.toFixed(1), unit: 'm/s',
-            flag: R.safe ? 'ok' : 'crit' },
-          { label: 'Centripetal force needed', value: R.needed.toFixed(0), unit: 'N',
-            hint: 'mv²/r' },
-          { label: 'Centripetal acceleration', value: R.a.toFixed(2), unit: 'm/s²',
-            hint: (R.a / G).toFixed(2) + ' g' },
-          { label: 'Normal force', value: R.bodies[0].N.toFixed(0), unit: 'N',
-            hint: 'bigger than mg on a bank' },
-          { label: 'Bank for this speed alone', value: (Math.atan(p.speed * p.speed / (p.radius * G)) * 180 / Math.PI).toFixed(1),
-            unit: '°', hint: 'θ = arctan(v²/rg)' }
-        ];
-      }
-      const out = [
-        { label: 'Acceleration a', value: Math.abs(R.a).toFixed(3), unit: 'm/s²', flag: 'accent',
-          hint: R.static ? 'zero — it holds' : 'solved, not substituted' },
-        { label: p.mode === 'contact' ? 'Contact force N₁₂' : 'Tension T',
-          value: (p.mode === 'contact' ? R.Nc : R.T).toFixed(2), unit: 'N', flag: 'accent' },
-        { label: 'Friction needed', value: Math.abs(R.fNeed || 0).toFixed(2), unit: 'N',
-          hint: 'to hold it still' },
-        { label: 'Friction available μₛN', value: (R.fMax || 0).toFixed(2), unit: 'N',
-          flag: R.static ? 'ok' : 'crit' },
-        { label: 'State', value: R.static ? 'static' : 'sliding', unit: '',
-          flag: R.static ? 'ok' : 'warn',
-          hint: R.static ? 'friction is NOT μₛN here' : 'friction is now μₖN' }
+      const meas = { label: 'Acceleration, motion sensor', value: S.fit ? Math.abs(S.fit.m).toFixed(3) : '—', unit: 'm/s²',
+                     flag: 'ok', hint: 'fitted from the record' };
+      if (p.mode === 'banking') return [
+        { label: 'Ideal speed √(rg tanθ)', value: R.vIdeal.toFixed(2), unit: 'm/s', flag: 'accent', hint: 'no friction needed at all' },
+        { label: 'Slowest safe speed', value: R.vMin.toFixed(2), unit: 'm/s', hint: R.vMin < 0.01 ? 'it can stand still' : 'below this it slides in' },
+        { label: 'Fastest safe speed', value: isFinite(R.vMax) ? R.vMax.toFixed(2) : '∞', unit: 'm/s', flag: 'accent' },
+        { label: 'Driving at', value: p.speed.toFixed(1), unit: 'm/s', flag: R.safe ? 'ok' : 'crit' },
+        { label: 'Centripetal force needed', value: R.needed.toFixed(0), unit: 'N', hint: 'mv²/r' },
+        { label: 'Normal force', value: R.bodies[0].N.toFixed(0), unit: 'N', hint: 'bigger than mg on a bank' }
       ];
-      if (p.mode !== 'contact') {
-        out.push({ label: 'Normal force on m₁', value: (R.N || 0).toFixed(2), unit: 'N',
-          hint: p.mode === 'incline' ? 'mg cos θ, not mg' : 'mg on the flat' });
-        out.push({ label: 'Weight component down slope',
-          value: (p.m1 * G * Math.sin(p.mode === 'incline' ? p.theta * Math.PI / 180 : 0)).toFixed(2),
-          unit: 'N', hint: 'mg sin θ' });
-        out.push({ label: 'm₂ lets go above', value: (((R.fMax || 0) +
-          p.m1 * G * Math.sin(p.mode === 'incline' ? p.theta * Math.PI / 180 : 0)) / G).toFixed(2),
-          unit: 'kg', hint: 'the threshold in the graph' });
-      } else {
-        out.push({ label: 'Shared acceleration', value: R.a.toFixed(3), unit: 'm/s²',
-          hint: 'both blocks, always equal' });
-        out.push({ label: 'If pushed from the other side',
-          value: R.slipping ? (p.m1 * R.a + (R.slipping ? p.muK * p.m1 * G : 0)).toFixed(2) : '0.00',
-          unit: 'N', flag: 'warn', hint: 'the contact force is NOT symmetric' });
+      if (p.mode === 'lift') return [
+        { label: 'Scale reading', value: R.reading.toFixed(1), unit: 'kg', flag: 'accent', hint: 'N/g, not your mass' },
+        { label: 'Normal force N = m(g + a)', value: R.Nscale.toFixed(1), unit: 'N' },
+        { label: 'True weight mg', value: (p.m1 * G).toFixed(1), unit: 'N' },
+        { label: 'Lift acceleration', value: R.aLift.toFixed(2), unit: 'm/s²', flag: R.aLift > 0 ? 'ok' : R.aLift < 0 ? 'crit' : undefined },
+        { label: 'Cable tension', value: (R.Tcable / 1000).toFixed(2), unit: 'kN', hint: '(M + m)(g + a)' },
+        { label: 'Lift speed', value: Math.abs(R.vLift).toFixed(2), unit: 'm/s', hint: 'speed does not change the reading' }
+      ];
+      if (p.mode === 'wedge') return [
+        { label: 'Wedge slides back at A', value: R.A.toFixed(3), unit: 'm/s²', flag: 'accent', hint: 'mg sinθ cosθ/(M + m sin²θ)' },
+        meas,
+        { label: 'Block relative to wedge', value: R.ar.toFixed(3), unit: 'm/s²', hint: 'down the face' },
+        { label: 'Block as the floor sees it', value: R.a.toFixed(3), unit: 'm/s²', hint: R.pathAngle.toFixed(1) + '° below horizontal' },
+        { label: 'Normal force N', value: R.N.toFixed(3), unit: 'N', hint: 'less than mg cosθ = ' + (p.m1 * G * Math.cos(R.theta)).toFixed(2) },
+        { label: 'Floor pushes on wedge', value: R.Nfloor.toFixed(2), unit: 'N', hint: 'less than (M + m)g = ' + ((p.M + p.m1) * G).toFixed(2) },
+        { label: 'Horizontal momentum', value: '0', unit: 'kg·m/s', flag: 'ok', hint: 'no horizontal outside force' }
+      ];
+      const out = [
+        { label: 'Acceleration, solved', value: Math.abs(R.a).toFixed(3), unit: 'm/s²', flag: 'accent',
+          hint: R.static ? 'zero — it holds' : 'from the constraint equations' },
+        meas
+      ];
+      if (p.mode === 'contact') {
+        out.push({ label: 'Contact force N₁₂', value: R.static ? 'indeterminate' : R.Nc.toFixed(2), unit: R.static ? '' : 'N',
+                   flag: 'accent', hint: R.static ? '0 to ' + R.NcMax.toFixed(1) + ' N — friction shares it' : 'accelerates m₂ alone' });
+        out.push({ label: 'Push from the other side', value: R.static ? '—' : (p.m1 * R.a + p.muK * p.m1 * G).toFixed(2),
+                   unit: R.static ? '' : 'N', flag: 'warn', hint: 'the contact force is NOT symmetric' });
+        return out;
+      }
+      out.push({ label: 'Tension T₁', value: R.T1.toFixed(2), unit: 'N', flag: 'accent' });
+      if (p.mode === 'atwood' || p.mp > 0) out.push({ label: 'Tension T₂', value: R.T2.toFixed(2), unit: 'N',
+        hint: p.mp > 0 ? 'differs: the pulley has mass' : 'same: light pulley' });
+      if (p.mode !== 'atwood') {
+        out.push({ label: 'Friction needed', value: Math.abs(R.fNeed || 0).toFixed(2), unit: 'N', hint: 'to hold it still' });
+        out.push({ label: 'Friction available μₛN', value: (R.fMax || 0).toFixed(2), unit: 'N', flag: R.static ? 'ok' : 'crit' });
+        out.push({ label: 'Normal force on m₁', value: (R.N || 0).toFixed(2), unit: 'N', hint: p.mode === 'incline' ? 'mg cos θ, not mg' : 'mg on the flat' });
       }
       return out;
     },
@@ -855,34 +1087,41 @@
     equation(S) {
       const p = S.p, R = S.R;
       if (p.mode === 'banking')
-        return E.v('v') + E.sub('ideal') + ' ' + E.op('=') + ' √(' + E.v('rg') + ' tan' + E.v('θ') + ') ' +
-          E.op('=') + ' ' + E.n(R.vIdeal, 'm/s') +
+        return E.v('v') + E.sub('ideal') + ' ' + E.op('=') + ' √(' + E.v('rg') + ' tan' + E.v('θ') + ') ' + E.op('=') + ' ' + E.n(R.vIdeal, 'm/s') +
           '<br>' + E.v('v') + E.sub('max') + ' ' + E.op('=') + ' √(' + E.v('rg') +
-          E.frac('tan' + E.v('θ') + E.op('+') + E.v('μ'), '1' + E.op('−') + E.v('μ') + ' tan' + E.v('θ')) +
-          ') ' + E.op('=') + ' ' + E.n(isFinite(R.vMax) ? R.vMax : 999, 'm/s') + E.op('·') +
-          ' ' + E.v('v') + E.sub('min') + ' ' + E.op('=') + ' ' + E.n(R.vMin, 'm/s');
+          E.frac('tan' + E.v('θ') + E.op('+') + E.v('μ'), '1' + E.op('−') + E.v('μ') + ' tan' + E.v('θ')) + ') ' + E.op('=') + ' ' +
+          E.n(isFinite(R.vMax) ? R.vMax : 999, 'm/s');
+      if (p.mode === 'lift')
+        return E.v('N') + ' ' + E.op('−') + ' ' + E.v('mg') + ' ' + E.op('=') + ' ' + E.v('ma') + E.op('⇒') + ' ' + E.v('N') + ' ' +
+          E.op('=') + ' ' + E.v('m') + '(' + E.v('g') + ' ' + E.op('+') + ' ' + E.v('a') + ') ' + E.op('=') + ' ' + E.n(R.Nscale, 'N') +
+          '<br>reading ' + E.op('=') + ' ' + E.frac(E.v('N'), E.v('g')) + ' ' + E.op('=') + ' ' + E.n(R.reading, 'kg') +
+          E.op('·') + ' free fall: ' + E.v('a') + ' ' + E.op('=') + ' −' + E.v('g') + ' ' + E.op('⇒') + ' ' + E.v('N') + ' ' + E.op('=') + ' 0';
+      if (p.mode === 'wedge')
+        return E.v('A') + ' ' + E.op('=') + ' ' + E.frac(E.v('mg') + ' sin' + E.v('θ') + ' cos' + E.v('θ'),
+          E.v('M') + ' ' + E.op('+') + ' ' + E.v('m') + ' sin²' + E.v('θ')) + ' ' + E.op('=') + ' ' + E.n(R.A, 'm/s²') +
+          '<br>' + E.v('a') + E.sub('rel') + ' ' + E.op('=') + ' ' + E.frac('(' + E.v('M') + E.op('+') + E.v('m') + ')' + E.v('g') + ' sin' + E.v('θ'),
+          E.v('M') + ' ' + E.op('+') + ' ' + E.v('m') + ' sin²' + E.v('θ')) + ' ' + E.op('=') + ' ' + E.n(R.ar, 'm/s²') +
+          E.op('·') + ' ' + E.v('N') + ' ' + E.op('=') + ' ' + E.n(R.N, 'N');
       if (p.mode === 'contact')
-        return E.v('a') + ' ' + E.op('=') + ' ' + E.frac(E.v('F') + E.op('−') + E.v('μ') +
-          '(' + E.v('m') + '₁' + E.op('+') + E.v('m') + '₂)' + E.v('g'),
+        return E.v('a') + ' ' + E.op('=') + ' ' + E.frac(E.v('F') + E.op('−') + E.v('μ') + '(' + E.v('m') + '₁' + E.op('+') + E.v('m') + '₂)' + E.v('g'),
           E.v('m') + '₁' + E.op('+') + E.v('m') + '₂') + ' ' + E.op('=') + ' ' + E.n(R.a, 'm/s²') +
-          '<br>' + E.v('N') + '₁₂ ' + E.op('=') + ' ' + E.v('m') + '₂' + E.v('a') + ' ' + E.op('+') +
-          ' ' + E.v('μm') + '₂' + E.v('g') + ' ' + E.op('=') + ' ' + E.n(R.Nc, 'N') + E.op('·') +
-          ' push from the other side and it is NOT the same';
-      const thr = p.mode === 'incline' ? p.theta * Math.PI / 180 : 0;
-      let s = 'test: ' + E.v('f') + E.sub('needed') + ' ' + E.op('=') + ' ' +
-        E.n(Math.abs(R.fNeed || 0), 'N') + ' vs ' + E.v('μ') + E.sub('s') + E.v('N') + ' ' +
-        E.op('=') + ' ' + E.n(R.fMax || 0, 'N') + E.op('→') +
-        (R.static ? ' it holds' : ' it lets go');
+          '<br>' + E.v('N') + '₁₂ ' + E.op('=') + ' ' + E.v('m') + '₂(' + E.v('a') + E.op('+') + E.v('μg') + ') ' + E.op('=') + ' ' +
+          (R.static ? 'indeterminate while static' : E.n(R.Nc, 'N'));
+      if (p.mode === 'atwood')
+        return E.v('a') + ' ' + E.op('=') + ' ' + E.frac('(' + E.v('m') + '₁' + E.op('−') + E.v('m') + '₂)' + E.v('g'),
+          E.v('m') + '₁' + E.op('+') + E.v('m') + '₂' + E.op('+') + ' ' + E.frac(E.v('I'), E.v('r') + '²')) + ' ' + E.op('=') + ' ' +
+          E.n(R.a, 'm/s²') + '<br>' + E.v('T') + '₁ ' + E.op('=') + ' ' + E.v('m') + '₁(' + E.v('g') + E.op('−') + E.v('a') + ') ' +
+          E.op('=') + ' ' + E.n(R.T1, 'N') + E.op('·') + ' ' + E.v('T') + '₂ ' + E.op('=') + ' ' + E.v('m') + '₂(' + E.v('g') + E.op('+') +
+          E.v('a') + ') ' + E.op('=') + ' ' + E.n(R.T2, 'N');
+      let s = 'test: ' + E.v('f') + E.sub('needed') + ' ' + E.op('=') + ' ' + E.n(Math.abs(R.fNeed || 0), 'N') + ' vs ' + E.v('μ') +
+        E.sub('s') + E.v('N') + ' ' + E.op('=') + ' ' + E.n(R.fMax || 0, 'N') + E.op('→') + (R.static ? ' it holds' : ' it lets go');
       s += '<br>' + E.v('a') + ' ' + E.op('=') + ' ';
-      if (R.static) s += '0' + E.op(',') + ' and ' + E.v('f') + ' ' + E.op('=') + ' ' +
-        E.n(Math.abs(R.fNeed || 0), 'N') + E.op(',') + ' NOT ' + E.v('μ') + E.sub('s') + E.v('N');
-      else s += E.frac(E.v('m') + '₂' + E.v('g') + E.op('−') + E.v('m') + '₁' + E.v('g') + 'sin' +
-        E.v('θ') + E.op('−') + E.v('μ') + E.sub('k') + E.v('m') + '₁' + E.v('g') + 'cos' + E.v('θ'),
-        E.v('m') + '₁' + E.op('+') + E.v('m') + '₂') + ' ' + E.op('=') + ' ' + E.n(Math.abs(R.a), 'm/s²');
-      s += '<br>' + E.v('T') + ' ' + E.op('=') + ' ' + E.n(R.T, 'N');
+      if (R.static) s += '0' + E.op(',') + ' and ' + E.v('f') + ' ' + E.op('=') + ' ' + E.n(Math.abs(R.fNeed || 0), 'N') + E.op(',') + ' NOT ' + E.v('μ') + E.sub('s') + E.v('N');
+      else s += E.frac(E.v('m') + '₂' + E.v('g') + E.op('−') + E.v('m') + '₁' + E.v('g') + 'sin' + E.v('θ') + E.op('−') + E.v('μ') + E.sub('k') +
+        E.v('m') + '₁' + E.v('g') + 'cos' + E.v('θ'), E.v('m') + '₁' + E.op('+') + E.v('m') + '₂' + (p.mp > 0 ? E.op('+') + E.frac(E.v('I'), E.v('r') + '²') : '')) +
+        ' ' + E.op('=') + ' ' + E.n(Math.abs(R.a), 'm/s²');
       return s;
     },
-
     eqNote: '<b>Static friction is not μ<sub>s</sub>N.</b> It is whatever value equilibrium demands, up ' +
       'to a ceiling of μ<sub>s</sub>N — and that ceiling is reached only at the instant of slipping. A ' +
       'block sitting on a table with a 2 N pull experiences 2 N of friction, not μ<sub>s</sub>N, however ' +
@@ -894,7 +1133,7 @@
     problems: [
       { source: 'JEE Main pattern · the Atwood machine',
         q: 'Two masses of 5.00 kg and 3.00 kg hang from a light string over a frictionless pulley. Take g = 9.81 m/s². Find the acceleration of the system in m/s².',
-        params: { mode: 'atwood', m1: 5, m2: 3, muS: 0, muK: 0 },
+        params: { mode: 'atwood', mp: 0, m1: 5, m2: 3, muS: 0, muK: 0 },
         predict: { label: 'acceleration', unit: 'm/s²', tol: 0.02 },
         measure: S => Math.abs(S.R.a),
         working: 'a = (m₁ − m₂)g/(m₁ + m₂) = (5.00 − 3.00)(9.81)/8.00 = <b>2.45 m/s²</b>, and the ' +
@@ -904,7 +1143,7 @@
           'without redoing the problem.' },
       { source: 'JEE Main pattern · does it move at all?',
         q: 'A 10.0 kg block rests on a horizontal table with μₛ = 0.500, connected over a pulley to a 2.00 kg hanging mass. Find the acceleration of the system in m/s².',
-        params: { mode: 'table', m1: 10, m2: 2, muS: 0.5, muK: 0.4, theta: 0 },
+        params: { mode: 'table', mp: 0, m1: 10, m2: 2, muS: 0.5, muK: 0.4, theta: 0 },
         predict: { label: 'acceleration', unit: 'm/s²', tol: 0.05 },
         measure: S => Math.abs(S.R.a),
         working: '<b>Zero.</b> Test first: the pull is m₂g = 19.6 N, while static friction can supply ' +
@@ -914,7 +1153,7 @@
           'here means "it does not move", not "it moves backwards".' },
       { source: 'JEE Advanced pattern · once it breaks free',
         q: 'The same table and block, but now with a 8.00 kg hanging mass and μₖ = 0.400. Find the acceleration in m/s².',
-        params: { mode: 'table', m1: 10, m2: 8, muS: 0.5, muK: 0.4, theta: 0 },
+        params: { mode: 'table', mp: 0, m1: 10, m2: 8, muS: 0.5, muK: 0.4, theta: 0 },
         predict: { label: 'acceleration', unit: 'm/s²', tol: 0.02 },
         measure: S => Math.abs(S.R.a),
         working: 'Test: the pull is 78.5 N against a ceiling of 49.1 N, so it slides. Now — and only ' +
@@ -940,7 +1179,33 @@
           'N sin θ = mv²/r and N cos θ = mg. Divide: tan θ = v²/rg, so ' +
           'v = √(rg tan θ) = √(80.0 × 9.81 × 0.364) = <b>16.9 m/s</b>. The mass cancels — a lorry and ' +
           'a motorbike have the same ideal speed. With friction this becomes a <i>band</i> either side ' +
-          'of that value, which the graph draws.' }
+          'of that value, which the graph draws.' },
+      { source: 'JEE Advanced pattern · a pulley with mass',
+        q: 'Masses of 5.00 kg and 3.00 kg hang over a pulley that is a uniform disc of mass 2.00 kg. The string does not slip. Find the acceleration in m/s² (g = 9.81 m/s²).',
+        params: { mode: 'atwood', m1: 5, m2: 3, mp: 2, muS: 0, muK: 0 },
+        predict: { label: 'acceleration', unit: 'm/s²', tol: 0.02 },
+        measure: S => Math.abs(S.R.a),
+        working: 'The pulley needs a net torque to spin up, so the tensions differ: (T₁ − T₂)r = Iα with I = ½Mr² and ' +
+          'α = a/r gives T₁ − T₂ = ½Ma. Adding the three equations: a = (m₁ − m₂)g/(m₁ + m₂ + ½M) = 2(9.81)/9.00 = ' +
+          '<b>2.18 m/s²</b>. Then T₁ = m₁(g − a) = 38.2 N and T₂ = m₂(g + a) = 36.0 N. The pulley\'s mass enters as ' +
+          'half its mass, because a disc keeps half its mass at small radius.' },
+      { source: 'JEE Advanced pattern · the wedge that moves',
+        q: 'A 1.00 kg block slides down the smooth 30° face of a 4.00 kg wedge that rests on a smooth floor. Find the acceleration of the wedge, in m/s².',
+        params: { mode: 'wedge', m1: 1, M: 4, theta: 30, fixWedge: false },
+        predict: { label: 'wedge acceleration', unit: 'm/s²', tol: 0.02 },
+        measure: S => S.R.A,
+        working: 'Three unknowns, three equations: the block\'s two components and the wedge\'s horizontal equation, ' +
+          'with the block constrained to stay on the face. They give A = mg sinθ cosθ/(M + m sin²θ) = ' +
+          '(9.81)(0.5)(0.866)/(4 + 0.25) = <b>1.00 m/s²</b>. The block\'s real path is steeper than the face (the ' +
+          'dashed line), N is less than mg cosθ, and total horizontal momentum stays zero throughout.' },
+      { source: 'NEET pattern · the lift',
+        q: 'A 60.0 kg person stands on a bathroom scale in a lift that accelerates upward at 2.00 m/s². What does the scale read, in kg? (g = 9.81 m/s²)',
+        params: { mode: 'lift', m1: 60, liftA: 2, trip: 'up' },
+        predict: { label: 'scale reading', unit: 'kg', tol: 0.02 },
+        measure: S => 60 * (9.81 + 2) / 9.81,
+        working: 'The scale measures the normal force, not the mass. N − mg = ma, so N = m(g + a) = 60 × 11.81 = 708.6 N, ' +
+          'and the scale, calibrated in kg, shows N/g = <b>72.2 kg</b>. Moving at steady speed it reads 60.0 kg; ' +
+          'braking on the way up it reads less; in free fall it reads zero.' }
     ],
 
     walkthrough: [
@@ -951,14 +1216,14 @@
           'reaction: it supplies whatever equilibrium needs, up to a ceiling. Writing f = μₛN when the ' +
           'block is not on the point of slipping is the commonest error in the chapter, and it gives a ' +
           'block that accelerates backwards.',
-        params: { mode: 'table', m1: 10, m2: 2, muS: 0.5, muK: 0.4, theta: 0 } },
+        params: { mode: 'table', mp: 0, m1: 10, m2: 2, muS: 0.5, muK: 0.4, theta: 0 } },
       { title: '2 · Drag the hanging mass until it lets go',
         body: 'Drag m₂ downward — it gets heavier — and watch the red line in the first graph climb toward the green one.',
         ask: 'What happens at the moment the two lines cross?',
         reveal: 'The block breaks free, and friction <b>drops</b> from its peak μₛN to the smaller μₖN. ' +
           'That is why a heavy box lurches the instant you get it moving and then feels easier to push. ' +
           'The threshold is m₂ = μₛm₁ = 5.0 kg here, marked on the graph.',
-        params: { mode: 'table', m1: 10, m2: 5.2, muS: 0.5, muK: 0.4, theta: 0 } },
+        params: { mode: 'table', mp: 0, m1: 10, m2: 5.2, muS: 0.5, muK: 0.4, theta: 0 } },
       { title: '3 · On a slope, N is not mg',
         body: 'Switch to the incline at 30° and look at the normal-force readout.',
         ask: 'Why is the normal force smaller than the weight?',
@@ -966,7 +1231,7 @@
           'balanced: N = mg cos θ. The other component, mg sin θ, runs down the slope and is what the ' +
           'string and friction have to fight. Using mg for N on a slope inflates the friction by 1/cos θ, ' +
           'which at 60° is a factor of two.',
-        params: { mode: 'incline', m1: 5, m2: 3, theta: 30, muS: 0.6, muK: 0.5 } },
+        params: { mode: 'incline', mp: 0, m1: 5, m2: 3, theta: 30, muS: 0.6, muK: 0.5 } },
       { title: '4 · The tension is not the weight',
         body: 'Set the incline frictionless and watch the tension as the system accelerates.',
         ask: 'The hanging mass is 3 kg, so is the tension 29.4 N?',
@@ -974,7 +1239,7 @@
           'accelerate. T = m₂(g − a) whenever m₂ is descending, so the tension is always <i>less</i> ' +
           'than the weight of a falling mass and <i>more</i> than the weight of a rising one. T equals ' +
           'the weight only when a = 0.',
-        params: { mode: 'incline', m1: 4, m2: 3, theta: 30, muS: 0, muK: 0 } },
+        params: { mode: 'incline', mp: 0, m1: 4, m2: 3, theta: 30, muS: 0, muK: 0 } },
       { title: '5 · The contact force is not symmetric',
         body: 'Switch to blocks in contact: 3 kg and 2 kg, 20 N applied to the 3 kg block.',
         ask: 'Swap which block you push. Does the contact force between them stay the same?',
@@ -998,7 +1263,28 @@
           'centripetal requirement and the friction (through N) — so it cancels. The same is true of a ' +
           'block sliding down a slope: the angle at which it starts to slide depends on μ and nothing ' +
           'else. If a mass survives to the end of one of these answers, look for the error.',
-        params: { mode: 'banking', m1: 400, theta: 20, radius: 80, muS: 0.4, muK: 0.35, speed: 16.9 } }
+        params: { mode: 'banking', m1: 400, theta: 20, radius: 80, muS: 0.4, muK: 0.35, speed: 16.9 } },
+      { title: '8 · A pulley with mass',
+        body: 'Load "Atwood · heavy pulley" and read the two tension meters.',
+        ask: 'Why are T₁ and T₂ different now?',
+        reveal: 'A heavy pulley needs a <b>net torque</b> to spin faster, and only a difference in tension can supply it: ' +
+          '(T₁ − T₂)r = Iα. With a light pulley the difference goes to zero, which is the only reason the textbook can ' +
+          'use one T for the whole string. The first graph shows the two tensions splitting apart as the pulley gets heavier.',
+        params: { mode: 'atwood', m1: 5, m2: 3, mp: 2 } },
+      { title: '9 · The wedge runs away',
+        body: 'Load "Sliding wedge". The wedge sits on a smooth track, so the block pushes it backwards.',
+        ask: 'Does the block slide down along the face of the wedge, as seen from the floor?',
+        reveal: '<b>No — its real path (dashed) is steeper than the face</b>, because the face moves away underneath it. ' +
+          'The normal force is less than mg cosθ, and the floor pushes up on the wedge with less than (M + m)g, because ' +
+          'the block is accelerating downwards. Clamp the wedge and every one of those differences disappears.',
+        params: { mode: 'wedge', m1: 1, M: 4, theta: 30, fixWedge: false } },
+      { title: '10 · Weight in a lift',
+        body: 'Load "Lift going up" and watch the scale through the whole trip.',
+        ask: 'When does the scale read more than the true mass, and when less?',
+        reveal: 'More while accelerating <b>upward</b> (starting up, or braking on the way down); less while accelerating ' +
+          'downward; exactly right at steady speed, however fast. The scale reads N, and N = m(g + a). Cut the cable ' +
+          'and a = −g, so N = 0: the reading drops to zero. That is weightlessness.',
+        params: { mode: 'lift', m1: 60, liftA: 2, trip: 'up' } }
     ],
 
     quiz: [
@@ -1018,7 +1304,16 @@
       { q: 'A car rounds a frictionless banked curve. The correct speed depends on:',
         options: ['the mass of the car', 'the radius and the bank angle only',
                   'the tyre width', 'the mass and the radius'], answer: 1,
-        why: 'v = √(rg tan θ). The mass cancels from the balance because weight, centripetal requirement and normal force all scale with it. A lorry and a motorbike have the same ideal speed.' }
+        why: 'v = √(rg tan θ). The mass cancels from the balance because weight, centripetal requirement and normal force all scale with it. A lorry and a motorbike have the same ideal speed.' },
+      { q: 'Two masses hang over a pulley that has mass. The tensions on the two sides are:',
+        options: ['always equal', 'different, with the larger on the side of the descending mass', 'zero', 'different, with the larger on the rising side'], answer: 1,
+        why: 'The pulley needs a net torque to accelerate its rotation, (T₁ − T₂)r = Iα, so the side that pulls it round (the descending mass) has the larger tension.' },
+      { q: 'A person on a scale in a lift that moves upward at constant speed reads:',
+        options: ['more than their weight', 'less than their weight', 'exactly their weight', 'zero'], answer: 2,
+        why: 'Constant velocity means a = 0, so N = mg. Only acceleration changes the reading, never speed.' },
+      { q: 'A block slides down a smooth wedge that is free to move on a smooth floor. The normal force between them is:',
+        options: ['mg cos θ', 'more than mg cos θ', 'less than mg cos θ', 'zero'], answer: 2,
+        why: 'The wedge accelerates away from the block, so the block presses on it less than it would on a fixed wedge: N = Mmg cosθ/(M + m sin²θ).' }
     ],
 
     notes: '<b>Where this shows up in the paper.</b>' +
@@ -1029,8 +1324,9 @@
       '<li>Blocks on an incline: N = mg cos θ, driving component mg sin θ, and the angle of repose ' +
       'tan θ = μₛ at which a block just begins to slide.</li>' +
       '<li>Banked curves, the ideal speed √(rg tan θ), and the band that friction opens around it.</li>' +
-      '<li>The accelerating wedge or lift, where the pseudo-force in the non-inertial frame is the ' +
-      'quickest route.</li></ul>' +
+      '<li>Pulleys with mass: the tensions differ by (I/r²)a, and the pulley\'s mass enters as ½M for a disc.</li>' +
+      '<li>The movable wedge: three equations and one constraint; horizontal momentum is conserved.</li>' +
+      '<li>Apparent weight in a lift: N = m(g + a), zero in free fall; or the pseudo-force −ma in the lift\'s frame.</li></ul>' +
       '<div class="pyq"><em>Trap to avoid</em>Static friction is <b>not</b> μ<sub>s</sub>N. That is its ' +
       'maximum, reached only at the point of slipping. Writing f = μ<sub>s</sub>N for a stationary block ' +
       'that is nowhere near slipping produces a negative acceleration, and a negative acceleration in ' +
@@ -1039,6 +1335,7 @@
       '<b>not</b> the weight of either mass. If it were, that mass would have no net force and could ' +
       'not accelerate. T = m(g − a) for a descending mass and m(g + a) for a rising one.</div>'
   });
+
 
   /* =========================================================================
      17 · CENTRE OF MASS AND COLLISIONS — momentum kept, energy audited
