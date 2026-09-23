@@ -95,28 +95,58 @@
      here are small enough on screen that perspective error is invisible),
      subdividing large faces so it stays true */
   function faceTex(ctx, cam, img, P0, P1, P3, n, shade, alpha) {
-    n = n || 1;
+    // n tiles each way, or [along P0→P1, along P0→P3]: a long thin face needs cutting only along its length
+    const nu = Array.isArray(n) ? n[0] : (n || 1), nv = Array.isArray(n) ? n[1] : (n || 1);
     const E1 = sub(P1, P0), E2 = sub(P3, P0);
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-      const a = add(P0, add(scale(E1, i / n), scale(E2, j / n)));
-      const b = add(a, scale(E1, 1 / n)), d = add(a, scale(E2, 1 / n)), cc = add(b, scale(E2, 1 / n));
+    /* One affine map per tile cannot follow a perspective quad: its fourth
+       corner misses, and from a steep angle that shows as dark wedges. Each
+       tile is therefore drawn as two triangles, each mapped exactly (an
+       affine map is exact on a triangle), with the clip grown a hair so
+       neighbours overlap instead of leaving a hairline between them. */
+    const tri = (s, d) => {
+      const [sx0, sy0, sx1, sy1, sx2, sy2] = s;
+      let [x0, y0, x1, y1, x2, y2] = d;
+      const gx = (x0 + x1 + x2) / 3, gy = (y0 + y1 + y2) / 3;
+      const gr = (x, y) => { const dx = x - gx, dy = y - gy, l = Math.hypot(dx, dy) || 1; return [x + dx / l * 0.9, y + dy / l * 0.9]; };
+      const A = gr(x0, y0), B = gr(x1, y1), C = gr(x2, y2);
+      const den = sx0 * (sy2 - sy1) - sx1 * sy2 + sx2 * sy1 + (sx1 - sx2) * sy0;
+      if (!den) return;
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.lineTo(C[0], C[1]); ctx.closePath(); ctx.clip();
+      ctx.transform(
+        -(sy0 * (x2 - x1) - sy1 * x2 + sy2 * x1 + (sy1 - sy2) * x0) / den,
+         (sy1 * y2 + sy0 * (y1 - y2) - sy2 * y1 + (sy2 - sy1) * y0) / den,
+         (sx0 * (x2 - x1) - sx1 * x2 + sx2 * x1 + (sx1 - sx2) * x0) / den,
+        -(sx1 * y2 + sx0 * (y1 - y2) - sx2 * y1 + (sx2 - sx1) * y0) / den,
+         (sx0 * (sy2 * x1 - sy1 * x2) + sy0 * (sx1 * x2 - sx2 * x1) + (sx2 * sy1 - sx1 * sy2) * x0) / den,
+         (sx0 * (sy2 * y1 - sy1 * y2) + sy0 * (sx1 * y2 - sx2 * y1) + (sx2 * sy1 - sx1 * sy2) * y0) / den);
+      // only the part of the texture under this triangle, padded a little
+      const ux0 = Math.max(0, Math.floor(Math.min(sx0, sx1, sx2)) - 2), vy0 = Math.max(0, Math.floor(Math.min(sy0, sy1, sy2)) - 2);
+      const ux1 = Math.min(img.width, Math.ceil(Math.max(sx0, sx1, sx2)) + 2), vy1 = Math.min(img.height, Math.ceil(Math.max(sy0, sy1, sy2)) + 2);
+      if (ux1 > ux0 && vy1 > vy0) ctx.drawImage(img, ux0, vy0, ux1 - ux0, vy1 - vy0, ux0, vy0, ux1 - ux0, vy1 - vy0);
+      ctx.restore();
+    };
+    const W = img.width, H = img.height;
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+      const a = add(P0, add(scale(E1, i / nu), scale(E2, j / nv)));
+      const b = add(a, scale(E1, 1 / nu)), d = add(a, scale(E2, 1 / nv)), cc = add(b, scale(E2, 1 / nv));
       const qa = cam.project(a), qb = cam.project(b), qd = cam.project(d), qc = cam.project(cc);
       if (!qa.ok || !qb.ok || !qd.ok || !qc.ok) continue;
-      const sw = img.width / n, sh = img.height / n;
+      const u0 = i / nu * W, u1 = (i + 1) / nu * W, v0 = j / nv * H, v1 = (j + 1) / nv * H;
       ctx.save();
-      ctx.beginPath(); ctx.moveTo(qa.x, qa.y); ctx.lineTo(qb.x, qb.y); ctx.lineTo(qc.x, qc.y); ctx.lineTo(qd.x, qd.y);
-      ctx.closePath(); ctx.clip();
       if (alpha != null) ctx.globalAlpha = alpha;
-      // expand a hair so the tiles meet
-      /* compose with the canvas's own transform (it carries the device
-         pixel ratio), never replace it */
-      ctx.save();
-      ctx.transform((qb.x - qa.x) / sw * 1.01, (qb.y - qa.y) / sw * 1.01, (qd.x - qa.x) / sh * 1.01, (qd.y - qa.y) / sh * 1.01,
-                    qa.x, qa.y);
-      ctx.drawImage(img, i * sw, j * sh, sw, sh, 0, 0, sw, sh);
+      tri([u0, v0, u1, v0, u1, v1], [qa.x, qa.y, qb.x, qb.y, qc.x, qc.y]);
+      tri([u0, v0, u1, v1, u0, v1], [qa.x, qa.y, qc.x, qc.y, qd.x, qd.y]);
       ctx.restore();
-      if (shade) { ctx.globalAlpha = 1; ctx.fillStyle = shade; ctx.fill(); }
-      ctx.restore();
+    }
+    // the lighting goes on once over the whole face: per tile it doubles up along the shared edges
+    if (shade) {
+      const c0 = cam.project(P0), c1 = cam.project(P1), c3 = cam.project(P3), c2 = cam.project(add(P1, E2));
+      if (c0.ok && c1.ok && c2.ok && c3.ok) {
+        ctx.save(); ctx.fillStyle = shade;
+        ctx.beginPath(); ctx.moveTo(c0.x, c0.y); ctx.lineTo(c1.x, c1.y); ctx.lineTo(c2.x, c2.y); ctx.lineTo(c3.x, c3.y); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
     }
   }
   /* the darkening a face of normal n receives, as an overlay colour */
@@ -148,8 +178,11 @@
       const P0 = sub(sub(c, e1), e2), P1 = add(sub(c, e2), e1), P3 = add(sub(c, e1), e2);
       const img = pick(axis), sh = shadeOverlay(F, n, amb);
       const long = Math.max(size[0], size[1], size[2]);
+      // tiles per edge from that edge's own length, capped by o.tiles
+      const l1 = 2 * Math.hypot(e1[0], e1[1], e1[2]), l2 = 2 * Math.hypot(e2[0], e2[1], e2[2]), cap = o.tiles || (long > 1.2 ? 3 : 1);
+      const nt = [Math.max(1, Math.min(cap, Math.ceil(l1 / 0.8))), Math.max(1, Math.min(cap, Math.ceil(l2 / 0.8)))];
       F.push(c, () => {
-        faceTex(ctx, cam, img, P0, P1, P3, o.tiles || (long > 1.2 ? 3 : 1), sh);
+        faceTex(ctx, cam, img, P0, P1, P3, nt, sh);
         if (o.edges !== false) {
           const q = [P0, P1, add(P1, sub(P3, P0)), P3].map(p => cam.project(p));
           if (q.every(x => x.ok)) {
@@ -227,7 +260,7 @@
   function rule(F, start, dir, lengthM, o) {
     o = o || {};
     const k = o.k || 1;                            // scene units per metre
-    const d = norm(dir), up = o.up || [0, 0, 1], side = norm(cross(up, d));
+    const d = norm(dir), up = o.up || [0, 0, 1], side = scale(norm(cross(up, d)), o.flip ? -1 : 1);
     const L = lengthM * k, w = o.width || 0.05, t = 0.008;
     const cm = Math.round(lengthM * 100);
     const img = ruleTex(cm, o.from || 0);

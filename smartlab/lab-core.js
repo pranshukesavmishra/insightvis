@@ -640,6 +640,9 @@ window.InsightLab = (function () {
       host.appendChild(grp);
     }
     (def.controls || []).forEach(group => {
+      // a group whose every item is hidden for this mode is left out whole
+      if (group.when && !group.when(S)) return;
+      if (group.items.every(it => it.when && !it.when(S))) return;
       const g = el('div', 'ctlgroup');
       if (group.group) g.appendChild(el('div', 'ctlgroup-name', group.group));
       group.items.forEach(it => {

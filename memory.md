@@ -742,6 +742,44 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-23 (d)** — **Client: batch 2 is "okay, not excellent"; make batch 3 better "in working by all
+  parameters".** Built **Gravitation** (4 set-ups) and **Fluids** (5 set-ups) in `sims-physics11.js`,
+  one IIFE holding both labs.
+  **New techniques, reusable:**
+  - **Ray-traced planets** (`traceBody`):
+    - Each pixel in the disc's box is a ray intersected with the sphere.
+    - The hit point is turned into latitude and longitude on a procedural equirectangular texture,
+      sampled bilinearly, then lit with a soft terminator, ocean glint and city lights.
+    - `o.cut` removes the y < 0 half and colours the section face by radius (the PREM layers).
+    - The pixel budget is about 170k per frame (≈20 ms).
+  - **Glassware and liquids as volumes** (`glassCyl`, `liquidCyl`): the convex hull of the two rim
+    ellipses, filled nearly clear with silhouette streaks for glass, or with a graded tint and a lit
+    surface for liquid. Contents are drawn before the liquid so they show through it tinted.
+  - **`BENCH.faceTex` now maps each tile as two exact affine triangles.** One affine map per tile
+    left dark wedges from steep angles. The shading overlay is applied once per face, and tile counts
+    follow each edge's length. `BENCH.rule` has a `flip` option so vertical rules read correctly.
+  - `lab-core` now omits a control group whose items are all hidden for the current mode, and
+    honours a group-level `when`.
+  **Measured, not asserted:**
+  - Kepler T to 6 figures; equal areas to 10⁻⁶.
+  - Drag run: PE lost ÷ KE gained = 2.05.
+  - PREM: g peaks at 10.69 m/s² at 3480 km; tunnel 38.2 min against 42.18 min uniform.
+  - Cavendish: G = 6.674 after the far-sphere β and damping (1 − ζ²) corrections, with ζ read back
+    as 0.121 against 0.12 set.
+  - Tank drain matches the formula to 10⁻¹²; venturi Cd 0.948 (water) and 0.68 (laminar oil).
+  - Viscometer: η 10% high from the wall, corrected to within 1%.
+  - Capillary: a tube that is too short caps the column at θ = 47.7°.
+  **Bugs caught in the build:**
+  - A comment pasted onto a line swallowed its code.
+  - The drag integrator went unstable: the step now stays below v/a_drag, and re-entry is at 120 km.
+  - (S₁ + 2S₂ + S₃)/4 drifted under heavy damping. The exact three-point form is
+    (S₁S₃ − S₂²)/(S₁ + S₃ − 2S₂).
+  - The venturi Cd was inverted, and an open-exit pipe made every throat reading negative. A
+    back-pressure valve was added.
+  - A negative absolute pressure was shown instead of boiling.
+  - The meniscus sag lost the sign of cos θ and filled the stage for mercury.
+  - Labels were drawn in front of a globe that hides their object: ask `hidden(pt)` first.
+
 - **2026-09-23 (c)** — **Client: batch 2 is "only 10–20%", upgrade it very much — visuals, working and
   correctness.** Built **`bench3d.js` (window.BENCH)**, the apparatus layer every future bench should use:
   `wood/metal` procedural textures, `texBox` (textured, lit, per-face sorted), `table`, `clampStand`,

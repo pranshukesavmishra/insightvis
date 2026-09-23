@@ -101,11 +101,11 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v8 (shipped)
+## 4. Insight Smart Lab — v9 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Forty experiments across twenty-five chapters.**
+Source: [`smartlab/`](./smartlab). **Forty-two experiments across twenty-seven chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
-**Physics now spans fifteen chapters** — thirteen of its benches are built in true 3D on `render3d.js`,
+**Physics now spans seventeen chapters** — fifteen of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
 
 ### Physics · Moving Charges & Magnetism
@@ -204,6 +204,48 @@ The bench:
 
 The circuits sit on a breadboard, with resistors whose colour bands match their value, electrolytic
 capacitors and handheld multimeters. They cover RC charging, charge sharing and series/parallel networks.
+
+### Physics · Gravitation
+**Gravitation — Orbits, the Inside of the Earth and Weighing G**
+Four set-ups. No path is drawn from a conic-section formula: every one is integrated from F = GMm/r²,
+and each exam result is **read off the run**.
+- **Launch a satellite** round a ray-traced planet (Earth, Moon, Mars, Jupiter). The globe has
+  procedural continents, clouds, sun glint and city lights on the night side. Drag the velocity arrow
+  to launch faster or steeper, and the launch point to go higher. The lab times the period, measures
+  the semi-major axis from the nearest and furthest points reached, and sums the areas swept in twelve
+  equal times; they agree to 10⁻⁶. It also covers:
+  - a geostationary satellite hanging over a ground station;
+  - Newton's cannon;
+  - the "same speed, aimed upward" orbit that crashes;
+  - escape;
+  - **air drag and the satellite paradox**: kinetic energy rises while total energy falls, and the
+    potential energy lost is exactly twice the kinetic energy gained.
+- **Binary star**: both stars are integrated, and the centre of mass is checked rather than assumed.
+  Radial-velocity curves show what a telescope records.
+- **Inside the Earth**: a cut-away globe built on the PREM seismic density model, where g **rises** to
+  10.69 m/s² at the core boundary. A ball in a straight tunnel takes 42.2 min one way for every chord
+  of a uniform Earth, but only 38 min through the real one. A plumb line shows the effect of spin, and
+  a shortened day can make the equator float.
+- **Cavendish torsion balance**: the torque is summed over all four sphere pairs, and a laser spot is
+  read on a scale 5 m away. The lab works out G from turning points exactly as a student does. The
+  textbook formula comes out 7.5% low because of the far spheres; with the far-sphere and damping
+  corrections it returns **6.674 × 10⁻¹¹**.
+
+### Physics · Mechanical Properties of Fluids
+**Fluids — Pressure, Flow, Viscosity and Surface Tension**
+Five pieces of apparatus.
+- **A draining tank** with real jets landing on a rule. Two holes at y and H − y hit the same spot, and
+  the drain time matches (A/a)√(2H/g) to the second.
+- **A venturimeter** with five manometer tubes, and the pressure and energy lines drawn on a
+  backboard. Friction comes out of f(Re), so Cd falls below one, and far below in a laminar oil. Open
+  the exit and the throat sucks air; push the flow hard enough and the water cavitates.
+- **A falling-ball viscometer** timed by two light gates, with the full drag law, added mass and the
+  wall correction. Stokes' law holds in creeping flow and fails for a steel ball in water. An inset
+  shows the Stokes streamlines and the three forces.
+- **Archimedes**: a spring balance and a beaker on a scale show both halves at once. Iron floats on
+  mercury. Cut the string and the block bobs.
+- **Capillary rise** in three tubes, integrated with inertia: the wide tube overshoots and rings. A
+  tube that is too short does **not** overflow; its contact angle gives way instead.
 
 ### Physics · System of Particles & Rotational Motion
 **27 · Rolling, Slipping and the Moment of Inertia**
