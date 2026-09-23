@@ -6,7 +6,7 @@
 > whenever a decision is made or a constraint is discovered.** A stale memory is worse than
 > no memory — fix anything here that no longer matches reality.
 
-Last updated: 2026-09-14 (v5, artifact v14)
+Last updated: 2026-09-23 (v8, artifact v20)
 
 ---
 
@@ -741,6 +741,24 @@ Append only. Never rewrite history.
 ---
 
 ## 13. Session log
+
+- **2026-09-23** — **Batch 2 of ten syllabus labs: Laws of Motion, Collisions, Capacitance**
+  (`sims-physics10.js`, artifact v20). *newton*: one linear solve for five rigs, friction settled by
+  a three-step test (assume static, read the friction needed, compare with μₛN), and the block
+  rotated into the slope through `R3.box` axes. *collisions*: the contact instant solved from the
+  geometry, the impulse along the line of centres, the CM drawn as a marker, a view from the CM, and
+  the ballistic swing done with RK4. *capacitance*: a finite-volume SOR Laplace solver on the plate
+  section with sub-cell permittivity mixing. C comes from the energy and F = ½V² dC/dx from a cached
+  25-point C(x); dC/dx equals the ideal 1/d_eff − 1/d to every printed figure at three gaps. RC and
+  charge-sharing heat are integrated rather than assumed and equal ½CV² and ½μ_C ΔV² for any R.
+  **Lessons for §14:** (1) R3.box sorts each face by its own centre, so two boxes whose large faces
+  touch (the slab under a plate) must be cut at shared x-boundaries or one paints over the other from
+  behind. Decoration belonging to a section plane (field lines, charge marks) goes in ONE `F.push`
+  with that plane, never in free labels, which float in front from every angle. (2) A drag gain per
+  metre of bench fails on a foreshortened axis; use a fixed gain per screen pixel (§2.13). (3) At
+  430 px two stacked panels bury a small bench: move one to the top of the canvas, or cut the
+  panel down to its comparison rows. `R3.polyline` gained a `dash` option. Audit clean at 40 sims;
+  all fifteen new worked answers reproduce their working text.
 
 - **2026-09-15 (b)** — **Batch 1 of ten syllabus labs: Current Electricity, Ray Optics, Waves.**
   Client chose JEE Main/Advanced syllabus topics over Olympiad exotica, so "ultra level" now means

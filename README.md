@@ -101,11 +101,11 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v7 (shipped)
+## 4. Insight Smart Lab — v8 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Thirty-seven experiments across twenty-three chapters.**
+Source: [`smartlab/`](./smartlab). **Forty experiments across twenty-five chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
-**Physics now spans thirteen chapters** — ten of its benches are built in true 3D on `render3d.js`,
+**Physics now spans fifteen chapters** — thirteen of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
 
 ### Physics · Moving Charges & Magnetism
@@ -164,6 +164,37 @@ The harmonic series is a **result of the boundary conditions**, not a rule: a cl
 at f₁ and 3f₁ and flatly refuses at 2f₁, while an open pipe of the same length takes every
 harmonic. Beats are drawn as an exact sum, and the Doppler panel shows that a moving source and a
 moving observer at the same speed give **genuinely different** frequencies.
+
+### Physics · Laws of Motion
+**Connected Bodies — Pulleys, Friction and Banking**
+No block is told whether it moves. Newton's second law for every body plus the string constraint is
+assembled as a linear system and solved, and then the friction that answer needs is **tested
+against μₛN**. If static friction can supply it, nothing moves and the friction is whatever
+equilibrium demands — not μₛN. If it cannot, the block breaks free onto μₖN. Five benches share the
+one solver: the Atwood machine, block on a table, the incline (with the block rotated into the
+slope), blocks in contact (the contact force changes with the side you push), and a banked road
+with its safe-speed band. Every free-body arrow is drawn at the size the solver returned.
+
+### Physics · System of Particles · Collisions
+**Collisions and the Centre of Mass**
+The contact instant is solved from the geometry and an equal and opposite impulse is applied **along
+the line of centres only**. Momentum and kinetic energy are shown before and after, side by side. The
+centre of mass is a glowing marker that moves straight through every impact at the same speed. A
+second panel shows the view from the CM, where every collision is two equal and opposite momenta.
+Head-on, glancing (equal masses at e = 1 leave at 90° for every offset), the ballistic pendulum with
+the swing integrated rather than assumed simple-harmonic, and a shell that bursts mid-flight, whose
+CM keeps to the parabola only until a piece lands.
+
+### Physics · Electrostatic Potential & Capacitance
+**Capacitors — Dielectrics, Energy and the Pull on a Slab**
+The field between the plates is **solved**: Laplace's equation ∇·(ε∇φ) = 0 on a grid, with the
+slab's permittivity painted into the cells it fills and the fringe allowed to bulge past the edges.
+C comes from the stored energy, and the force on the slab from ½V² dC/dx. Ideal plates cannot
+explain the pull; the fringe does, and the grid shows the slab drawn in before it reaches the plates,
+while landing exactly on the textbook force in the middle. Battery on and battery off come out of
+the same C(x) with opposite energy accounts. Three circuit benches complete the chapter. RC charging
+leaves ½CV² as heat whatever R is. Charge sharing is a perfectly inelastic collision for charge. The
+series and parallel networks are solved as nodal problems.
 
 ### Physics · System of Particles & Rotational Motion
 **27 · Rolling, Slipping and the Moment of Inertia**
