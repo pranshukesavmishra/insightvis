@@ -2215,5 +2215,1284 @@
       'ball by itself, for a pendulum that is swinging, or once a piece of a shell has hit the ground.</div>'
   });
 
+  /* =========================================================================
+     18 · CAPACITANCE, DIELECTRICS AND ENERGY — the field solved, not drawn
+
+     The capacitor's cross-section is solved as it really is: Laplace's
+     equation ∇·(ε∇φ) = 0 on a grid, with the plates held at ±V/2, the slab's
+     permittivity painted into the cells it occupies, and the field allowed to
+     bulge out past the edges. The capacitance is then read from the stored
+     energy, C = 2U/V², and the force on the slab from how that energy
+     changes as the slab moves: F = ½V² dC/dx.
+
+     That last step is the point. The textbook field between ideal plates is
+     perpendicular to the slab and cannot pull it anywhere; the force comes
+     entirely from the fringing field at the edge, which the ideal model
+     throws away. The grid keeps it, so the pull is computed from the thing
+     that actually does the pulling — and it comes out equal to the ideal
+     answer, which is the beautiful part.
+     ========================================================================= */
+
+  const EPS0 = 8.854e-12;
+  const PLATE_L = 0.10, PLATE_W = 0.10;            // 10 cm × 10 cm plates
+
+  /* The grid. Plates run x ∈ [0, L] at z = ±d/2, both on grid nodes. The gap
+     always gets eight cells whatever d is, and the margin is wide enough for
+     the fringe field to die away before it reaches the earthed boundary. */
+  function capGrid(dm) {
+    const L = PLATE_L, nL = 64, hx = L / nL;
+    const mX = Math.ceil(Math.max(2.2 * dm, 0.2 * L) / hx);
+    const hz = dm / 8, mZ = Math.ceil(Math.max(2.2 * dm, 0.2 * L) / hz);
+    const nx = nL + 2 * mX + 1, nz = 8 + 2 * mZ + 1;
+    return { L: L, d: dm, hx: hx, hz: hz, nx: nx, nz: nz, i0: mX, i1: mX + nL,
+             jBot: mZ, jTop: mZ + 8, x0: -mX * hx, z0: -(mZ + 4) * hz };
+  }
+
+  /* Relative permittivity of every CELL for a slab whose right-hand face is
+     at s (it enters from the left and is as long as the plates), of
+     thickness t, resting on the lower plate. A cell cut by a slab face gets
+     the area-weighted mix, so the capacitance moves smoothly with s instead
+     of in steps of one cell. */
+  function capEps(Gd, s, t, K) {
+    const cw = Gd.nx - 1, ch = Gd.nz - 1, e = new Float64Array(cw * ch);
+    const zb = -Gd.d / 2, zt = zb + t, xl = s - Gd.L, xr = s;
+    for (let j = 0; j < ch; j++) {
+      const za = Gd.z0 + j * Gd.hz, zc = za + Gd.hz;
+      const fz = Math.max(0, Math.min(zc, zt) - Math.max(za, zb)) / Gd.hz;
+      for (let i = 0; i < cw; i++) {
+        const xa = Gd.x0 + i * Gd.hx, xc = xa + Gd.hx;
+        const fx = Math.max(0, Math.min(xc, xr) - Math.max(xa, xl)) / Gd.hx;
+        e[j * cw + i] = 1 + (K - 1) * fx * fz;
+      }
+    }
+    return e;
+  }
+
+  /* Successive over-relaxation on the finite-volume form of ∇·(ε∇φ) = 0.
+     Each node's four couplings use the permittivity of the two cells that
+     share that edge, which is what makes the normal D continuous across the
+     slab's face without any special treatment. Warm-started from the last
+     solution, a small move of the slab converges in a few dozen sweeps. */
+  function capSolve(Gd, eps, phi, tol) {
+    const nx = Gd.nx, nz = Gd.nz, cw = nx - 1;
+    const rx = Gd.hz / Gd.hx, rz = Gd.hx / Gd.hz;
+    if (!phi) {
+      phi = new Float64Array(nx * nz);
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const z = Gd.z0 + j * Gd.hz;
+        phi[j * nx + i] = Math.abs(z) <= Gd.d / 2 && i >= Gd.i0 && i <= Gd.i1 ? z / Gd.d : 0;
+      }
+    }
+    const fixed = (i, j) => (j === Gd.jTop || j === Gd.jBot) && i >= Gd.i0 && i <= Gd.i1;
+    for (let i = Gd.i0; i <= Gd.i1; i++) { phi[Gd.jTop * nx + i] = 0.5; phi[Gd.jBot * nx + i] = -0.5; }
+    // pre-compute the five weights of every interior node once
+    const W = new Float64Array(nx * nz * 4);
+    for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) {
+      const c = (ii, jj) => eps[jj * cw + ii];
+      const k = (j * nx + i) * 4;
+      W[k] = rx * (c(i, j) + c(i, j - 1)) / 2;          // east
+      W[k + 1] = rx * (c(i - 1, j) + c(i - 1, j - 1)) / 2;  // west
+      W[k + 2] = rz * (c(i, j) + c(i - 1, j)) / 2;          // north
+      W[k + 3] = rz * (c(i, j - 1) + c(i - 1, j - 1)) / 2;  // south
+    }
+    const om = 1.92;
+    let it = 0, dmax = 1;
+    while (dmax > tol && it < 4000) {
+      dmax = 0;
+      for (let j = 1; j < nz - 1; j++) {
+        for (let i = 1; i < nx - 1; i++) {
+          if (fixed(i, j)) continue;
+          const n = j * nx + i, k = n * 4;
+          const sw = W[k] + W[k + 1] + W[k + 2] + W[k + 3];
+          const tgt = (W[k] * phi[n + 1] + W[k + 1] * phi[n - 1] +
+                       W[k + 2] * phi[n + nx] + W[k + 3] * phi[n - nx]) / sw;
+          const dd = tgt - phi[n];
+          phi[n] += om * dd;
+          if (Math.abs(dd) > dmax) dmax = Math.abs(dd);
+        }
+      }
+      it++;
+    }
+    return { phi: phi, it: it };
+  }
+
+  /* Energy per unit depth for ΔV = 1, as a pure number: c = Σ εᵣ|∇φ|² A.
+     Then C = ε₀·W·c. For ideal plates with nothing between them c = L/d. */
+  function capEnergy(Gd, eps, phi) {
+    const nx = Gd.nx, cw = nx - 1, hx = Gd.hx, hz = Gd.hz;
+    let c = 0;
+    for (let j = 0; j < Gd.nz - 1; j++) for (let i = 0; i < cw; i++) {
+      const a = phi[j * nx + i], b = phi[j * nx + i + 1];
+      const e = phi[(j + 1) * nx + i], f = phi[(j + 1) * nx + i + 1];
+      const Ex = ((b + f) - (a + e)) / (2 * hx), Ez = ((e + f) - (a + b)) / (2 * hz);
+      c += eps[j * cw + i] * (Ex * Ex + Ez * Ez) * hx * hz;
+    }
+    return c;
+  }
+
+  /* The ideal-plate answer, for comparison: the slab region is a series
+     stack (air gap d − t, dielectric t), in parallel with the empty part. */
+  function capIdeal(dm, s, t, K) {
+    const L = PLATE_L;
+    // the length of slab actually between the plates: its span [s − L, s] against [0, L]
+    const sIn = Math.max(0, Math.min(s, L) - Math.max(s - L, 0));
+    return EPS0 * PLATE_W * ((L - sIn) / dm + sIn / (dm - t + t / K));
+  }
+  function capIdealSlope(dm, s, t, K) {
+    const k = EPS0 * PLATE_W * (1 / (dm - t + t / K) - 1 / dm);
+    return s > 0 && s < PLATE_L ? k : s > PLATE_L && s < 2 * PLATE_L ? -k : 0;
+  }
+
+  /* Everything the slab bench needs, rebuilt when anything changes. The
+     C(s) curve is solved once per (d, t, K) at 25 slab positions and cached;
+     the field at the current position is solved warm from the last one. */
+  function capState(S) {
+    const p = S.p, dm = p.dmm / 1000, t = p.tFrac * dm, K = p.K, L = PLATE_L;
+    const key = [dm, t, K].join('|');
+    if (S._capKey !== key) {
+      S._capKey = key;
+      const Gd = capGrid(dm);
+      const ss = [], cs = [];
+      let ph = null;
+      for (let k = -4; k <= 20; k++) {
+        const s = k / 16 * L, e = capEps(Gd, s, t, K);
+        ph = capSolve(Gd, e, ph, 1e-7).phi;
+        ss.push(s); cs.push(capEnergy(Gd, e, ph));
+      }
+      S.Gd = Gd; S.capS = ss; S.capC = cs; S._phiCur = ph.slice(); S._sCur = null;
+    }
+    const Gd = S.Gd, s = p.xIn * L;
+    if (S._sCur !== s) {
+      const e = capEps(Gd, s, t, K);
+      S._phiCur = capSolve(Gd, e, S._phiCur, 1e-7).phi;
+      S._epsCur = e; S._sCur = s;
+      S.cNow = capEnergy(Gd, e, S._phiCur);
+      capFieldArt(S);
+    }
+    const W = EPS0 * PLATE_W;
+    /* dc/ds by central differences on the cached curve, interpolated */
+    const ss = S.capS, cs = S.capC, n = ss.length;
+    const slope = (k) => k <= 0 ? (cs[1] - cs[0]) / (ss[1] - ss[0])
+                       : k >= n - 1 ? (cs[n - 1] - cs[n - 2]) / (ss[n - 1] - ss[n - 2])
+                       : (cs[k + 1] - cs[k - 1]) / (ss[k + 1] - ss[k - 1]);
+    const dcAt = (x) => {
+      const u = clamp((x - ss[0]) / (ss[1] - ss[0]), 0, n - 1);
+      const k = Math.min(Math.floor(u), n - 2), f = u - k;
+      return slope(k) * (1 - f) + slope(k + 1) * f;
+    };
+    const R = { dm: dm, t: t, K: K, s: s, W: W };
+    R.C = W * S.cNow;                                // with fringing
+    R.Cid = capIdeal(dm, s, t, K);                   // ideal plates
+    R.C0 = W * cs[0];                                // slab well outside
+    R.C0id = EPS0 * PLATE_W * L / dm;
+    R.fringe = R.C / R.Cid - 1;
+    /* Disconnected means: charged to V with the slab well away, then the
+       battery removed. From then on Q is what is fixed, and V is not. */
+    R.Q0 = R.C0 * p.V;
+    R.V = p.battery ? p.V : R.Q0 / R.C;
+    R.Q = R.C * R.V;
+    R.U = 0.5 * R.C * R.V * R.V;
+    R.dcds = W * dcAt(s);
+    R.F = 0.5 * R.V * R.V * R.dcds;                  // + means pulled in
+    R.Vid = p.battery ? p.V : (R.C0id * p.V) / R.Cid;
+    R.Qid = R.Cid * R.Vid;
+    R.Uid = 0.5 * R.Cid * R.Vid * R.Vid;
+    R.Fid = 0.5 * R.Vid * R.Vid * capIdealSlope(dm, s, t, K);
+    R.Eair = R.Vid / (dm - t + t / K);               // air gap above the slab (ideal)
+    R.Ediel = R.Eair / K;
+    R.Eempty = R.Vid / dm;
+    R.sigma = EPS0 * R.Eair;                         // free charge density over the slab
+    R.sigmaB = R.sigma * (1 - 1 / K);                // bound charge on the slab's faces
+    R.dcdsFn = dcAt;
+    return R;
+  }
+
+  /* The pictures drawn from the solved field: a heat map of |E| over the
+     section, field lines traced from the charge on the upper plate, and
+     where that charge actually sits. */
+  function capFieldArt(S) {
+    const Gd = S.Gd, phi = S._phiCur, eps = S._epsCur;
+    const nx = Gd.nx, nz = Gd.nz, cw = nx - 1, ch = nz - 1, hx = Gd.hx, hz = Gd.hz;
+    const Ex = new Float64Array(nx * nz), Ez = new Float64Array(nx * nz);
+    for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) {
+      const n = j * nx + i;
+      Ex[n] = -(phi[n + 1] - phi[n - 1]) / (2 * hx);
+      Ez[n] = -(phi[n + nx] - phi[n - nx]) / (2 * hz);
+    }
+    // heat map of |E| per cell, relative to the empty-gap field 1/d
+    if (typeof document !== 'undefined') {
+      const cv = S._heat || (S._heat = document.createElement('canvas'));
+      cv.width = cw; cv.height = ch;
+      const cx = cv.getContext('2d'), img = cx.createImageData(cw, ch), E0 = 1 / Gd.d;
+      for (let j = 0; j < ch; j++) for (let i = 0; i < cw; i++) {
+        const a = phi[j * nx + i], b = phi[j * nx + i + 1];
+        const e = phi[(j + 1) * nx + i], f = phi[(j + 1) * nx + i + 1];
+        const ex = ((b + f) - (a + e)) / (2 * hx), ez = ((e + f) - (a + b)) / (2 * hz);
+        const v = Math.min(1.6, Math.hypot(ex, ez) / E0);
+        const k = ((ch - 1 - j) * cw + i) * 4;
+        const w = Math.max(0, v - 1) / 0.6;
+        img.data[k] = Math.round(30 + 60 * Math.min(1, v) + 150 * w);
+        img.data[k + 1] = Math.round(70 + 150 * Math.min(1, v) + 30 * w);
+        img.data[k + 2] = Math.round(140 + 110 * Math.min(1, v));
+        img.data[k + 3] = Math.round(255 * Math.min(0.90, Math.pow(v, 0.6) * 0.80));
+      }
+      cx.putImageData(img, 0, 0);
+    }
+    const fAt = (x, z) => {
+      const u = (x - Gd.x0) / hx, w = (z - Gd.z0) / hz;
+      if (u < 1 || w < 1 || u > nx - 2 || w > nz - 2) return null;
+      const i = Math.floor(u), j = Math.floor(w), a = u - i, b = w - j;
+      const n = j * nx + i;
+      const bl = (A) => A[n] * (1 - a) * (1 - b) + A[n + 1] * a * (1 - b) +
+                        A[n + nx] * (1 - a) * b + A[n + nx + 1] * a * b;
+      return [bl(Ex), bl(Ez)];
+    };
+    // surface charge on both faces of a plate: D just outside each face
+    const charge = (jPl, sgn) => {
+      const out = [];
+      for (let i = Gd.i0; i <= Gd.i1; i++) {
+        const iL = Math.max(i - 1, 0), iR = Math.min(i, cw - 1);
+        const eUp = (eps[jPl * cw + iL] + eps[jPl * cw + iR]) / 2;
+        const eDn = (eps[(jPl - 1) * cw + iL] + eps[(jPl - 1) * cw + iR]) / 2;
+        const up = eUp * (phi[jPl * nx + i] - phi[(jPl + 1) * nx + i]) / hz * sgn;
+        const dn = eDn * (phi[jPl * nx + i] - phi[(jPl - 1) * nx + i]) / hz * sgn;
+        const wgt = (i === Gd.i0 || i === Gd.i1) ? 0.5 : 1;
+        out.push({ x: Gd.x0 + i * hx, up: Math.max(0, up) * wgt, dn: Math.max(0, dn) * wgt });
+      }
+      return out;
+    };
+    /* place n marks so that each carries the same share of the charge: they
+       crowd where σ is high, which is over the slab and at the edges */
+    const quant = (list, n, inner) => {
+      const seq = [];
+      list.forEach(q => seq.push({ x: q.x, side: inner, w: inner < 0 ? q.dn : q.up }));
+      list.slice().reverse().forEach(q => seq.push({ x: q.x, side: -inner, w: inner < 0 ? q.up : q.dn }));
+      const tot = seq.reduce((a, q) => a + q.w, 0) || 1;
+      const out = [];
+      let acc = 0, k = 0;
+      for (const q of seq) {
+        acc += q.w;
+        while (k < n && (k + 0.5) / n * tot <= acc) { out.push({ x: q.x, side: q.side }); k++; }
+      }
+      return out;
+    };
+    const zt = Gd.d / 2, zb = -Gd.d / 2;
+    S.capPlus = quant(charge(Gd.jTop, 1), 24, -1);
+    S.capMinus = quant(charge(Gd.jBot, -1), 24, 1);
+    const lines = [];
+    const step = Math.min(hx, hz) * 0.7;
+    S.capPlus.forEach(sd => {
+      let x = sd.x, z = zt + sd.side * hz * 0.3;
+      const pts = [[x, zt]];
+      for (let n = 0; n < 4000; n++) {
+        const e1 = fAt(x, z); if (!e1) break;
+        const m1 = Math.hypot(e1[0], e1[1]) || 1;
+        const e2 = fAt(x + e1[0] / m1 * step / 2, z + e1[1] / m1 * step / 2); if (!e2) break;
+        const m2 = Math.hypot(e2[0], e2[1]) || 1;
+        const xn = x + e2[0] / m2 * step, zn = z + e2[1] / m2 * step;
+        if (xn >= 0 && xn <= PLATE_L && ((z > zb && zn <= zb) || (z < zb && zn >= zb))) {
+          pts.push([xn, zb]); break;
+        }
+        x = xn; z = zn;
+        if (n % 2 === 0) pts.push([x, z]);
+      }
+      lines.push(pts);
+    });
+    S.capLines = lines;
+  }
+
+  /* ---- the circuits: charging, sharing, and networks ----
+     RC charging and charge sharing are integrated (RK4 on dq/dt), with the
+     heat in the resistor accumulated as ∫i²R dt alongside. Nothing about the
+     famous "half the energy is always lost" result is assumed: it falls out
+     of the integral, for any R, which is exactly what makes it strange. */
+  function rk4q(f, q, h) {
+    const a = f(q), b = f(q + a * h / 2), c = f(q + b * h / 2), d = f(q + c * h);
+    return q + h / 6 * (a + 2 * b + 2 * c + d);
+  }
+
+  function rcRun(p) {
+    const R = p.Rk * 1e3, C = p.C1uf * 1e-6, V = p.V, tau = R * C;
+    const N = 800, T = 10 * tau, h = T / N;
+    const out = { tau: tau, T: T, t: [], q: [], i: [], U: [], Wb: [], H: [], R: R, C: C, V: V };
+    let q = 0, Wb = 0, H = 0;
+    for (let k = 0; k <= N; k++) {
+      const t = k * h, charging = t < 5 * tau;
+      const i = charging ? (V - q / C) / R : -(q / C) / R;
+      out.t.push(t); out.q.push(q); out.i.push(i);
+      out.U.push(q * q / (2 * C)); out.Wb.push(Wb); out.H.push(H);
+      if (k === N) break;
+      const f = charging ? (qq => (V - qq / C) / R) : (qq => -(qq / C) / R);
+      const q2 = rk4q(f, q, h);
+      /* heat and battery work over the step, by Simpson on the current */
+      const im = f((q + q2) / 2), i2 = f(q2);
+      H += R * h / 6 * (i * i + 4 * im * im + i2 * i2);
+      if (charging) Wb += V * (q2 - q);
+      q = q2;
+    }
+    out.Q = C * V; out.I0 = V / R;
+    return out;
+  }
+
+  function shareRun(p) {
+    const R = p.Rk * 1e3, C1 = p.C1uf * 1e-6, C2 = p.C2uf * 1e-6;
+    const Cs = C1 * C2 / (C1 + C2), tau = R * Cs;
+    const pre = 0.8 * tau, N = 800, T = pre + 6 * tau, h = T / N;
+    const out = { tau: tau, T: T, pre: pre, t: [], V1: [], V2: [], U: [], H: [], i: [] };
+    let q1 = C1 * p.V, q2 = C2 * p.V2, H = 0;
+    const Qt = q1 + q2;
+    for (let k = 0; k <= N; k++) {
+      const t = k * h, on = t >= pre;
+      const i = on ? (q1 / C1 - q2 / C2) / R : 0;
+      out.t.push(t); out.V1.push(q1 / C1); out.V2.push(q2 / C2); out.i.push(i);
+      out.U.push(q1 * q1 / (2 * C1) + q2 * q2 / (2 * C2)); out.H.push(H);
+      if (k === N) break;
+      if (!on) continue;
+      /* q2 = Qt − q1: charge is conserved exactly, by construction */
+      const f = qq => -((qq / C1 - (Qt - qq) / C2) / R);
+      const n1 = rk4q(f, q1, h);
+      const ia = -f(q1), im = -f((q1 + n1) / 2), ib = -f(n1);
+      H += R * h / 6 * (ia * ia + 4 * im * im + ib * ib);
+      q1 = n1; q2 = Qt - q1;
+    }
+    out.Vf = Qt / (C1 + C2);
+    out.U0 = out.U[0];
+    out.Uf = 0.5 * (C1 + C2) * out.Vf * out.Vf;
+    out.lossTheory = 0.5 * Cs * Math.pow(p.V - p.V2, 2);
+    out.Qt = Qt; out.Cs = Cs;
+    return out;
+  }
+
+  /* A capacitor network in steady state is a nodal problem: with every node
+     starting uncharged, the charge on each isolated node sums to zero, which
+     is Kirchhoff's current law with C in place of 1/R. So SOLVE.Net does it
+     as it stands, with conductances C (in μF). */
+  function capNetwork(p) {
+    const C = [p.C1uf, p.C2uf, p.C3uf];
+    let edges, nN;
+    if (p.topo === 'series') { nN = 4; edges = [[1, 2, 0], [2, 3, 1], [3, 0, 2]]; }
+    else if (p.topo === 'parallel') { nN = 2; edges = [[1, 0, 0], [1, 0, 1], [1, 0, 2]]; }
+    else { nN = 3; edges = [[1, 2, 0], [2, 0, 1], [2, 0, 2]]; }  // C1 then (C2 ∥ C3)
+    const N = SV.Net(nN);
+    edges.forEach(e => N.res(e[0], e[1], 1 / C[e[2]]));
+    N.bat(0, 1, p.V, 0);
+    const sol = N.solve();
+    const V = sol.V || new Array(nN).fill(0);
+    const caps = edges.map(e => {
+      const dv = V[e[0]] - V[e[1]], c = C[e[2]] * 1e-6;
+      return { k: e[2], C: c, V: dv, Q: c * dv, U: 0.5 * c * dv * dv };
+    });
+    const Qin = caps.filter((c, i) => edges[i][0] === 1).reduce((a, c) => a + c.Q, 0);
+    const out = { caps: caps, Ceq: Qin / p.V, Qin: Qin, V: V };
+    out.U = caps.reduce((a, c) => a + c.U, 0);
+    return out;
+  }
+
+  /* one closed form per topology, used for the sweep in the graph and to
+     check the nodal answer */
+  function ceqClosed(topo, C1, C2, C3) {
+    if (topo === 'series') return 1 / (1 / C1 + 1 / C2 + 1 / C3);
+    if (topo === 'parallel') return C1 + C2 + C3;
+    return 1 / (1 / C1 + 1 / (C2 + C3));
+  }
+
+  L.register({
+    id: 'capacitance', subject: 'physics',
+    name: 'Capacitors — Dielectrics, Energy and the Pull on a Slab',
+    chapter: 'Electrostatic Potential and Capacitance',
+    exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
+    weight: 'Very high yield',
+    is3D: true,
+    stageHint: 'Slab: drag it in and out, the glowing sheet is the solved field · circuits run by themselves',
+    lede: 'The field in this capacitor is not drawn from a formula. It is <b>solved</b>: Laplace\'s ' +
+      'equation on a grid across the plates, with the slab\'s permittivity painted into the cells it ' +
+      'fills. So the field bulges out past the edges, as a real one does. The capacitance is read from ' +
+      'the stored energy, and the <b>force on the slab</b> from how that energy changes as it moves. ' +
+      'Between ideal plates the field is perpendicular to the slab and cannot pull it at all; the pull ' +
+      'comes from the fringe at the edge. The grid keeps that fringe, and still gets the textbook ' +
+      'answer exactly. Then switch the battery off, and every energy answer changes direction.',
+
+    params: { mode: 'slab', dmm: 15, K: 4, tFrac: 1, xIn: 0.5, V: 200, battery: true,
+              Rk: 100, C1uf: 100, C2uf: 50, C3uf: 6, V2: 0, topo: 'mixed',
+              showLines: true, run: true },
+
+    presets: [
+      { name: 'Slab half in · battery on', params: { mode: 'slab', dmm: 15, K: 4, tFrac: 1, xIn: 0.5, V: 200, battery: true } },
+      { name: 'Slab half in · battery off', params: { mode: 'slab', dmm: 15, K: 4, tFrac: 1, xIn: 0.5, V: 200, battery: false } },
+      { name: 'Thin slab, t = d/2', params: { mode: 'slab', dmm: 15, K: 5, tFrac: 0.5, xIn: 1, V: 200, battery: true } },
+      { name: 'Slab just reaching the edge', params: { mode: 'slab', dmm: 15, K: 4, tFrac: 1, xIn: 0, V: 200, battery: true } },
+      { name: 'Metal-like slab, K = 10', params: { mode: 'slab', dmm: 15, K: 10, tFrac: 0.6, xIn: 1, V: 200, battery: true } },
+      { name: 'Charging through R', params: { mode: 'rc', Rk: 100, C1uf: 100, V: 12 } },
+      { name: 'Same C, 10× the resistance', params: { mode: 'rc', Rk: 1000, C1uf: 100, V: 12 } },
+      { name: 'Sharing charge', params: { mode: 'share', C1uf: 100, C2uf: 50, V: 12, V2: 0, Rk: 100 } },
+      { name: 'Opposite charges meet', params: { mode: 'share', C1uf: 100, C2uf: 100, V: 12, V2: -12, Rk: 100 } },
+      { name: 'Network · C₁ then C₂ ∥ C₃', params: { mode: 'network', topo: 'mixed', C1uf: 2, C2uf: 3, C3uf: 6, V: 12 } },
+      { name: 'Network · all in series', params: { mode: 'network', topo: 'series', C1uf: 2, C2uf: 3, C3uf: 6, V: 12 } }
+    ],
+
+    controls: [
+      { group: 'Arrangement', items: [
+        { key: 'mode', type: 'select', label: 'What is set up', restructure: true, options: [
+          { value: 'slab', label: 'Dielectric slab' }, { value: 'rc', label: 'Charging (RC)' },
+          { value: 'share', label: 'Sharing charge' }, { value: 'network', label: 'Network' }] }
+      ] },
+      { group: 'The parallel plates', items: [
+        { key: 'dmm', label: 'Plate gap <i>d</i>', min: 5, max: 20, step: 0.5, unit: 'mm',
+          fmt: v => v.toFixed(1), restructure: true },
+        { key: 'K', label: 'Dielectric constant <i>K</i>', min: 1, max: 10, step: 0.1, unit: '',
+          fmt: v => v.toFixed(1), restructure: true },
+        { key: 'tFrac', label: 'Slab thickness <i>t</i> ÷ <i>d</i>', min: 0.1, max: 1, step: 0.01, unit: '',
+          fmt: v => v.toFixed(2), restructure: true },
+        { key: 'xIn', label: 'How far the slab is in', min: -0.25, max: 1.25, step: 0.005, unit: '× L',
+          fmt: v => v.toFixed(3), restructure: true },
+        { key: 'battery', type: 'toggle', label: 'Battery stays connected', restructure: true }
+      ] },
+      { group: 'Supply', items: [
+        { key: 'V', label: 'Battery <i>V</i> (or <i>V</i>₁)', min: -500, max: 500, step: 1, unit: 'V',
+          fmt: v => v.toFixed(0), restructure: true }
+      ] },
+      { group: 'The circuit', items: [
+        { key: 'Rk', label: 'Resistance <i>R</i>', min: 1, max: 1000, step: 1, unit: 'kΩ',
+          fmt: v => v.toFixed(0), restructure: true },
+        { key: 'C1uf', label: '<i>C</i>₁', min: 1, max: 500, step: 1, unit: 'μF',
+          fmt: v => v.toFixed(0), restructure: true },
+        { key: 'C2uf', label: '<i>C</i>₂', min: 1, max: 500, step: 1, unit: 'μF',
+          fmt: v => v.toFixed(0), restructure: true },
+        { key: 'C3uf', label: '<i>C</i>₃', min: 1, max: 500, step: 1, unit: 'μF',
+          fmt: v => v.toFixed(0), restructure: true },
+        { key: 'V2', label: 'Start voltage on <i>C</i>₂', min: -500, max: 500, step: 1, unit: 'V',
+          fmt: v => v.toFixed(0), restructure: true },
+        { key: 'topo', type: 'select', label: 'Network', restructure: true, options: [
+          { value: 'series', label: 'Series' }, { value: 'parallel', label: 'Parallel' },
+          { value: 'mixed', label: 'C₁ + (C₂∥C₃)' }] }
+      ] },
+      { group: 'Display', items: [
+        { key: 'showLines', type: 'toggle', label: 'Show field lines and charges' },
+        { key: 'run', type: 'toggle', label: 'Let it run' }
+      ] }
+    ],
+
+    setup(S) {
+      const p = S.p;
+      S.t2 = S.t2 || 0;
+      if (p.mode === 'slab') {
+        if (p.dmm < 5) p.dmm = 5;
+        S.R = capState(S);
+      } else if (p.mode === 'rc') {
+        S.R = rcRun(p);
+        S.slow = S.R.T / 12;                           // the full cycle in 12 s
+      } else if (p.mode === 'share') {
+        S.R = shareRun(p);
+        S.slow = S.R.T / 9;
+      } else {
+        S.R = capNetwork(p);
+        S.slow = 1;
+      }
+      if (S._lastMode !== p.mode) { S.t2 = 0; S._lastMode = p.mode; }
+      const view = p.mode === 'slab' ? { theta: -1.18, phi: 0.36, dist: 2.35, target: [0.42, 0, 0.0] }
+                 : { theta: -1.50, phi: 0.78, dist: 2.55, target: [0, 0, 0.0] };
+      const vk = p.mode === 'slab' ? 'slab' : 'circuit';
+      if (!S.cam || S._viewMode !== vk) {
+        S.cam = Camera(view);
+        S.cam.minDist = 1.2; S.cam.maxDist = 12;
+        S._viewMode = vk;
+      }
+    },
+
+    step(S, dt) {
+      const p = S.p;
+      if (!p.run || p.mode === 'slab' || p.mode === 'network') return;
+      S.t2 += dt * S.slow;
+      if (S.t2 > S.R.T) S.t2 = 0;
+    },
+
+    drawStage(S, g) {
+      const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, R = S.R;
+      const cam = S.cam, acc = th.phys;
+      const F = R3.Frame(ctx, cam, { ambient: 0.26, floorZ: p.mode === 'slab' ? null : 0 });
+      const plus = '#FF6B6B', minus = '#5AA9FF', copper = '#D9A05B';
+      let hdl = null;
+      /* DEPTH POLICY (§14.6): the board carries F.GROUND. The section sheet
+         and its field lines are decoration on the capacitor, so they take a
+         few hundredths; plates, slab and components sort on true depth. */
+
+      if (p.mode === 'slab') {
+        if (W < 660 && !S._narrowCam) { cam.dist *= 1.35; S._narrowCam = true; }
+        const k = 10, Gd = S.Gd, L = PLATE_L;
+        const dm = R.dm, t = R.t, s = R.s, pt = 0.018;
+        const zT = dm / 2 * k, zB = -dm / 2 * k;
+        const yF = -PLATE_W / 2 * k;
+        // a stand for the plates, so they are not floating in the void
+        R3.box(F, [0.5, 0, zB - pt - 0.30], [1.9, 1.3, 0.05], '#1E2840',
+               { shadow: false, ambient: 0.16, bias: F.GROUND });
+        [[0.08, 0.40], [0.92, 0.40], [0.08, -0.40], [0.92, -0.40]].forEach(q =>
+          R3.cylinder(F, [q[0], q[1], zB - pt - 0.28], [q[0], q[1], zB - pt], 0.012, '#4A5878',
+                      { segments: 10, shadow: false, ambient: 0.3 }));
+        /* The plates and the slab are cut at the same x-boundaries: the edges
+           of the plates and the ends of the slab. R3.box sorts each face by
+           its own centre, so a slab piece and the plate piece above it must
+           share a centre, or a large face of one sorts past the other and the
+           slab is painted over the plate that covers it (seen from behind). */
+        const cuts = [s - L, 0, L, s].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+        const plateCol = [RX.mix('#9AA8C0', plus, 0.18), RX.mix('#9AA8C0', minus, 0.18)];
+        for (let i = 0; i < cuts.length - 1; i++) {
+          const a = cuts[i], b = cuts[i + 1], mid = (a + b) / 2, w = b - a;
+          if (w < 1e-6) continue;
+          if (a >= 0 - 1e-9 && b <= L + 1e-9) {
+            R3.box(F, [mid * k, 0, zT + pt / 2], [w * k, PLATE_W * k, pt], plateCol[0], { shadow: false, ambient: 0.42 });
+            R3.box(F, [mid * k, 0, zB - pt / 2], [w * k, PLATE_W * k, pt], plateCol[1], { shadow: false, ambient: 0.42 });
+          }
+          if (a >= s - L - 1e-9 && b <= s + 1e-9)
+            R3.box(F, [mid * k, 0, zB + t * k / 2], [w * k, PLATE_W * k * 0.97, t * k],
+                   '#D9A441', { shadow: false, ambient: 0.46 });
+        }
+        R3.label(F, [(s - L) * k + 0.62, yF - 0.02, zB - pt - 0.07], 'slab K = ' + p.K.toFixed(1),
+                 '#F2C879', { size: 10 });
+        // the solved field, on the front section
+        if (S._heat && Gd) {
+          const xw = (Gd.nx - 1) * Gd.hx, zh = (Gd.nz - 1) * Gd.hz;
+          const secC = [(Gd.x0 + xw / 2) * k, yF - 0.006, (Gd.z0 + zh / 2) * k];
+          R3.texPlane(F, secC, [xw / 2 * k, 0, 0], [0, 0, -zh / 2 * k], S._heat,
+                      { alpha: 0.95, grid: 10, bias: -0.02 });
+          /* Field lines and charge marks belong to the section, so they are
+             drawn in ONE item sorted with it: seen from behind, the plates
+             then hide them, instead of the marks floating in front the way
+             free labels do. */
+          if (p.showLines && S.capLines) {
+            F.push(secC, () => {
+              const yl = yF - 0.012;
+              ctx.save();
+              ctx.strokeStyle = g.alpha('#F4F8FF', .75); ctx.lineWidth = 1.1;
+              S.capLines.forEach(l => {
+                ctx.beginPath(); let pen = false;
+                l.forEach(q => {
+                  const r = cam.project([q[0] * k, yl, q[1] * k]);
+                  if (!r.ok) { pen = false; return; }
+                  if (!pen) { ctx.moveTo(r.x, r.y); pen = true; } else ctx.lineTo(r.x, r.y);
+                });
+                ctx.stroke();
+              });
+              ctx.font = '700 11px "IBM Plex Mono",monospace';
+              ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+              const mark = (at, txt, col, size) => {
+                const r = cam.project(at); if (!r.ok) return;
+                if (size) ctx.font = '700 ' + size + 'px "IBM Plex Mono",monospace';
+                ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(5,8,15,.85)';
+                ctx.strokeText(txt, r.x, r.y); ctx.fillStyle = col; ctx.fillText(txt, r.x, r.y);
+              };
+              S.capPlus.forEach(q => mark([q.x * k, yl, q.side < 0 ? zT + 0.006 : zT + pt + 0.022], '+', plus));
+              S.capMinus.forEach(q => mark([q.x * k, yl, q.side > 0 ? zB - 0.006 : zB - pt - 0.022], '−', minus));
+              /* bound charge on the slab's faces, only where the slab is
+                 between the plates: it cancels part of the free charge's
+                 field inside the dielectric */
+              const x0 = Math.max(0, s - L), x1 = Math.min(L, s);
+              if (x1 > x0 && p.K > 1.05) {
+                const nb = Math.max(1, Math.round(16 * (x1 - x0) / L * (1 - 1 / p.K)));
+                for (let i = 0; i < nb; i++) {
+                  const xx = (x0 + (i + 0.5) / nb * (x1 - x0)) * k;
+                  mark([xx, yl, zB + t * k - 0.010], '−', RX.mix(minus, '#FFFFFF', .35), 8.5);
+                  mark([xx, yl, zB + 0.010], '+', RX.mix(plus, '#FFFFFF', .35), 8.5);
+                }
+              }
+              ctx.restore();
+            }, -0.021);
+          }
+        }
+        // the battery, and the switch that decides which quantity is fixed
+        const bx = L * k + 0.36, zc = 0;
+        R3.cylinder(F, [bx, 0, -0.11], [bx, 0, 0.09], 0.055, '#2B3550', { segments: 20, shadow: false, ambient: 0.3 });
+        R3.cylinder(F, [bx, 0, 0.09], [bx, 0, 0.12], 0.022, '#D0D6E4', { segments: 14, shadow: false, ambient: 0.5 });
+        R3.label(F, [bx + 0.03, 0, -0.19], p.battery ? 'V = ' + p.V.toFixed(0) + ' V' : 'switch open',
+                 p.battery ? acc : th.warn, { size: 10 });
+        const wTop = p.battery
+          ? [[L * k, 0, zT + pt / 2], [bx, 0, zT + pt / 2 + 0.20], [bx, 0, 0.12]]
+          : [[L * k, 0, zT + pt / 2], [bx - 0.12, 0, zT + pt / 2 + 0.14]];
+        R3.polyline(F, wTop, copper, { alpha: .95, width: 2.2, bias: -0.01 });
+        if (!p.battery) {
+          R3.polyline(F, [[bx - 0.04, 0, zT + pt / 2 + 0.20], [bx, 0, zT + pt / 2 + 0.20], [bx, 0, 0.12]],
+                      copper, { alpha: .95, width: 2.2, bias: -0.01 });
+          R3.polyline(F, [[bx - 0.12, 0, zT + pt / 2 + 0.14], [bx - 0.07, 0, zT + pt / 2 + 0.30]],
+                      '#C9D4EA', { alpha: 1, width: 2.4, bias: -0.01 });
+          R3.label(F, [bx - 0.02, 0, zT + pt / 2 + 0.40], 'battery off · Q is now fixed',
+                   th.warn, { size: 9.5 });
+        }
+        R3.polyline(F, [[L * k, 0, zB - pt / 2], [bx, 0, zB - pt / 2 - 0.12], [bx, 0, -0.11]],
+                    copper, { alpha: .95, width: 2.2, bias: -0.01 });
+        // the force on the slab, as an arrow on the part that sticks out
+        const Fref = Math.max(Math.abs(R.F), 1e-18);
+        if (Math.abs(R.F) > 1e-12) {
+          const dir = Math.sign(R.F);
+          const ax = Math.max((s - L) * k + 0.10, -1.05), az = zB + t * k + 0.10;
+          R3.arrow(F, [ax, yF - 0.03, az], [ax + dir * 0.30, yF - 0.03, az], 0.012, th.ok,
+                   { head: 0.05, shadow: false, ambient: 0.85, bias: -0.04 });
+          R3.label(F, [ax + dir * 0.15, yF - 0.03, az + 0.13],
+                   'F = ' + (R.F * 1e6).toFixed(2) + ' μN · ' + (dir > 0 ? 'pulled in' : 'pushed out'),
+                   th.ok, { size: 10 });
+          void Fref;
+        } else {
+          R3.label(F, [(s - L) * k + 0.25, yF - 0.03, zB + t * k + 0.12], 'no pull here', th['text-3'], { size: 9.5 });
+        }
+        // the drag handle sits on the slab's outer end
+        const hp = [Math.max((s - L) * k + 0.03, -1.2), yF, zB + t * k / 2];
+        const qh = cam.project(hp);
+        if (qh.ok) {
+          hdl = { x: qh.x, y: qh.y, r: 13, tip: 'drag the slab' };
+          const qb = cam.project([hp[0] + 1, hp[1], hp[2]]);
+          if (qb.ok) {
+            const dx = qb.x - qh.x, dy = qb.y - qh.y, Lp = Math.hypot(dx, dy) || 1;
+            S._axS = { ux: dx / Lp, uy: dy / Lp };
+          }
+        }
+      }
+
+      else {
+        /* ---- a circuit board, drawn as a raised 3D schematic ---- */
+        const zc = 0.07;
+        R3.box(F, [0, 0, -0.03], [2.7, 1.55, 0.06], '#1C2640', { shadow: false, ambient: 0.16, bias: F.GROUND });
+        R3.plane(F, [-1.33, -0.755, 0.0005], [2.66, 0, 0], [0, 1.51, 0], '#212C48',
+                 { grid: 18, gridAlpha: 0.10, bias: F.GROUND });
+        const P3 = (q) => [q[0], q[1], zc];
+        const wire = (pts) => R3.polyline(F, pts.map(P3), copper, { alpha: .95, width: 2.6, bias: -0.01 });
+        const cap = (c, axis, frac, tag, sub) => {
+          const ex = axis === 'x', gap = 0.036;
+          const o = ex ? [gap, 0, 0] : [0, gap, 0];
+          const sz = ex ? [0.018, 0.24, 0.18] : [0.24, 0.018, 0.18];
+          const fa = clamp(frac, -1, 1);
+          R3.box(F, [c[0] - o[0], c[1] - o[1], zc], sz, RX.mix('#9AA8C0', fa >= 0 ? plus : minus, 0.45 * Math.abs(fa)),
+                 { shadow: false, ambient: 0.42 });
+          R3.box(F, [c[0] + o[0], c[1] + o[1], zc], sz, RX.mix('#9AA8C0', fa >= 0 ? minus : plus, 0.45 * Math.abs(fa)),
+                 { shadow: false, ambient: 0.42 });
+          const gz = ex ? [gap * 1.3, 0.20, 0.15] : [0.20, gap * 1.3, 0.15];
+          if (Math.abs(fa) > 0.01)
+            R3.box(F, [c[0], c[1], zc], gz, RX.mix('#18223A', '#3DD6F5', 0.25 + 0.6 * Math.abs(fa)),
+                   { shadow: false, ambient: 0.9 });
+          R3.label(F, [c[0], c[1], zc + 0.16], tag, '#E6ECF8', { size: 10 });
+          if (sub) R3.label(F, [c[0], c[1], zc + 0.26], sub, acc, { size: 9.5 });
+        };
+        const res = (a, b, tag) => {
+          R3.cylinder(F, P3(a), P3(b), 0.034, '#C8B08A', { segments: 14, shadow: false, ambient: 0.45 });
+          ['#8B4A2B', '#1A1A1A', '#D4A017'].forEach((c, i) => {
+            const f0 = 0.25 + i * 0.17, f1 = f0 + 0.07;
+            const A = [a[0] + (b[0] - a[0]) * f0, a[1] + (b[1] - a[1]) * f0, zc];
+            const B = [a[0] + (b[0] - a[0]) * f1, a[1] + (b[1] - a[1]) * f1, zc];
+            R3.cylinder(F, A, B, 0.036, c, { segments: 14, shadow: false, ambient: 0.4 });
+          });
+          R3.label(F, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, zc + 0.11], tag, '#E6ECF8', { size: 10 });
+        };
+        const bat = (a, b, tag) => {   // + terminal at b
+          R3.cylinder(F, P3(a), P3(b), 0.05, '#2B3550', { segments: 18, shadow: false, ambient: 0.3 });
+          const d = [b[0] - a[0], b[1] - a[1]], Ld = Math.hypot(d[0], d[1]);
+          const tip = [b[0] + d[0] / Ld * 0.03, b[1] + d[1] / Ld * 0.03];
+          R3.cylinder(F, P3(b), P3(tip), 0.02, '#D0D6E4', { segments: 12, shadow: false, ambient: 0.5 });
+          R3.label(F, [(a[0] + b[0]) / 2 - 0.16, (a[1] + b[1]) / 2, zc + 0.10], tag, acc, { size: 10 });
+          R3.label(F, [tip[0], tip[1], zc + 0.08], '+', plus, { size: 11 });
+        };
+        const lever = (pv, to) => R3.polyline(F, [P3(pv), [to[0], to[1], zc + (to[2] || 0)]], '#E8EEF8',
+                                              { alpha: 1, width: 3, bias: -0.015 });
+        /* moving charge: dots along a path, displaced by the charge that has
+           actually passed — so they stop exactly when the current does */
+        const flow = (pts, moved, col) => {
+          const seg = [], cum = [0];
+          for (let i = 1; i < pts.length; i++) {
+            const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+            seg.push(l); cum.push(cum[i - 1] + l);
+          }
+          const tot = cum[cum.length - 1], sp = 0.16;
+          let off = ((moved % sp) + sp) % sp;
+          for (let d = off; d < tot; d += sp) {
+            let i = 0; while (i < seg.length - 1 && cum[i + 1] < d) i++;
+            const f = (d - cum[i]) / (seg[i] || 1);
+            R3.sphere(F, [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f, zc + 0.012],
+                      0.012, col, { shadow: false, vivid: true });
+          }
+        };
+        const at = (arr) => {
+          const T = S.R.t, u = clamp(S.t2 / (S.R.T / (T.length - 1)), 0, T.length - 1);
+          const i = Math.min(Math.floor(u), T.length - 2), f = u - i;
+          return arr[i] * (1 - f) + arr[i + 1] * f;
+        };
+
+        if (p.mode === 'rc') {
+          const charging = S.t2 < 5 * R.tau;
+          const q = at(R.q), i = at(R.i), Vc = q / R.C;
+          bat([-1.0, -0.2], [-1.0, 0.2], 'V = ' + p.V.toFixed(0) + ' V');
+          wire([[-1.0, 0.2], [-1.0, 0.45], [-0.80, 0.45]]);
+          wire([[-1.0, -0.2], [-1.0, -0.45], [0.95, -0.45], [0.95, -0.10]]);
+          wire([[-0.70, -0.45], [-0.70, 0.25]]);
+          wire([[-0.55, 0.45], [-0.30, 0.45]]);
+          res([-0.30, 0.45], [0.30, 0.45], 'R = ' + p.Rk.toFixed(0) + ' kΩ');
+          wire([[0.30, 0.45], [0.95, 0.45], [0.95, 0.10]]);
+          cap([0.95, 0], 'y', Vc / Math.max(Math.abs(p.V), 1e-9), 'C = ' + p.C1uf.toFixed(0) + ' μF',
+              Vc.toFixed(2) + ' V');
+          lever([-0.55, 0.45], charging ? [-0.80, 0.45, 0] : [-0.70, 0.25, 0]);
+          R3.label(F, [-0.64, 0.58, zc], charging ? 'charging' : 'discharging', charging ? th.ok : th.warn, { size: 10 });
+          const moved = q / Math.max(R.Q, 1e-30) * 1.2;
+          if (charging) flow([[-1.0, 0.2], [-1.0, 0.45], [-0.55, 0.45], [0.95, 0.45], [0.95, 0.12]], moved, '#FFE08A');
+          else flow([[0.95, 0.12], [0.95, 0.45], [-0.55, 0.45], [-0.70, 0.25], [-0.70, -0.45], [0.95, -0.45], [0.95, -0.12]],
+                    -moved, '#FFE08A');
+          R3.label(F, [0, -0.62, zc], 'i = ' + (i * 1e6).toFixed(1) + ' μA · τ = RC = ' + R.tau.toFixed(2) + ' s',
+                   th['text-2'], { size: 10 });
+        }
+
+        else if (p.mode === 'share') {
+          const on = S.t2 >= R.pre;
+          const V1 = at(R.V1), V2 = at(R.V2), Vm = Math.max(Math.abs(p.V), Math.abs(p.V2), 1e-9);
+          cap([-0.85, 0], 'y', V1 / Vm, 'C₁ = ' + p.C1uf.toFixed(0) + ' μF', V1.toFixed(2) + ' V');
+          cap([0.85, 0], 'y', V2 / Vm, 'C₂ = ' + p.C2uf.toFixed(0) + ' μF', V2.toFixed(2) + ' V');
+          wire([[-0.85, 0.10], [-0.85, 0.45], [-0.50, 0.45]]);
+          wire([[-0.25, 0.45], [0.05, 0.45]]);
+          res([0.05, 0.45], [0.55, 0.45], 'R = ' + p.Rk.toFixed(0) + ' kΩ');
+          wire([[0.55, 0.45], [0.85, 0.45], [0.85, 0.10]]);
+          wire([[-0.85, -0.10], [-0.85, -0.45], [0.85, -0.45], [0.85, -0.10]]);
+          lever([-0.50, 0.45], on ? [-0.25, 0.45, 0] : [-0.32, 0.45, 0.16]);
+          R3.label(F, [-0.38, 0.62, zc], on ? 'switch closed' : 'switch open', on ? th.ok : th.warn, { size: 10 });
+          const C1 = p.C1uf * 1e-6;
+          const moved = on ? (p.V - V1) * C1 / Math.max(Math.abs(R.Qt), C1 * Vm) * 1.6 : 0;
+          if (on) flow([[-0.85, 0.12], [-0.85, 0.45], [0.85, 0.45], [0.85, 0.12]], moved, '#FFE08A');
+        }
+
+        else {
+          const cs = R.caps, Vb = p.V, lab = (c) => (c.Q * 1e6).toFixed(1) + ' μC · ' + c.V.toFixed(2) + ' V';
+          const fr = (c) => c.V / Math.max(Math.abs(Vb), 1e-9);
+          bat([-1.05, -0.2], [-1.05, 0.2], 'V = ' + Vb.toFixed(0) + ' V');
+          wire([[-1.05, 0.2], [-1.05, 0.45]]);
+          wire([[-1.05, -0.2], [-1.05, -0.45]]);
+          if (p.topo === 'series') {
+            wire([[-1.05, 0.45], [-0.55, 0.45]]);
+            cap([-0.45, 0.45], 'x', fr(cs[0]), 'C₁ ' + p.C1uf + ' μF', lab(cs[0]));
+            wire([[-0.35, 0.45], [0.10, 0.45]]);
+            cap([0.20, 0.45], 'x', fr(cs[1]), 'C₂ ' + p.C2uf + ' μF', lab(cs[1]));
+            wire([[0.30, 0.45], [0.95, 0.45], [0.95, 0.10]]);
+            cap([0.95, 0], 'y', fr(cs[2]), 'C₃ ' + p.C3uf + ' μF', lab(cs[2]));
+            wire([[0.95, -0.10], [0.95, -0.45], [-1.05, -0.45]]);
+          } else if (p.topo === 'parallel') {
+            wire([[-1.05, 0.45], [0.95, 0.45]]);
+            wire([[-1.05, -0.45], [0.95, -0.45]]);
+            [[-0.35, 0], [0.30, 1], [0.95, 2]].forEach(b => {
+              wire([[b[0], 0.45], [b[0], 0.10]]); wire([[b[0], -0.10], [b[0], -0.45]]);
+              const c = cs[b[1]];
+              cap([b[0], 0], 'y', fr(c), 'C' + '₁₂₃'[b[1]] + ' ' + [p.C1uf, p.C2uf, p.C3uf][b[1]] + ' μF', lab(c));
+            });
+          } else {
+            wire([[-1.05, 0.45], [-0.45, 0.45]]);
+            cap([-0.35, 0.45], 'x', fr(cs[0]), 'C₁ ' + p.C1uf + ' μF', lab(cs[0]));
+            wire([[-0.25, 0.45], [0.95, 0.45]]);
+            wire([[-1.05, -0.45], [0.95, -0.45]]);
+            [[0.30, 1], [0.95, 2]].forEach(b => {
+              wire([[b[0], 0.45], [b[0], 0.10]]); wire([[b[0], -0.10], [b[0], -0.45]]);
+              const c = cs[b[1]];
+              cap([b[0], 0], 'y', fr(c), 'C' + '₁₂₃'[b[1]] + ' ' + [p.C1uf, p.C2uf, p.C3uf][b[1]] + ' μF', lab(c));
+            });
+          }
+          R3.label(F, [0, -0.64, zc], 'C_eq = ' + (R.Ceq * 1e6).toFixed(3) + ' μF · battery delivers ' +
+                   (R.Qin * 1e6).toFixed(2) + ' μC', acc, { size: 10.5 });
+        }
+      }
+
+      F.render();
+
+      if (hdl) {
+        const onD = g.dragging === 'slab';
+        ctx.save();
+        ctx.strokeStyle = onD ? th.text : g.alpha(acc, .75); ctx.lineWidth = onD ? 2.2 : 1.6;
+        ctx.beginPath(); ctx.arc(hdl.x, hdl.y, hdl.r, 0, TAU); ctx.stroke(); ctx.restore();
+        // below the ring: the force label sits above it
+        PA.lbl(ctx, hdl.x, hdl.y + hdl.r + 12, hdl.tip, onD ? th.text : g.alpha(th['text-3'], .95), 'center', 9);
+        g.handle(hdl.x, hdl.y, hdl.r + 3, 'slab');
+      }
+
+      /* ---------------- instrument panels ---------------- */
+      const narrow = W < 660;
+      const panel = (bx, by, bw, bh, title) => {
+        ctx.fillStyle = g.alpha('#0B1020', .92);
+        ctx.strokeStyle = g.alpha(th.line, 1); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+        PA.lbl(ctx, bx + 10, by + 13, title, th['text-3'], 'left', 8.5);
+        return (i, kk, v, c) => {
+          PA.lbl(ctx, bx + 10, by + 30 + i * 15, kk, th['text-3'], 'left', 9);
+          PA.lbl(ctx, bx + bw - 10, by + 30 + i * 15, v, c || th['text-2'], 'right', 9.5);
+        };
+      };
+      const eng = (x, u) => {
+        const a = Math.abs(x);
+        const pre = a >= 1e6 ? ['M', 1e-6] : a >= 1e3 ? ['k', 1e-3] : a >= 1 ? ['', 1] : a >= 1e-3 ? ['m', 1e3] : a >= 1e-6 ? ['μ', 1e6] : a >= 1e-9 ? ['n', 1e9] : ['p', 1e12];
+        return (x * pre[1]).toPrecision(4) + ' ' + pre[0] + u;
+      };
+      let leftTop = null;
+      {
+        const rows = p.mode === 'slab' ? (narrow ? 4 : 7) : 5;
+        const bw = narrow ? W - 24 : Math.min(W * 0.36, 300), bh = 26 + rows * 15 + 14;
+        const bx = 12, by = H - bh - 30;
+        leftTop = by;
+        if (p.mode === 'slab') {
+          const row = panel(bx, by, bw, bh, 'THE PULL ON THE SLAB · grid vs ideal plates');
+          if (narrow) {
+            // on a phone: only the comparison that is the point of the panel
+            row(0, 'C, grid · ideal', eng(R.C, 'F') + ' · ' + eng(R.Cid, 'F'), acc);
+            row(1, 'V across the plates', R.V.toFixed(2) + ' V', p.battery ? th['text-2'] : th.warn);
+            row(2, 'force, grid −dU/dx', eng(R.F, 'N'), th.ok);
+            row(3, 'force, ideal formula', eng(R.Fid, 'N'));
+          } else {
+          row(0, 'C with fringing (grid)', eng(R.C, 'F'), acc);
+          row(1, 'C, ideal plates', eng(R.Cid, 'F'));
+          row(2, 'fringing adds', (100 * R.fringe).toFixed(1) + ' %');
+          row(3, 'V across the plates', R.V.toFixed(2) + ' V', p.battery ? th['text-2'] : th.warn);
+          row(4, 'stored energy U', eng(R.U, 'J'));
+          row(5, 'force, from −dU/dx on the grid', eng(R.F, 'N'), th.ok);
+          row(6, 'force, ideal-plate formula', eng(R.Fid, 'N'));
+          }
+        } else if (p.mode === 'rc') {
+          const k = (arr) => {
+            const T = R.t, u = clamp(S.t2 / (R.T / (T.length - 1)), 0, T.length - 1);
+            const i = Math.min(Math.floor(u), T.length - 2), f = u - i;
+            return arr[i] * (1 - f) + arr[i + 1] * f;
+          };
+          const row = panel(bx, by, bw, bh, 'WHERE THE ENERGY WENT');
+          row(0, 'battery has supplied', eng(k(R.Wb), 'J'));
+          row(1, 'stored in C  ½q²/C', eng(k(R.U), 'J'), acc);
+          row(2, 'heat in R  ∫i²R dt', eng(k(R.H), 'J'), th.warn);
+          row(3, 'heat ÷ stored, charging', S.t2 < 5 * R.tau && k(R.U) > 0 ? (k(R.H) / k(R.U)).toFixed(3) : '—');
+          row(4, 'time', (S.t2 / R.tau).toFixed(2) + ' τ');
+        } else if (p.mode === 'share') {
+          const k = (arr) => {
+            const T = R.t, u = clamp(S.t2 / (R.T / (T.length - 1)), 0, T.length - 1);
+            const i = Math.min(Math.floor(u), T.length - 2), f = u - i;
+            return arr[i] * (1 - f) + arr[i + 1] * f;
+          };
+          const row = panel(bx, by, bw, bh, 'CHARGE KEPT, ENERGY NOT');
+          row(0, 'total charge Q₁ + Q₂', eng(R.Qt, 'C'), th.ok);
+          row(1, 'stored energy now', eng(k(R.U), 'J'), acc);
+          row(2, 'heat in R so far', eng(k(R.H), 'J'), th.warn);
+          row(3, 'final loss, ½·C₁C₂/(C₁+C₂)·ΔV²', eng(R.lossTheory, 'J'));
+          row(4, 'common voltage at the end', R.Vf.toFixed(3) + ' V');
+        } else {
+          const row = panel(bx, by, bw, bh, 'EACH CAPACITOR');
+          R.caps.forEach((c, i) => row(i, 'C' + '₁₂₃'[c.k] + ':  Q = ' + (c.Q * 1e6).toFixed(2) + ' μC',
+                                       'V = ' + c.V.toFixed(3) + ' V', acc));
+          row(3, 'total energy ½C_eq V²', eng(R.U, 'J'));
+          row(4, 'check: ½C_eq V² =', eng(0.5 * R.Ceq * p.V * p.V, 'J'), th.ok);
+        }
+      }
+      /* the energy account for a small push of the slab — the battery-on
+         versus battery-off question, answered with this capacitor's numbers */
+      if (p.mode === 'slab' && !narrow) {
+        const dC = R.dcds * 1e-3;                       // per mm of insertion
+        const V = R.V;
+        const bw = narrow ? W - 24 : 236, bh = 26 + 4 * 15 + 12;
+        const bx = narrow ? 12 : W - bw - 14;
+        const by = narrow ? 40 : H - bh - 30;
+        const row = panel(bx, by, bw, bh, 'SLIDE IT IN 1 mm MORE');
+        if (p.battery) {
+          row(0, 'battery does  V² dC', eng(V * V * dC, 'J'));
+          row(1, 'field energy rises  ½V² dC', eng(0.5 * V * V * dC, 'J'), acc);
+          row(2, 'work done on the slab', eng(0.5 * V * V * dC, 'J'), th.ok);
+          row(3, 'so U goes', 'UP · the battery pays twice', th.warn);
+        } else {
+          row(0, 'battery does', '0 — it is gone');
+          row(1, 'field energy changes', '−' + eng(0.5 * V * V * dC, 'J'), acc);
+          row(2, 'work done on the slab', eng(0.5 * V * V * dC, 'J'), th.ok);
+          row(3, 'so U goes', 'DOWN · the field pays', th.warn);
+        }
+        void leftTop;
+      }
+
+      ctx.fillStyle = g.alpha(th['text-3'], .95);
+      ctx.font = '10px "IBM Plex Mono",monospace'; ctx.textAlign = 'left';
+      ctx.fillText(p.mode === 'slab'
+        ? 'plates 10 × 10 cm, d = ' + p.dmm.toFixed(1) + ' mm · the front section is solved, ∇·(ε∇φ) = 0'
+        : p.mode === 'rc' ? 'charge 5τ, then discharge 5τ · the moving dots are the charge that has passed'
+        : p.mode === 'share' ? 'charge is conserved exactly; the energy lost does not depend on R'
+        : 'solved as a nodal network with C in place of 1/R', 14, 31);
+    },
+
+    onDrag(S, e) {
+      if (e.id !== 'slab' || !S._axS) return;
+      const along = e.dx * S._axS.ux + e.dy * S._axS.uy;
+      S.p.xIn = clamp(S.p.xIn + along * 0.004, -0.25, 1.25);
+      this.setup(S);
+    },
+
+    plots: [
+      { title: 'The answer across the whole range — computed against the textbook',
+        legend: [{ c: '#3DD6F5', label: 'computed here' }, { c: '#9AA8C0', label: 'ideal / textbook' },
+                 { c: '#F5B451', label: 'second quantity' }],
+        draw(S, g) {
+          const p = S.p, R = S.R, cy = '#3DD6F5', gr = '#9AA8C0', am = '#F5B451';
+          if (p.mode === 'slab') {
+            /* F(s) from the grid's C(s), against the ideal step: the grid
+               pulls before the slab arrives and lets go gradually — the
+               fringe at work — but inside it lands exactly on the formula */
+            const W0 = EPS0 * PLATE_W, ss = S.capS, cs = S.capC, L = PLATE_L;
+            const Cat = (x) => {
+              const u = clamp((x - ss[0]) / (ss[1] - ss[0]), 0, ss.length - 1);
+              const k = Math.min(Math.floor(u), ss.length - 2), f = u - k;
+              return W0 * (cs[k] * (1 - f) + cs[k + 1] * f);
+            };
+            const grid = [], ideal = [];
+            for (let i = 0; i <= 150; i++) {
+              const x = -0.25 + 1.5 * i / 150, s = x * L;
+              const V = p.battery ? p.V : R.Q0 / Cat(s);
+              grid.push([x, 0.5 * V * V * W0 * R.dcdsFn(s) * 1e6]);
+              const Vi = p.battery ? p.V : R.C0id * p.V / capIdeal(R.dm, s, R.t, p.K);
+              ideal.push([x, 0.5 * Vi * Vi * capIdealSlope(R.dm, s, R.t, p.K) * 1e6]);
+            }
+            const vals = grid.concat(ideal).map(q => q[1]);
+            const hi = Math.max.apply(null, vals) * 1.15 || 1, lo = Math.min(0, Math.min.apply(null, vals) * 1.15);
+            const P = g.Plot({ xmin: -0.25, xmax: 1.25, ymin: lo, ymax: hi,
+              xlabel: 'slab position (fraction of plate length)', ylabel: 'force on slab (μN)',
+              xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(1) }).frame();
+            P.clip(() => {
+              P.line([[-0.25, 0], [1.25, 0]], g.alpha(g.theme['text-3'], .5), 1);
+              [0, 1].forEach(x => P.vline(x, g.alpha(g.theme['text-3'], .35), [2, 3]));
+              P.line(ideal, gr, 1.6, [5, 4]);
+              P.line(grid, cy, 2.4);
+              P.vline(p.xIn, g.alpha(g.theme.text, .5), [3, 3]);
+              P.dot(p.xIn, R.F * 1e6, 4.5, cy, g.theme['ink-950']);
+            });
+            P.tag(-0.24, grid[0][1], 'already pulling', cy, 'left', -10);
+            return;
+          }
+          if (p.mode === 'rc') {
+            const qs = [], is = [], T = R.t, tau = R.tau;
+            for (let k = 0; k < T.length; k += 4) {
+              qs.push([T[k] / tau, R.q[k] / R.Q]);
+              is.push([T[k] / tau, R.i[k] / R.I0]);
+            }
+            const P = g.Plot({ xmin: 0, xmax: 10, ymin: -1.05, ymax: 1.05,
+              xlabel: 'time (units of τ = RC)', ylabel: 'q ÷ CV  ·  i ÷ (V/R)',
+              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(1) }).frame();
+            P.clip(() => {
+              P.line([[0, 0], [10, 0]], g.alpha(g.theme['text-3'], .5), 1);
+              P.line([[0, 0.632], [1, 0.632], [1, 0]], gr, 1.2, [4, 3]);
+              P.line(qs, cy, 2.4); P.line(is, am, 2);
+              P.vline(S.t2 / tau, g.alpha(g.theme.text, .5), [3, 3]);
+            });
+            P.tag(1, 0.632, '63% at t = τ', gr, 'left', -8);
+            return;
+          }
+          if (p.mode === 'share') {
+            const a = [], b = [], T = R.t, tau = R.tau;
+            for (let k = 0; k < T.length; k += 4) { a.push([T[k] / tau, R.V1[k]]); b.push([T[k] / tau, R.V2[k]]); }
+            const lo = Math.min(p.V, p.V2, R.Vf) - 1, hi = Math.max(p.V, p.V2, R.Vf) + 1;
+            const P = g.Plot({ xmin: 0, xmax: R.T / tau, ymin: lo, ymax: hi,
+              xlabel: 'time (units of τ = R·C₁C₂/(C₁+C₂))', ylabel: 'voltage (V)',
+              xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => {
+              P.line([[0, R.Vf], [R.T / tau, R.Vf]], gr, 1.3, [5, 4]);
+              P.line(a, cy, 2.4); P.line(b, am, 2.2);
+              P.vline(S.t2 / tau, g.alpha(g.theme.text, .5), [3, 3]);
+            });
+            P.tag(R.T / tau * 0.5, R.Vf, 'common V = (C₁V₁ + C₂V₂)/(C₁ + C₂)', gr, 'left', -8);
+            return;
+          }
+          const pts = [], clo = [];
+          for (let i = 0; i <= 150; i++) {
+            const c3 = 1 + 499 * Math.pow(i / 150, 2);
+            pts.push([c3, capNetwork(Object.assign({}, p, { C3uf: c3 })).Ceq * 1e6]);
+            clo.push([c3, ceqClosed(p.topo, p.C1uf, p.C2uf, c3)]);
+          }
+          const hi = Math.max.apply(null, pts.map(q => q[1])) * 1.1;
+          const P = g.Plot({ xmin: 1, xmax: 500, ymin: 0, ymax: hi,
+            xlabel: 'C₃ (μF)', ylabel: 'C_eq (μF)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(1) }).frame();
+          P.clip(() => {
+            P.line(clo, gr, 4, [2, 0]);
+            P.line(pts, cy, 2);
+            P.vline(p.C3uf, g.alpha(g.theme.text, .5), [3, 3]);
+            P.dot(p.C3uf, R.Ceq * 1e6, 4.5, cy, g.theme['ink-950']);
+          });
+          P.tag(500, pts[pts.length - 1][1], p.topo === 'parallel' ? 'grows without limit'
+                : 'capped by the others', gr, 'right', -9);
+        },
+        hover(S, x) {
+          const p = S.p;
+          if (p.mode !== 'network') return null;
+          const n = capNetwork(Object.assign({}, p, { C3uf: x }));
+          return [{ label: 'C₃', value: x.toFixed(1) + ' μF' },
+                  { label: 'C_eq', value: (n.Ceq * 1e6).toFixed(3) + ' μF', color: '#3DD6F5' }];
+        } },
+
+      { title: 'Where the energy goes',
+        legend: [{ c: '#3DD6F5', label: 'stored in the field' }, { c: '#F5B451', label: 'heat · or battery off' },
+                 { c: '#4ADE80', label: 'battery work · or the total' }],
+        draw(S, g) {
+          const p = S.p, R = S.R, cy = '#3DD6F5', am = '#F5B451', gn = '#4ADE80';
+          if (p.mode === 'slab') {
+            /* the same slab, the same motion: with the battery on, U rises as
+               C/C₀; with it off, U falls as C₀/C. Opposite, from one C(s). */
+            const ss = S.capS, cs = S.capC, on = [], off = [];
+            for (let k = 0; k < ss.length; k++) {
+              on.push([ss[k] / PLATE_L, cs[k] / cs[0]]);
+              off.push([ss[k] / PLATE_L, cs[0] / cs[k]]);
+            }
+            const hi = Math.max.apply(null, on.map(q => q[1])) * 1.08;
+            const P = g.Plot({ xmin: -0.25, xmax: 1.25, ymin: 0, ymax: hi,
+              xlabel: 'slab position (fraction of plate length)', ylabel: 'U ÷ U before the slab',
+              xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(1) }).frame();
+            P.clip(() => {
+              P.line([[-0.25, 1], [1.25, 1]], g.alpha(g.theme['text-3'], .5), 1, [3, 3]);
+              P.line(on, p.battery ? gn : g.alpha(gn, .45), p.battery ? 2.6 : 1.4);
+              P.line(off, p.battery ? g.alpha(am, .45) : am, p.battery ? 1.4 : 2.6);
+              P.vline(p.xIn, g.alpha(g.theme.text, .5), [3, 3]);
+              P.dot(p.xIn, p.battery ? R.C / R.C0 : R.C0 / R.C, 4.5, p.battery ? gn : am, g.theme['ink-950']);
+            });
+            P.tag(1.0, on[20][1], 'battery on: U rises', gn, 'right', -9);
+            P.tag(1.0, off[20][1], 'battery off: U falls', am, 'right', 12);
+            return;
+          }
+          if (p.mode === 'rc' || p.mode === 'share') {
+            const T = R.t, tau = R.tau, U = [], Hh = [], Wt = [];
+            for (let k = 0; k < T.length; k += 4) {
+              U.push([T[k] / tau, R.U[k] * 1e3]); Hh.push([T[k] / tau, R.H[k] * 1e3]);
+              Wt.push([T[k] / tau, (p.mode === 'rc' ? R.Wb[k] : R.U[k] + R.H[k]) * 1e3]);
+            }
+            const hi = Math.max.apply(null, Wt.concat(U, Hh).map(q => q[1])) * 1.12 || 1;
+            const P = g.Plot({ xmin: 0, xmax: T[T.length - 1] / tau, ymin: 0, ymax: hi,
+              xlabel: 'time (units of τ)', ylabel: 'energy (mJ)',
+              xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(2) }).frame();
+            P.clip(() => {
+              P.line(Wt, gn, 2); P.line(U, cy, 2.4); P.line(Hh, am, 2.2);
+              P.vline(S.t2 / tau, g.alpha(g.theme.text, .5), [3, 3]);
+            });
+            if (p.mode === 'rc') P.tag(5, 0.5 * R.C * R.V * R.V * 1e3, 'heat = stored = ½CV², for ANY R', am, 'right', -9);
+            else P.tag(R.T / tau * 0.98, R.H[R.H.length - 1] * 1e3, 'lost: independent of R', am, 'right', -9);
+            return;
+          }
+          const lines = [[], [], []];
+          for (let i = 0; i <= 120; i++) {
+            const c3 = 1 + 499 * Math.pow(i / 120, 2);
+            const n = capNetwork(Object.assign({}, p, { C3uf: c3 }));
+            n.caps.forEach(c => lines[c.k].push([c3, c.U * 1e6]));
+          }
+          const hi = Math.max.apply(null, lines.flat().map(q => q[1])) * 1.1 || 1;
+          const P = g.Plot({ xmin: 1, xmax: 500, ymin: 0, ymax: hi,
+            xlabel: 'C₃ (μF)', ylabel: 'energy in each (μJ)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+          P.clip(() => {
+            P.line(lines[0], cy, 2.2); P.line(lines[1], am, 2); P.line(lines[2], gn, 2);
+            P.vline(p.C3uf, g.alpha(g.theme.text, .5), [3, 3]);
+          });
+          P.tag(2, lines[0][0][1], 'C₁', cy, 'left', -8);
+        } }
+    ],
+
+    readouts(S) {
+      const p = S.p, R = S.R;
+      const eng = (x, u) => {
+        const a = Math.abs(x);
+        const pre = a >= 1e6 ? ['M', 1e-6] : a >= 1e3 ? ['k', 1e-3] : a >= 1 ? ['', 1] : a >= 1e-3 ? ['m', 1e3] : a >= 1e-6 ? ['μ', 1e6] : a >= 1e-9 ? ['n', 1e9] : ['p', 1e12];
+        return { v: (x * pre[1]).toPrecision(4), u: pre[0] + u };
+      };
+      const ro = (label, x, u, extra) => { const e = eng(x, u); return Object.assign({ label: label, value: e.v, unit: e.u }, extra || {}); };
+      if (p.mode === 'slab') return [
+        ro('Capacitance (ideal plates)', R.Cid, 'F', { flag: 'accent', hint: 'the exam answer' }),
+        ro('Capacitance (solved, with fringe)', R.C, 'F', { hint: '+' + (100 * R.fringe).toFixed(1) + '% from the edges' }),
+        { label: 'Voltage across the plates', value: R.Vid.toFixed(2), unit: 'V', flag: p.battery ? undefined : 'warn',
+          hint: p.battery ? 'held by the battery' : 'falls as C rises: V = Q/C' },
+        ro('Charge on the plates', R.Qid, 'C', { hint: p.battery ? 'rises as the slab goes in' : 'fixed' }),
+        ro('Stored energy', R.Uid, 'J', { hint: p.battery ? '½CV²' : 'Q²/2C' }),
+        ro('Force on the slab (grid)', R.F, 'N', { flag: 'ok', hint: R.F >= 0 ? 'pulled in' : 'pushed back' }),
+        ro('E in the air gap', R.Eair, 'V/m', { hint: 'over the slab' }),
+        ro('E inside the dielectric', R.Ediel, 'V/m', { hint: 'E_air ÷ K' }),
+        ro('Bound charge density', R.sigmaB, 'C/m²', { hint: 'σ(1 − 1/K)' })
+      ];
+      if (p.mode === 'rc') {
+        const u = clamp(S.t2 / (R.T / (R.t.length - 1)), 0, R.t.length - 1), i0 = Math.floor(u);
+        return [
+          { label: 'Time constant τ = RC', value: R.tau.toFixed(3), unit: 's', flag: 'accent' },
+          ro('Final charge CV', R.Q, 'C'),
+          ro('Charge now', R.q[i0], 'C', { hint: (100 * R.q[i0] / R.Q).toFixed(1) + '% of CV' }),
+          ro('Current now', R.i[i0], 'A', { hint: 'starts at V/R' }),
+          ro('Energy stored at full charge', 0.5 * R.C * R.V * R.V, 'J', { hint: '½CV²' }),
+          ro('Heat in R, charging', R.H[400], 'J', { flag: 'warn', hint: 'integrated, not assumed' }),
+          ro('Battery work, charging', R.Wb[400], 'J', { hint: 'QV = CV²' }),
+          { label: 'Time to reach 99%', value: (R.tau * Math.log(100)).toFixed(3), unit: 's', hint: '4.6 τ' }
+        ];
+      }
+      if (p.mode === 'share') return [
+        { label: 'Common final voltage', value: R.Vf.toFixed(3), unit: 'V', flag: 'accent',
+          hint: '(C₁V₁ + C₂V₂)/(C₁ + C₂)' },
+        ro('Total charge (kept)', R.Qt, 'C', { flag: 'ok' }),
+        ro('Energy before', R.U0, 'J'),
+        ro('Energy after', R.Uf, 'J'),
+        ro('Heat, integrated ∫i²R dt', R.H[R.H.length - 1], 'J', { flag: 'warn' }),
+        ro('Heat, formula', R.lossTheory, 'J', { hint: '½ C₁C₂/(C₁+C₂) ΔV²' }),
+        { label: 'Time constant', value: R.tau.toFixed(3), unit: 's', hint: 'R × C₁C₂/(C₁+C₂)' }
+      ];
+      return [
+        { label: 'Equivalent capacitance', value: (R.Ceq * 1e6).toFixed(4), unit: 'μF', flag: 'accent' },
+        ro('Charge from the battery', R.Qin, 'C'),
+        ro('Total energy stored', R.U, 'J', { hint: '½ C_eq V²' })
+      ].concat(R.caps.map(c => ({ label: 'C' + '₁₂₃'[c.k] + ' has', value: (c.Q * 1e6).toFixed(3),
+        unit: 'μC', hint: c.V.toFixed(3) + ' V across it' })));
+    },
+
+    equation(S) {
+      const p = S.p, R = S.R;
+      if (p.mode === 'slab')
+        return E.v('C') + ' ' + E.op('=') + ' ' + E.frac(E.v('ε') + '₀' + E.v('A'), E.v('d') + E.op('−') + E.v('t') +
+          E.op('+') + E.frac(E.v('t'), E.v('K'))) + ' (under the slab) ' + E.op('·') + ' ' +
+          E.v('F') + ' ' + E.op('=') + ' ½' + E.v('V') + '² ' + E.frac('d' + E.v('C'), 'd' + E.v('x')) + ' ' +
+          E.op('=') + ' ' + E.n(R.F * 1e6, 'μN') +
+          '<br>battery ' + (p.battery ? 'on: ' + E.v('V') + ' fixed, ' + E.v('U') + ' ' + E.op('=') + ' ½' + E.v('CV') + '² rises'
+                                      : 'off: ' + E.v('Q') + ' fixed, ' + E.v('U') + ' ' + E.op('=') + ' ' +
+                                        E.frac(E.v('Q') + '²', '2' + E.v('C')) + ' falls') +
+          ' ' + E.op('·') + ' ' + E.v('U') + ' ' + E.op('=') + ' ' + E.n(R.Uid * 1e6, 'μJ');
+      if (p.mode === 'rc')
+        return E.v('q') + ' ' + E.op('=') + ' ' + E.v('CV') + '(1 ' + E.op('−') + ' ' + E.v('e') + '<sup>−t/RC</sup>) ' +
+          E.op('·') + ' τ ' + E.op('=') + ' ' + E.n(R.tau, 's') +
+          '<br>' + E.v('W') + E.sub('battery') + ' ' + E.op('=') + ' ' + E.v('CV') + '² ' + E.op('=') + ' ' +
+          E.v('U') + E.sub('C') + ' ' + E.op('+') + ' ' + E.v('H') + E.sub('R') + ' ' + E.op('=') + ' ½' + E.v('CV') +
+          '² ' + E.op('+') + ' ½' + E.v('CV') + '²';
+      if (p.mode === 'share')
+        return E.v('V') + E.sub('common') + ' ' + E.op('=') + ' ' + E.frac(E.v('C') + '₁' + E.v('V') + '₁' + E.op('+') +
+          E.v('C') + '₂' + E.v('V') + '₂', E.v('C') + '₁' + E.op('+') + E.v('C') + '₂') + ' ' + E.op('=') + ' ' +
+          E.n(R.Vf, 'V') + '<br>Δ' + E.v('U') + ' ' + E.op('=') + ' ½' +
+          E.frac(E.v('C') + '₁' + E.v('C') + '₂', E.v('C') + '₁' + E.op('+') + E.v('C') + '₂') + '(' + E.v('V') + '₁' +
+          E.op('−') + E.v('V') + '₂)² ' + E.op('=') + ' ' + E.n(R.lossTheory * 1e3, 'mJ');
+      return (p.topo === 'series' ? E.frac('1', E.v('C') + E.sub('eq')) + ' ' + E.op('=') + ' Σ ' + E.frac('1', E.v('C') + E.sub('i'))
+            : p.topo === 'parallel' ? E.v('C') + E.sub('eq') + ' ' + E.op('=') + ' Σ ' + E.v('C') + E.sub('i')
+            : E.frac('1', E.v('C') + E.sub('eq')) + ' ' + E.op('=') + ' ' + E.frac('1', E.v('C') + '₁') + ' ' + E.op('+') + ' ' +
+              E.frac('1', E.v('C') + '₂' + E.op('+') + E.v('C') + '₃')) +
+        ' ' + E.op('=') + ' ' + E.n(R.Ceq * 1e6, 'μF');
+    },
+
+    eqNote: '<b>Two questions decide every capacitor problem: what is held fixed, and where the energy goes.</b> ' +
+      'With the battery connected, V is fixed. Inserting a dielectric raises C, so Q and U both rise, and ' +
+      'the battery supplies twice what the field gains: half is stored, and half is the work done ' +
+      'pulling the slab in. With the battery removed, Q is fixed. Raising C now lowers V and ' +
+      '<b>lowers</b> U, and the field itself pays for pulling the slab in. The slab is attracted in both ' +
+      'cases; only the energy account changes sign. Charging through a resistor loses exactly half the ' +
+      'battery\'s work as heat whatever R is, and connecting two capacitors loses energy whatever the ' +
+      'wire. Both are the capacitor version of a perfectly inelastic collision.',
+
+    problems: [
+      { source: 'NEET pattern · a slab that fills the gap',
+        q: 'Square plates of side 10.0 cm are 10.0 mm apart. A slab of dielectric constant 4.00 fills the gap completely. Ignoring edge effects, find the capacitance in pF. (ε₀ = 8.854 × 10⁻¹² F/m)',
+        params: { mode: 'slab', dmm: 10, K: 4, tFrac: 1, xIn: 1, V: 200, battery: true },
+        predict: { label: 'capacitance', unit: 'pF', tol: 0.02 },
+        measure: S => S.R.Cid * 1e12,
+        working: 'C = Kε₀A/d = 4.00 × 8.854 × 10⁻¹² × 0.0100 / 0.0100 = <b>35.4 pF</b>. The grid, which keeps the ' +
+          'fringe, gives a few per cent more: at a gap-to-side ratio of 1 : 10 the edges are not negligible, and ' +
+          'every real capacitor measures a little higher than this formula.' },
+      { source: 'JEE Main pattern · a slab thinner than the gap',
+        q: 'The same plates, 10.0 mm apart, with a slab of K = 5.00 and thickness 5.00 mm lying flat inside. Find the capacitance in pF, ignoring edge effects.',
+        params: { mode: 'slab', dmm: 10, K: 5, tFrac: 0.5, xIn: 1, V: 200, battery: true },
+        predict: { label: 'capacitance', unit: 'pF', tol: 0.02 },
+        measure: S => S.R.Cid * 1e12,
+        working: 'The slab and the remaining air are in series: C = ε₀A/(d − t + t/K) = 8.854 × 10⁻¹³ / ' +
+          '(0.00500 + 0.00100) = <b>14.8 pF</b>. The shortcut: a slab of thickness t behaves like an air gap ' +
+          'of t/K, so it "removes" t(1 − 1/K) = 4 mm of the gap. A metal slab (K → ∞) removes all of t.' },
+      { source: 'JEE Advanced pattern · battery removed first',
+        q: 'The empty capacitor is charged to 200 V, and then the battery is disconnected. A slab of K = 4.00 that fills the gap is then pushed fully in. What is the new potential difference, in volts?',
+        params: { mode: 'slab', dmm: 10, K: 4, tFrac: 1, xIn: 1, V: 200, battery: false },
+        predict: { label: 'new voltage', unit: 'V', tol: 0.02 },
+        measure: S => S.R.Vid,
+        working: 'With the battery gone, Q cannot change. C rises by K, so V = Q/C falls by K: ' +
+          '<b>50.0 V</b>. The energy Q²/2C falls by the same factor of 4: the field did work pulling the slab ' +
+          'in. Had the battery stayed on, V would stay 200 V, Q and U would both rise fourfold, and the battery ' +
+          'would have paid for it.' },
+      { source: 'JEE Main pattern · the heat in the resistor',
+        q: 'A 100 μF capacitor is charged from a 12.0 V battery through a 100 kΩ resistor. How much heat is produced in the resistor during the full charge, in mJ?',
+        params: { mode: 'rc', Rk: 100, C1uf: 100, V: 12 },
+        predict: { label: 'heat', unit: 'mJ', tol: 0.02 },
+        measure: S => S.R.H[400] * 1e3,
+        working: 'The battery moves Q = CV through V, so it does QV = CV² = 14.4 mJ of work. The capacitor ends ' +
+          'up with ½CV² = 7.2 mJ. The rest, <b>7.20 mJ</b>, is heat. R does not appear: a smaller R gives a ' +
+          'bigger current for a shorter time, and ∫i²R dt comes out the same. The lab integrates it ' +
+          'numerically and gets 7.20 mJ for any R you choose.' },
+      { source: 'JEE Advanced pattern · charge sharing',
+        q: 'A 100 μF capacitor charged to 12.0 V is connected through a resistor to an uncharged 50.0 μF capacitor. How much energy is dissipated, in mJ?',
+        params: { mode: 'share', C1uf: 100, C2uf: 50, V: 12, V2: 0, Rk: 100 },
+        predict: { label: 'energy lost', unit: 'mJ', tol: 0.02 },
+        measure: S => S.R.H[S.R.H.length - 1] * 1e3,
+        working: 'Charge is shared, not lost: 1.20 mC spreads over 150 μF to give 8.00 V. Energy goes from ' +
+          '7.20 mJ to ½ × 150 μF × 64 = 4.80 mJ, so <b>2.40 mJ</b> is dissipated. The quick route is ' +
+          '½ · C₁C₂/(C₁+C₂) · ΔV² = ½ × 33.3 μF × 144. That expression has the same shape as the energy lost ' +
+          'when two bodies stick together, ½μΔu², and for the same reason.' }
+    ],
+
+    walkthrough: [
+      { title: '1 · The field is solved, not drawn',
+        body: 'Look at the glowing section on the front of the capacitor. That is |E| from Laplace\'s equation.',
+        ask: 'Where is the field strongest, and where is it weakest?',
+        reveal: 'It is uniform in the empty part of the gap and <b>weaker inside the slab</b> by a factor of K. The ' +
+          'slab\'s bound charges oppose the field. It is also strong at the plate edges and bulges ' +
+          'outside, which is the fringe that the ideal formula ignores. The + and − marks are spaced so each ' +
+          'carries the same charge, so they crowd over the slab, where σ is highest.',
+        params: { mode: 'slab', dmm: 15, K: 4, tFrac: 1, xIn: 0.5, V: 200, battery: true } },
+      { title: '2 · Why a slab is pulled in at all',
+        body: 'Between ideal plates the field is vertical and the slab\'s face is vertical. Move the slab to just outside the plates.',
+        ask: 'Is it pulled even before it enters?',
+        reveal: '<b>Yes.</b> The first graph shows the grid force starting before position 0. The fringe ' +
+          'field reaches out past the edge and polarises the slab, and the non-uniform field pulls the dipoles ' +
+          'in. The ideal model can only get the force from energy (F = ½V² dC/dx), which is why it is taught ' +
+          'that way. Inside, the grid lands exactly on that formula.',
+        params: { mode: 'slab', dmm: 10, K: 4, tFrac: 1, xIn: -0.05, V: 200, battery: true } },
+      { title: '3 · Battery on: the battery pays twice',
+        body: 'Battery connected. Read the right-hand panel as the slab goes in.',
+        ask: 'If the battery does work W, how much ends up stored in the field?',
+        reveal: '<b>Half.</b> The battery pushes dQ = V dC through V, doing V² dC of work. The field gains ' +
+          '½V² dC. The other half is mechanical work, the pull on the slab. If you hold the slab back so it ' +
+          'moves slowly, that energy goes into your hand.',
+        params: { mode: 'slab', dmm: 10, K: 4, tFrac: 1, xIn: 0.5, V: 200, battery: true } },
+      { title: '4 · Battery off: everything reverses except the pull',
+        body: 'Now switch the battery off and slide the slab in again.',
+        ask: 'Does the stored energy go up or down this time? Is the slab still attracted?',
+        reveal: 'U goes <b>down</b>: U = Q²/2C with Q fixed. The slab is <b>still pulled in</b>, and the field ' +
+          'pays for it out of its own energy. The second graph shows both cases from the same C(x): one ' +
+          'curve rises and the other falls. This battery-on versus battery-off question appears on nearly ' +
+          'every paper.',
+        params: { mode: 'slab', dmm: 10, K: 4, tFrac: 1, xIn: 0.5, V: 200, battery: false } },
+      { title: '5 · Half the energy is always lost',
+        body: 'Charge a capacitor through R, then use the preset with 10× the resistance.',
+        ask: 'Does the larger resistance waste more energy, or less?',
+        reveal: '<b>Neither — exactly the same.</b> The heat is ½CV² for any R. A large R makes a small ' +
+          'current that lasts longer, a small R a large one that is over quickly, and ∫i²R dt comes to the ' +
+          'same total. Only charging in many small voltage steps, rather than all at once, avoids the loss.',
+        params: { mode: 'rc', Rk: 100, C1uf: 100, V: 12 } },
+      { title: '6 · Sharing charge is an inelastic collision',
+        body: 'Connect a charged 100 μF capacitor to an empty 50 μF one.',
+        ask: 'Charge is conserved. Is energy?',
+        reveal: '<b>No, and the loss does not depend on the wire.</b> ΔU = ½·C₁C₂/(C₁+C₂)·(V₁ − V₂)². ' +
+          'Compare the energy lost when two bodies collide and stick, ½·m₁m₂/(m₁+m₂)·(u₁ − u₂)². Charge ' +
+          'plays the part of momentum and C the part of mass, and both equalise a shared quantity (V or ' +
+          'velocity) at a fixed energy cost.',
+        params: { mode: 'share', C1uf: 100, C2uf: 50, V: 12, V2: 0, Rk: 100 } }
+    ],
+
+    quiz: [
+      { q: 'A capacitor stays connected to a battery while a dielectric slab is inserted. The stored energy:',
+        options: ['decreases', 'increases', 'stays the same', 'becomes zero'], answer: 1,
+        why: 'V is fixed, C rises by K, so U = ½CV² rises by K. The battery supplies twice that increase; the other half is work on the slab.' },
+      { q: 'A charged capacitor is isolated, then a dielectric slab is inserted. The stored energy:',
+        options: ['increases by K', 'decreases by K', 'stays the same', 'increases by K²'], answer: 1,
+        why: 'Q is fixed, so U = Q²/2C falls as C rises. The field does the work of pulling the slab in.' },
+      { q: 'A capacitor is charged fully through a resistor R from a battery of emf V. The heat produced in R is:',
+        options: ['CV²', '½CV²', 'zero if R is small', 'depends on R'], answer: 1,
+        why: 'The battery does QV = CV² of work; ½CV² is stored, so ½CV² is dissipated — independent of R.' },
+      { q: 'A slab of thickness t and constant K is placed between plates a distance d apart. The capacitance is:',
+        options: ['ε₀A/(d − t)', 'Kε₀A/d', 'ε₀A/(d − t + t/K)', 'ε₀A/(d + t/K)'], answer: 2,
+        why: 'The air (d − t) and the slab (t) are in series; the slab behaves like air of thickness t/K.' },
+      { q: 'Capacitors of 2, 3 and 6 μF are connected in series across 12 V. The charge on each is:',
+        options: ['12 μC', '24 μC', '72 μC', '132 μC'], answer: 0,
+        why: 'In series every capacitor carries the same charge. C_eq = 1 μF, so Q = C_eq·V = 12 μC on each.' }
+    ],
+
+    notes: '<b>Where this shows up in the paper.</b>' +
+      '<ul><li>Parallel plates with a dielectric: fully filling (C = Kε₀A/d), partly thick ' +
+      '(ε₀A/(d − t + t/K)), and partly inserted along the length (two capacitors in parallel).</li>' +
+      '<li>Battery connected versus disconnected: which of V, Q, E, U change, and in which direction.</li>' +
+      '<li>The force on a dielectric slab, F = ½V² dC/dx, and why it is always attractive.</li>' +
+      '<li>Series and parallel networks, and the charge on each capacitor.</li>' +
+      '<li>RC charging and discharging: q = CV(1 − e<sup>−t/RC</sup>), τ = RC, and the energy split.</li>' +
+      '<li>Connecting charged capacitors: common voltage and energy lost, including capacitors connected ' +
+      'with opposite polarities.</li></ul>' +
+      '<div class="pyq"><em>Trap to avoid</em>Before anything else, decide what is <b>fixed</b>. Battery on: ' +
+      'V is fixed. Battery off: Q is fixed. The same slab gives opposite answers for U, and opposite ' +
+      'answers for E in the air gap, depending on this one fact.</div>' +
+      '<div class="pyq"><em>Trap to avoid</em>The energy lost in charging or in charge sharing does ' +
+      '<b>not</b> depend on the resistance. A problem that gives R and asks for the heat is usually ' +
+      'testing whether you notice that R is not needed.</div>'
+  });
+
 
 })(window.InsightLab);
