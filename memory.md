@@ -742,6 +742,31 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-24 (a)** — **Client: batch 3 liked, "upgrade very much… think what else you can do, ultra
+  level".** I read "ultra level" per §2.10 as **new physics the student drives**, not more polish.
+  Every addition computes its result, and each has problems checked against the apparatus.
+  **Gravitation** (now 5 set-ups):
+  - Mission control: a stage button fires a Δv, and `runOrbit(p, state)` restarts from any state.
+  - The Hohmann autopilot fires at apogee, found by bisection on ṙ; it ends at e = 1e-4 after a
+    5.27 h coast.
+  - A rendezvous target shows the speed-up-to-fall-behind paradox.
+  - A two-body potential landscape with marching-squares equipotentials, the neutral point at
+    0.900 d, and v_min = 11.07 km/s against 11.19 km/s escape. A hollow shell gives a flat floor.
+  **Fluids** (now 8 set-ups):
+  - An accelerating cart: the first sloshing mode overshoots to about 2 × arctan(a/g); the pendulum
+    swings back and the helium balloon leans forward.
+  - A spinning vessel: a volume-conserving paraboloid with a dry-spot branch, and Ekman spin-up.
+  - Two bubbles on real cap geometry, with Poiseuille flow between them: the small one empties.
+  - A U-tube with two liquids, and an integrated oscillation of 1.003 s.
+  **Lessons:**
+  - A button can be a stage handle that fires on `phase === 'start'`; no lab-core change is needed.
+  - A mission needs a fixed frame (`rDisp` covers the target and the ghosts), or the scene rescales
+    at every burn.
+  - A single-quad colour band looks blocky on a height field: shade smoothly and draw contours as
+    segments inside each cell.
+  - A backboard texture must match its plane's aspect ratio, or its labels squeeze unreadable
+    (`boardTex(wpx)`).
+
 - **2026-09-23 (d)** — **Client: batch 2 is "okay, not excellent"; make batch 3 better "in working by all
   parameters".** Built **Gravitation** (4 set-ups) and **Fluids** (5 set-ups) in `sims-physics11.js`,
   one IIFE holding both labs.

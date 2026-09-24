@@ -226,6 +226,15 @@ and each exam result is **read off the run**.
   10.69 m/s² at the core boundary. A ball in a straight tunnel takes 42.2 min one way for every chord
   of a uniform Earth, but only 38 min through the real one. A plumb line shows the effect of spin, and
   a shortened day can make the equator float.
+- **Mission control**: a FIRE ENGINE button on the stage applies a Δv (prograde, retrograde or
+  radial) to the live orbit, and the integrator restarts from that exact state. A Hohmann autopilot
+  climbs from 300 km to geostationary orbit with two burns (2.43 and 1.47 km/s). The apogee is found
+  by bisection, and the craft finishes with e = 0.0001. A rendezvous mission puts a target 10° ahead:
+  speeding up makes you fall behind; dropping lower catches it.
+- **Field and potential**: the Earth–Moon potential drawn as a 3D landscape with equipotential
+  contours (marching squares). The neutral point sits at 0.900 d. A probe launched at 11.05 km/s falls
+  back; at 11.09 km/s it crests the saddle and reaches the Moon, below the 11.19 km/s escape speed. A
+  hollow-shell option shows the flat, field-free interior.
 - **Cavendish torsion balance**: the torque is summed over all four sphere pairs, and a laser spot is
   read on a scale 5 m away. The lab works out G from turning points exactly as a student does. The
   textbook formula comes out 7.5% low because of the far spheres; with the far-sphere and damping
@@ -244,6 +253,14 @@ Five pieces of apparatus.
   shows the Stokes streamlines and the three forces.
 - **Archimedes**: a spring balance and a beaker on a scale show both halves at once. Iron floats on
   mercury. Cut the string and the block bobs.
+- **Moving frames**: in an accelerating cart the water surface settles at tan θ = a/g. It first
+  overshoots to about twice that tilt, because the first sloshing mode rings. A pendulum swings
+  back while a helium balloon leans **forward**. In a spinning vessel the surface is a paraboloid; its
+  volume is conserved, it spins up over the Ekman time, and above 27 rad/s the centre runs dry.
+- **Two soap bubbles** joined by a valve: each cap's pressure is 4T/R from its real geometry, and the
+  air flows through the tube by Poiseuille's law. The small bubble empties into the large one.
+- **A U-tube** with oil poured on water. The two columns balance at the interface. Tip it and it
+  oscillates with T = 2π√(L/2g).
 - **Capillary rise** in three tubes, integrated with inertia: the wide tube overshoots and rings. A
   tube that is too short does **not** overflow; its contact angle gives way instead.
 
