@@ -742,6 +742,16 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (c)** — **Client: "when I scroll over the controls, the whole page scrolls too; give the controls their own scroller".**
+  - The side column (\`.col-side\`) is now a sticky pane: \`top:64px\`, \`max-height:calc(100vh − 76px)\`,
+    \`overflow-y:auto\` and \`overscroll-behavior:contain\`. The wheel over it moves only the controls,
+    so the stage stays in view while a slider changes.
+  - The left rail is contained the same way.
+  - In one-column layouts (≤1120 px) the control deck body has its own scroller, 62vh at most.
+  - Verified with the wheel at 1500, 1000 and 390 px: window.scrollY does not change.
+  **Lesson:** a max-height flex column squashes \`overflow:hidden\` panels instead of overflowing.
+  It needs \`.col-side > * { flex-shrink: 0 }\`.
+
 - **2026-09-25 (b)** — **Client: "more upgrades according to the JEE Main and Advanced point of view".** I read this as
   covering the syllabus's classic problem types, each one computed:
   - **Gravitation 'shapes' mode**: a brute-force superposition over up to 3000 point masses (ring, disc,

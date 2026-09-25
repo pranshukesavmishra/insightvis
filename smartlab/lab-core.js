@@ -1041,7 +1041,7 @@ window.InsightLab = (function () {
     main.appendChild(expo);
 
     const con = el('div', 'console');
-    const left = el('div', 'col'), right = el('div', 'col');
+    const left = el('div', 'col'), right = el('div', 'col col-side');
     con.appendChild(left); con.appendChild(right);
     main.appendChild(con);
 
@@ -1159,6 +1159,7 @@ window.InsightLab = (function () {
 
     /* controls */
     const cp = panel('Control deck');
+    cp.classList.add('ctlpanel');
     R.nodes.controls = cp.body;
     right.appendChild(cp);
     buildControls(cp.body);
