@@ -101,9 +101,9 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v13 (shipped)
+## 4. Insight Smart Lab — v14 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Forty-six experiments across twenty-nine chapters.**
+Source: [`smartlab/`](./smartlab). **Forty-eight experiments across twenty-nine chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
 **Physics now spans nineteen chapters** — seventeen of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
@@ -387,6 +387,27 @@ Six benches, every number integrated rather than quoted:
 - **A yo-yo.**
 - **A cylinder on a pulled plank.** It slips above a critical force.
 - **A pushed block.** It either slides or tips over its edge.
+
+**Rolling on Curves, Wedges and Springs** (v14, JEE Advanced)
+One contact model for all four set-ups. At every step friction is solved for and tested against μN, and N = m(κv² + g cos ψ) comes
+from the curvature of the path.
+- **The vertical loop.** The least release height is found by running the bench and matches (5 + k)(R − r)/2. It also shows where
+  N = 0 and the parabola the ball flies on after it leaves. Near the top N is tiny, so a ball on a real track slips a little and
+  needs slightly *more* height than the textbook value.
+- **A ball in a bowl.** Its period is timed against 2π√((1 + k)(R − r)/g).
+- **A body rolling down a free wedge.** Five unknowns are solved together; horizontal momentum stays zero, and KE plus slip heat
+  equals mgΔh.
+- **A rolling body on a spring.** The spring is attached at the axle or at the top, on a floor or an incline; it slips past an
+  amplitude that is computed.
+
+**Rotational Impulse and Connected Bodies** (v14, JEE Advanced)
+- **τ = dL/dt on a flywheel.** The area under the net torque–time graph is laid against ΔL.
+- **A ball striking a cube.** During the blow the edge must hold with impulsive friction, so it pivots only when h ≥ 4a/3(1 + μ).
+  The least toppling speed is found by bisection and matches the formula to 1 part in 10⁶.
+- **An Atwood machine with a massive pulley.** T₁ ≠ T₂, and energy is accounted for. A table version is included.
+- **A string wound on a rolling cylinder.** It can pull from the top or the axle; no friction is needed when the string is at
+  r(1 + k).
+- **A belt drive.** The belt grips up to the capstan limit, then slips.
 
 ### Physics · Oscillations
 **28 · Resonance, Damping and Normal Modes**

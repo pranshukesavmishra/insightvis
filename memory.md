@@ -742,6 +742,28 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (h)** — **Client: "all"** (build every proposed Rotational Motion upgrade). Built two labs in
+  `sims-physics14.js` (built by `_build14.sh` from `_q0` header, `_r0` helpers and `_q1`–`_q6`; 48 sims):
+  - `rollcurve`: loop, bowl, free wedge, spring.
+  - `rotimpulse`: flywheel τ = dL/dt, ball striking a cube, heavy-pulley Atwood (hanging or on a table), wound cylinder, belt.
+  - 17 problems, all measured.
+  **Techniques:**
+  - One contact function: find the friction rolling needs; if |F| ≤ μN it sticks, otherwise kinetic friction acts against
+    the slip. When the slip changes sign, snap to rolling using angular momentum about the contact point.
+  - N comes from the curvature of the path, N = m(κv² + g cos ψ). The loop's path is a list of segments (line, fillet arc,
+    flat, loop arc, exit), each giving position, tangent angle and curvature at arc length s.
+  - Midpoint (RK2) steps for the loop and the cube. The toppling threshold went from 0.14% off to 1 part in 10⁶.
+  - Bisection by running the bench, for the loop's least height and the cube's least speed, compared against the formula.
+  - Physics finding: on a real track (μ = 0.6) the least loop height is 1.2187, not 1.2150, because near the top N → 0 and
+    the ball slips. With μ = 50 the bench returns exactly 1.2150 and 136.00°.
+  - Cube impact: stick case from angular momentum about the edge; slip case a 4×4 impulse solve (J, ω, v_edge, Jz) with
+    Jx = −μJz. After the blow, the edge-contact dynamics is a 4×4 solve for (ẍ_e, θ̈, N, F) per step.
+  - Record samples by step count, `Math.round(t/dt) % n === 0`. The earlier `t − last ≥ interval` test drifted by about 1%,
+    and index-to-time lookups read the wrong instant: the flywheel's L at the end of the drive was 5.04, not 5.10.
+  **Bugs:**
+  - Bisecting on "topples" missed the answer: at high speeds the cube is thrown off the floor (N < 0), which is a different
+    outcome. Counted both as "over", and set the search range from the formula.
+
 - **2026-09-25 (g)** — **Client: "a lot of graphical and simulation mistakes in all these three [rotational labs], check and
   correct them."** Went through every preset of `rolling`, `rigidbody` and `rollingadv`, checking the stage, both plots and the
   readouts. **Fixed:**
