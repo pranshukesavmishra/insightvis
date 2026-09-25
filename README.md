@@ -101,9 +101,9 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v14 (shipped)
+## 4. Insight Smart Lab — v15 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Forty-eight experiments across twenty-nine chapters.**
+Source: [`smartlab/`](./smartlab). **Fifty experiments across thirty-one chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
 **Physics now spans nineteen chapters** — seventeen of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
@@ -787,3 +787,24 @@ made.**
 ---
 
 *Built for Insight Coaching.*
+
+### Physics · Motion in a Straight Line & in a Plane
+**Kinematics — Motion Graphs, Projectiles with Drag and on Slopes, the River, Closest Approach** (v15)
+- **Motion graphs.** Linked x–t, v–t and a–t graphs from one RK4 run: the slope is shown live, and the signed area gives the
+  displacement while the distance is kept separately. A bouncing ball sums to h(1 + e²)/(1 − e²).
+- **Projectiles.** In vacuum, or with linear or quadratic drag; from a height or onto a slope. The best angle is found by a
+  golden-section search: 45° + α/2 on a slope, below 45° with drag.
+- **The river crossing.** The flow can be uniform or fastest mid-stream; the least drift is searched for.
+- **Two ships.** The closest approach from the relative velocity, checked against the sampled run.
+
+### Physics · Semiconductor Electronics
+**Semiconductors — Bands and Doping, the p–n Junction, Rectifiers, the Zener Regulator, Logic Gates** (v15)
+- **Bands and doping.** n_i(T) from the band gap; n and p from charge neutrality, so n·p = n_i² holds at every doping. The
+  Fermi level moves on a live band diagram.
+- **The p–n junction.** The Shockley diode with series resistance and breakdown, the built-in potential, and a depletion width
+  ∝ √(V_bi − V).
+- **Rectifiers.** Half-wave and bridge circuits with a smoothing capacitor; the real diodes are solved at every step, and an
+  oscilloscope shows the ripple.
+- **The Zener regulator.** Shows where regulation fails.
+- **Logic gates.** Timing diagrams, truth tables, and NAND-only builds.
+

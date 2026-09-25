@@ -742,6 +742,29 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (j)** — **Client: "continue next batch".** Batch 5 in `sims-physics15.js` (built by `_build15.sh`:
+  `_s0` header, `_r0` helpers, `_s1`–`_s6`; 50 sims):
+  - `kinematics`: graphs, projectiles, river, ships.
+  - `semicond`: bands, junction, rectifier, Zener, gates.
+  - 14 problems, all measured.
+  **Techniques:**
+  - Kinematics turning points are found from a sign change, interpolated inside the step.
+  - The bounce is detected inside the step. The ball rests once the impact speed falls below 4 mm/s; count only bounces
+    faster than 0.1 m/s.
+  - The best projectile angle comes from a golden-section search on the full run.
+  - The least river drift comes from a scan followed by a ternary search.
+  - Carriers: the majority density is taken as the large root, |net| + √(net² + n_i²). The naive `net + √…` cancels to zero
+    for p-type at high doping.
+  - Si N_v = 3.1 × 10¹⁹ (Green 1990) gives n_i(300 K) = 1.07 × 10¹⁰.
+  - The rectifier's diode is Shockley with I_s = 1e-14, η = 1 (≈ 0.66 V at 1 mA). The ripple approximation V/(f_r RC)
+    overestimates the measured ripple by 10–20%, because recharge starts before a full period has passed; the lab shows both.
+  - lab-core has no log sliders, so dopant densities use an exponent parameter (dE, aE, nE) and setup derives Ndop, NA, ND.
+  **Bugs:**
+  - Quick rectifier runs recorded no samples (`!quick` guard), so the capacitor-sweep plot was blank.
+  - 147 lattice atoms plus carriers drawn as `R3.sphere` and `wireSphere` ran at 2 fps. With `ballCloud` sprites it runs at
+    60 fps.
+  - A sign typo (`-cp.Ef * -1 * -1`) put the p-type Fermi level on the wrong side.
+
 - **2026-09-25 (i)** — **Client: "the ball doesn't hit the cube … it just falls before hitting".** Two drawing bugs in
   `rotimpulse` → cube:
   - The flat (never-tipped) run began with `xFlat = 0` but recorded `xFlat + a`, so the cube was drawn one edge (0.3 m)
