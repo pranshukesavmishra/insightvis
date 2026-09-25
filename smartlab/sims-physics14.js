@@ -1019,7 +1019,7 @@
   }
   function runCube(p, uOverride, quick) {
     const u = uOverride == null ? p.uball : uOverride, Im = cubeImpact(p, u), a = Im.a, M = Im.M, mu = Im.mu, Icm = Im.Icm, h2 = a / 2;
-    let xe = 0, ve = Im.vex, th = 0, w = Im.w, t = 0, phase = w > 0 ? 'tip' : 'flat', outcome = '', thMax = 0, xFlat = 0, vFlat = w > 0 ? 0 : Im.vex;
+    let xe = 0, ve = Im.vex, th = 0, w = Im.w, t = 0, phase = w > 0 ? 'tip' : 'flat', outcome = '', thMax = 0, xFlat = -a, vFlat = w > 0 ? 0 : Im.vex;
     const out = [], dt = 0.0005;
     while (t < 5) {
       if (phase === 'tip') {
@@ -1194,10 +1194,16 @@
     R3.sphere(F, V.add(ctr, [0, -a * 0.52, 0]), 0.018, '#FF6B5A', { shadow: false, vivid: true });
     // the ball: in, then out at its rebound speed
     const hb = Im.h * ks, rb = 0.05, xFace = -a / 2 - rb;
-    // after the blow the ball is a projectile: it leaves at its rebound speed and falls (drawn at 0.25× horizontally)
-    const bx = tA <= 0 ? xFace + (tA / tPre) * 1.0 : xFace + Math.min(1.2, Cb.Im.uBall * tA * ks * 0.25) - (Cb.Im.uBall > 0 ? 0.06 : 0);
+    // after the blow the ball is a projectile at its rebound speed, on the SAME time scale as the cube; it cannot pass
+    // through the cube's back face, wherever that face has moved (the cube may slide or tip away from it)
     const bz = tA <= 0 ? hb : Math.max(rb, hb - 0.5 * G * tA * tA * ks);
-    R3.sphere(F, [Math.min(bx, xFace), 0, bz], rb, '#E0453A', { shadow: true, vivid: true });
+    const B = V.add(edge, V.mul(ex, -a)), faceX = bz < B[2] - 1e-6 ? Infinity : B[0] + (bz - B[2]) / Math.max(1e-6, Math.cos(thc)) * Math.sin(thc);
+    const bxFree = tA <= 0 ? xFace + (tA / tPre) * 1.0 : xFace + Cb.Im.uBall * tA * ks;
+    const bx = Math.min(bxFree, faceX - rb);
+    R3.sphere(F, [bx, 0, bz], rb, '#E0453A', { shadow: true, vivid: true });
+    // the moment of impact: a flash where ball meets face
+    if (tA >= 0 && tA < 0.15) { const k = 1 - tA / 0.15, ring = []; for (let j = 0; j <= 24; j++) { const q = j / 24 * TAU; ring.push([-a / 2 - 0.004, (rb + 0.06 * (1 - k)) * Math.cos(q), hb + (rb + 0.06 * (1 - k)) * Math.sin(q)]); }
+      path3(F, ring, '#FFE08A', { alpha: 0.9 * k, width: 2.5, chunk: 2 }); R3.label(F, [-a / 2 - 0.1, 0, hb + 0.14], 'impact', '#FFE08A', { size: 10 }); }
     if (tA <= 0) R3.arrow(F, [bx - 0.3, 0, hb + 0.08], [bx - 0.05, 0, hb + 0.08], 0.008, '#FF8A7A', {});
     // just after the blow: the impulses
     if (tA > 0 && tA < 0.7) {

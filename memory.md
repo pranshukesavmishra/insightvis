@@ -742,6 +742,16 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (i)** — **Client: "the ball doesn't hit the cube … it just falls before hitting".** Two drawing bugs in
+  `rotimpulse` → cube:
+  - The flat (never-tipped) run began with `xFlat = 0` but recorded `xFlat + a`, so the cube was drawn one edge (0.3 m)
+    ahead of where the blow landed. It now starts at `xFlat = −a`, so the recorded value is the edge's displacement in
+    both phases.
+  - After the blow, the ball was pinned to the cube's starting face and drawn at 0.25× time. It now moves on the same time
+    scale as the cube, is clamped to the cube's current back face (tilted or sliding), falls under g, and flashes at impact.
+  **Lesson:** check two bodies that meet in the same frame, at the instant they meet. A convention that differs between two
+  phases of one run (here, edge vs. corner) shows only in the phase the presets rarely enter.
+
 - **2026-09-25 (h)** — **Client: "all"** (build every proposed Rotational Motion upgrade). Built two labs in
   `sims-physics14.js` (built by `_build14.sh` from `_q0` header, `_r0` helpers and `_q1`–`_q6`; 48 sims):
   - `rollcurve`: loop, bowl, free wedge, spring.
