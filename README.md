@@ -101,11 +101,11 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v10 (shipped)
+## 4. Insight Smart Lab — v11 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Forty-two experiments across twenty-seven chapters.**
+Source: [`smartlab/`](./smartlab). **Forty-four experiments across twenty-nine chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
-**Physics now spans seventeen chapters** — fifteen of its benches are built in true 3D on `render3d.js`,
+**Physics now spans nineteen chapters** — seventeen of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
 
 ### Physics · Moving Charges & Magnetism
@@ -289,6 +289,54 @@ Twelve set-ups, each computing what it shows.
   (1017.4 N at 60°) are included; the horizontal part never changes.
 - **Merging drops**: 1000 drops join the central one nearest first, while the surface area is summed
   every frame. Water releases 0.8233 mJ = 4πR²T(n^⅓ − 1); mercury heats by 0.691 mK.
+
+### Physics · Nuclei
+**Nuclei — Decay, Chains, Binding Energy and Criticality**
+Four set-ups. No curve on them is drawn from a formula.
+- **Counting a source**:
+  - A real population of nuclei decays by chance. The source is thoron, Ba-137m, Tc-99m, I-131, P-32 or Po-210.
+  - An end-window Geiger–Müller tube sits on a bench with a lead castle. Its non-paralysable dead time is applied event by event, and there is a background count.
+  - The half-life is fitted from the scaler's counts: thoron gives 55.6 ± 0.2 s.
+  - Alphas have a range in air, so a tube at 6 cm reads only background.
+  - Paper stops α, 3 mm of aluminium stops β, and lead attenuates γ.
+  - Switch off the dead-time correction on a hot source and the fitted half-life comes out 1.44 times too long.
+- **Decay chains**, integrated by RK4 and also run atom by atom:
+  - Mo-99 → Tc-99m (the technetium cow, with daily elution): the daughter peaks at a measured 22.84 h, and the activity ratio settles at 1.100.
+  - Ra-226 → Rn-222: secular equilibrium, 6.40 µg of radon per gram of radium after 30 days.
+  - Te-131 → I-131: no equilibrium.
+  - Neutron activation of sodium, growing to saturation.
+- **Binding energy and Q**:
+  - A nucleon-by-nucleon 3D nucleus with R = 1.2A^⅓.
+  - Binding energies from AME2020 mass excesses, with the liquid-drop formula term by term.
+  - Q-values from masses: fission 173.3 MeV, D–T fusion 17.59 MeV, and U-238 α decay with K_α = 4.197 MeV.
+  - The α and the recoil fly apart with equal momenta.
+- **A critical sphere**:
+  - A 3D Monte Carlo of neutron histories: flight, scatter, capture, fission and leakage.
+  - It uses one-group benchmark data (Sood et al., LA-13511) scaled to Godiva.
+  - It counts k generation by generation and finds the critical radius: 8.72 cm and 52 kg (Godiva is 52 kg).
+  - A reflector brings the critical mass down to 18 kg, and doubling the density quarters it.
+
+### Physics · Thermal Properties of Matter
+**Heat — Calorimetry, Expansion, Conduction and Radiation**
+- **Calorimeter**:
+  - Every body is tracked by its enthalpy, so latent heat holds it at 0 °C or 100 °C for exactly as long as it should.
+  - 100 g of ice at −10 °C in 200 g of water at 30 °C leaves 27.6 g unmelted.
+  - Steam gives 48.24 °C; the method of mixtures gives 37.01 °C.
+  - Unlag the cup and heat leaks to the room.
+- **Expansion**:
+  - A bimetallic strip bends by Timoshenko's formula (R = 37.7 cm against 37.5 cm from the textbook form) and closes an alarm contact.
+  - A flask's level dips 2.2 mm before rising, because the glass heats first; the apparent γ is γ_real − 3α_glass.
+  - Water's density minimum at 4 °C comes from the Tilton–Taylor formula.
+  - Two pendulum clocks are integrated through a day: the warm one loses 10.366 s against ½αΔT × 86 400 = 10.368 s.
+- **Conduction**, solved by the implicit heat equation from switch-on to steady state:
+  - Rods in series give a junction at 88.914 °C, exactly as the formula does.
+  - Rods in parallel carry 70.843 W.
+  - Ice melts at the cold end, 1.254 g/min.
+  - Ingen-Hausz rods lose heat from their sides, so the wax melts to lengths with l² ∝ K.
+- **Radiation**:
+  - A blackened and a polished sphere cool by εσT⁴ plus convection (RK4). Newton's average-temperature estimate holds for the polished one and misses by 3% for the black one.
+  - The black-body spectrum comes from Planck's law: the peak is found numerically (λT = 2.8978 × 10⁻³) and the power integrated (σ = 5.6704 × 10⁻⁸).
+  - The body's colour is computed from the CIE 1931 curves.
 
 ### Physics · System of Particles & Rotational Motion
 **27 · Rolling, Slipping and the Moment of Inertia**

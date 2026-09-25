@@ -742,6 +742,31 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (d)** — **Client: "continue to batch 4".** Built **Nuclei** and **Thermal Properties** in
+  `sims-physics12.js` (both labs in one IIFE, 44 sims now).
+  **New techniques, reusable:**
+  - **Counting statistics with a real detector.** Each scaler window is a Poisson stream at (decays × reach + background). The
+    non-paralysable dead time is simulated by waiting τ plus an exponential gap after each pulse. The half-life comes from a weighted
+    least-squares fit on ln(net rate), and a fit whose error is over 30% is refused.
+  - **Neutron transport Monte Carlo**, calibrated against the one-group benchmark (Sood et al., LA-13511: r_c = 7.428998 cm) and
+    scaled so it lands on Godiva. The critical radius comes from a fit of 1/k against 1/(R + δ)², then a straight line through five
+    larger runs. A bisection with fresh seeds at each step drifted 2%.
+  - **Enthalpy-method calorimetry**: T(h) inverts h(T) with its latent steps, so a phase change needs no special case.
+  - **Implicit conduction solver** (Thomas algorithm). Each face must take the metal at its own midpoint. Assigning material by
+    node put the junction half a cell out and cost 0.5% in the heat current.
+  - **Black-body colour**: Planck × the CIE fit of Wyman, Sloan & Shirley → XYZ → sRGB. The spectrum strip uses one scale for the
+    whole band, so the red and violet ends come out dim, as they look.
+  - Sprites (`sprite`, `ballCloud`) for thousands of atoms or nucleons a frame.
+  **Bugs caught in the build:**
+  - The steam's latent heat was added twice (h(100⁺) already includes L_v).
+  - The ice exchange was too slow to finish in the run.
+  - The flask's glass and liquid time constants were too close to show the dip.
+  - The Ingen-Hausz rods were too short for copper, so the wax melted to the tip.
+  - A bimetal strip bent the wrong way: the larger-α layer must be on the outside of the curve.
+  - An LCD on a vertical face lower than the box's centre was painted over by the box. The painter's algorithm sorts the face by its
+    centre; the fix is to stand the meter slightly proud of the face.
+  - The pendulums were drawn inside their clock cases.
+
 - **2026-09-25 (c)** — **Client: "when I scroll over the controls, the whole page scrolls too; give the controls their own scroller".**
   - The side column (\`.col-side\`) is now a sticky pane: \`top:64px\`, \`max-height:calc(100vh − 76px)\`,
     \`overflow-y:auto\` and \`overscroll-behavior:contain\`. The wheel over it moves only the controls,
