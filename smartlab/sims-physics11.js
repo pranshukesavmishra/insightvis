@@ -757,8 +757,11 @@
     }, o.bias || 0);
   }
   /* a satellite: a gold-foil bus, two solar wings and an antenna dish */
-  function satellite(F, at, tang, sz) {
-    const z = [0, 0, 1], t = R3.norm(tang), nrm = R3.norm(R3.cross(z, t));
+  function satellite(F, at, tang, sz, planeN) {
+    const t = R3.norm(tang);
+    let z = planeN ? R3.norm(planeN) : [0, 0, 1];
+    if (Math.abs(R3.dot(z, t)) > 0.98) z = [1, 0, 0];
+    const nrm = R3.norm(R3.cross(z, t));
     const ax = [t, nrm, z];
     R3.box(F, at, [sz, sz * 0.8, sz * 0.8], '#D6B055', { shadow: false, ambient: 0.45, axes: ax });
     [1, -1].forEach(sg => {
@@ -800,7 +803,15 @@
       return t1 > 0 && t1 < 1;
     };
     const now = orbitAt(O, S.ts);
-    const spin = p.spin ? TAU * S.ts / O.P.day : 0;
+    /* the orbit plane is tipped by the inclination about the line through the
+       launch point (the x axis): the dynamics are planar, only the frame turns */
+    const ci = Math.cos((p.incO || 0) * Math.PI / 180), si = Math.sin((p.incO || 0) * Math.PI / 180);
+    const cw = Math.cos((p.argP || 0) * Math.PI / 180), sw = Math.sin((p.argP || 0) * Math.PI / 180);
+    // first turn within the plane by the argument of perigee ω, then tip the plane by i
+    const rot = (v) => { const x = v[0] * cw - v[1] * sw, y = v[0] * sw + v[1] * cw; return [x, y * ci - v[2] * si, y * si + v[2] * ci]; };
+    const planeN = rot([0, 0, 1]);
+    const clk = S.clock || S.ts;
+    const spin = p.spin ? TAU * clk / O.P.day : 0;
     const bodyId = p.body;
     // the planet, ray-traced, with its air glowing at the limb
     const tr = traceBody(cam, W, H, [0, 0, 0], Rw, bodyId, spin);
@@ -815,7 +826,7 @@
       ctx.drawImage(tr.canvas, tr.x, tr.y, tr.w, tr.h);
     });
     // the equatorial plane, faintly, so the orbit has a floor to read against
-    const W3 = (x, y) => [x * k, y * k, 0];
+    const W3 = (x, y) => R3.scale(rot([x, y, 0]), k);
     // the whole path
     const dec = Math.max(1, Math.floor(O.pts.length / 500));
     const path = [];
@@ -855,9 +866,9 @@
     }
     if (trail.length > 1) path3(F, trail, '#E8FBFF', { alpha: 0.95, width: 2.2, glow: 8, chunk: 4 });
     // launch site: altitude marker from the ground up to the launch point
-    const r0k = O.r0 * k;
-    if (!burnt) path3(F, [[Rw, 0, 0], [r0k, 0, 0]], '#F5B451', { alpha: 0.8, width: 1.2, dash: [4, 3], chunk: 1 });
-    if (!burnt) R3.sphere(F, [r0k, 0, 0], 0.012, '#F5B451', { shadow: false });
+    const r0k = O.r0 * k, L0 = W3(O.r0, 0);
+    if (!burnt) path3(F, [W3(R, 0), L0], '#F5B451', { alpha: 0.8, width: 1.2, dash: [4, 3], chunk: 1 });
+    if (!burnt) R3.sphere(F, L0, 0.012, '#F5B451', { shadow: false });
     // the mission: what was flown before each burn, the burns themselves, the target
     if (M) {
       M.ghosts.forEach((gp, gi) => path3(F, gp.map(q => W3(q[0], q[1])), '#8FA4CE', { alpha: 0.18 + 0.1 * gi / Math.max(1, M.ghosts.length), width: 1, chunk: 6 }));
@@ -875,12 +886,12 @@
       }
       if (M.tgt) {
         const ta = M.tgt.th0 + M.tgt.n * S.clock, tp = W3(M.tgt.rT * Math.cos(ta), M.tgt.rT * Math.sin(ta));
-        satellite(F, tp, [-Math.sin(ta), Math.cos(ta), 0], 0.024);
+        satellite(F, tp, rot([-Math.sin(ta), Math.cos(ta), 0]), 0.026, planeN);
         R3.sphere(F, tp, 0.012, M.docked ? '#7CF0B0' : '#FF9A5A', { shadow: false });
         if (!hidden(tp)) R3.label(F, tp, M.docked ? 'DOCKED' : 'target', M.docked ? '#7CF0B0' : '#FFB070', { size: 9.5, dy: 18 });
       }
     }
-    if (!burnt && !hidden([r0k, 0, 0])) R3.label(F, [r0k, 0, 0], 'launch · h = ' + km(O.h0) + ' km', '#F5B451', { size: 9.5, dy: 16 });
+    if (!burnt && !hidden(L0)) R3.label(F, L0, 'launch · h = ' + km(O.h0) + ' km', '#F5B451', { size: 9.5, dy: 16 });
     // apsides
     if (O.end === 'closed' && O.eM > 0.004) {
       let iMin = 0, iMax = 0;
@@ -897,21 +908,48 @@
       const gs = [Rw * Math.cos(spin), Rw * Math.sin(spin), 0];
       const gsVis = !hidden(R3.scale(gs, 1.02));
       if (gsVis) R3.sphere(F, R3.scale(gs, 1.01), 0.011, '#FF5A7A', { shadow: false });
-      const sa = Math.atan2(now[2], now[1]);
-      const sub = [Rw * Math.cos(sa), Rw * Math.sin(sa), 0];
+      const sub = R3.scale(R3.norm(W3(now[1], now[2])), Rw * 1.002);
       path3(F, [W3(now[1], now[2]), sub], '#FF5A7A', { alpha: 0.5, width: 1, dash: [3, 3], chunk: 1 });
+      /* the ground track: where the satellite has been overhead, on the Earth
+         as it turns — a point in space, taken into the Earth's frame at the
+         moment it was flown over, then carried round to now */
+      if (!O.drag) {
+        const wE = TAU / O.P.day, n = 360, runs = [[]];
+        let span = Math.min(clk, (O.end === 'closed' ? O.T : O.Tloc0) * 3);
+        if (S.M && S.M.burns.length) span = Math.min(span, S.ts);          // only since the last burn
+        for (let j = 0; j <= n; j++) {
+          const tt = clk - span * (1 - j / n);
+          let ts2 = O.end === 'closed' ? ((tt - (clk - S.ts)) % O.T + O.T) % O.T : tt - (clk - S.ts);
+          if (ts2 < 0) continue;
+          const q = orbitAt(O, ts2), w = R3.norm(W3(q[1], q[2]));
+          const a = wE * (clk - tt), c = Math.cos(a), s = Math.sin(a);
+          const e = R3.scale([w[0] * c - w[1] * s, w[0] * s + w[1] * c, w[2]], Rw * 1.004);
+          if (R3.dot(e, cam.eye) > Rw * Rw * 1.02) runs[runs.length - 1].push(e); else if (runs[runs.length - 1].length) runs.push([]);
+        }
+        runs.forEach(rn2 => { if (rn2.length > 1) path3(F, rn2, '#FFD36B', { alpha: 0.85, width: 1.6, chunk: 4, bias: -0.01 }); });
+      }
       if (gsVis) R3.label(F, R3.scale(gs, 1.0), 'ground station', '#FF9AB0', { size: 8.5, dy: 12 });
     }
     // the satellite, and the two vectors that decide everything
     const ps = W3(now[1], now[2]), rn = Math.hypot(now[1], now[2]), vn = Math.hypot(now[3], now[4]);
-    const sz = 0.028;
+    const sz = 0.034;
     const satHidden = hidden(ps);
-    if (O.end !== 'crash' || S.ts < O.tEnd) satellite(F, ps, [now[3], now[4], 0], sz);
+    // is it in the planet's shadow? (behind the planet, as seen from the Sun)
+    const pw = rot([now[1], now[2], 0]), along = R3.dot(pw, SUN);
+    const eclipsed = along < 0 && Math.hypot(pw[0] - SUN[0] * along, pw[1] - SUN[1] * along, pw[2] - SUN[2] * along) < R;
+    if (!satHidden && (O.end !== 'crash' || S.ts < O.tEnd)) F.push(ps, () => {
+      const q = cam.project(ps); if (!q.ok) return;
+      const gr = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, 16);
+      gr.addColorStop(0, eclipsed ? 'rgba(120,140,190,.45)' : 'rgba(255,245,210,.7)'); gr.addColorStop(1, 'rgba(255,245,210,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(q.x, q.y, 16, 0, TAU); ctx.fill();
+    }, 0.02);
+    if (O.end !== 'crash' || S.ts < O.tEnd) satellite(F, ps, rot([now[3], now[4], 0]), sz, planeN);
+    if (eclipsed && !satHidden) R3.label(F, ps, 'in the shadow · eclipse', '#8FA4CE', { size: 9, dy: 22 });
     if (p.arrows && !satHidden) {
-      const vdir = R3.norm([now[3], now[4], 0]);
+      const vdir = R3.norm(rot([now[3], now[4], 0]));
       R3.arrow(F, ps, R3.add(ps, R3.scale(vdir, 0.26 * vn / O.vc)), 0.006, '#7CF0B0', { label: 'v ' + (vn / 1e3).toFixed(2) + ' km/s', labelSize: 9 });
       const gl = clamp(0.22 * Math.pow(O.r0 / rn, 2), 0.04, 0.5);
-      R3.arrow(F, ps, R3.add(ps, R3.scale(R3.norm([-now[1], -now[2], 0]), gl)), 0.006, '#F5B451', { label: 'g ' + (O.GM / (rn * rn)).toFixed(2), labelSize: 9 });
+      R3.arrow(F, ps, R3.add(ps, R3.scale(R3.norm(rot([-now[1], -now[2], 0])), gl)), 0.006, '#F5B451', { label: 'g ' + (O.GM / (rn * rn)).toFixed(2), labelSize: 9 });
     }
     if (O.end === 'crash' && S.ts >= O.tEnd - 1) {
       const lp = O.pts[O.pts.length - 1];
@@ -925,13 +963,13 @@
       R3.label(F, ip, 'lands ' + km(O.rangeKm * 1e3) + ' km downrange', '#FF8A6B', { size: 9.5, dy: -16 });
     }
     // velocity-tip and launch-point handles (drag to launch differently)
-    const lq = cam.project([r0k, 0, 0]);
-    const tipDir = [Math.sin(O.gm), Math.cos(O.gm), 0];
-    const tipW = R3.add([r0k, 0, 0], R3.scale(tipDir, 0.26 * O.v0 / O.vc));
+    const lq = cam.project(L0);
+    const tipDir = rot([Math.sin(O.gm), Math.cos(O.gm), 0]);
+    const tipW = R3.add(L0, R3.scale(tipDir, 0.26 * O.v0 / O.vc));
     F.render();
 
     const tq = cam.project(tipW);
-    const qx = cam.project([r0k + 0.1, 0, 0]), qy = cam.project([r0k, 0.1, 0]);
+    const qx = cam.project(R3.add(L0, rot([0.1, 0, 0]))), qy = cam.project(R3.add(L0, rot([0, 0.1, 0])));
     if (lq.ok && tq.ok && qx.ok && qy.ok && !burnt) {
       const ax = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1; return { ux: dx / l, uy: dy / l }; };
       S._axR = ax(lq, qx); S._axT = ax(lq, qy);
@@ -957,7 +995,7 @@
       O.P.name + ' · launch ' + (O.v0 / 1e3).toFixed(3) + ' km/s = ' + p.vr.toFixed(3) + ' v_c at ' + p.gam.toFixed(0) + '° · v_c ' +
         (O.vc / 1e3).toFixed(3) + ' · v_esc ' + (O.ve / 1e3).toFixed(3) + ' km/s',
       O.drag ? 'air drag ×' + Math.pow(10, p.dragX).toFixed(0) + ' (Cd·A/m = 0.01 m²/kg) so decay fits in a minute'
-             : 'RK4, 360 steps per local period · t = ' + tfmt(S.ts) + (p.spin ? ' · planet turning at its real rate' : ''), colK);
+             : 'RK4, 360 steps per local period · t = ' + tfmt(clk) + ' · inclination ' + (p.incO || 0).toFixed(1) + '°' + (p.spin ? ' · planet turning, ground track in gold' : ''), colK);
     const rows = narrow ? 4 : 7, bw = narrow ? W - 24 : 268, bh = 26 + rows * 15 + 10;
     const row = gPanel(g, 12, H - bh - 30, bw, bh, 'MEASURED FROM THE RUN');
     if (O.end === 'closed') {
@@ -1658,6 +1696,177 @@
     }
   }
 
+  /* =========================================================================
+     THE SOLAR SYSTEM — Kepler's laws from the real planets
+
+     Each body's orbit round the Sun is integrated (RK4, the step shrinking
+     near perihelion so Halley's comet at e = 0.967 is resolved), starting
+     from perihelion, then set into space by its real inclination, node and
+     argument of perihelion (J2000 elements). Its period is timed, its
+     semi-major axis read from the nearest and furthest points reached, and
+     T² ∝ a³ is plotted from those measurements, not from a table. Planet
+     sizes are enlarged so they can be seen; distances are true.
+     ========================================================================= */
+  const GMSUN = 1.32712440018e20;
+  const BODIES = [
+    // id, name, a (AU), e, i, Ω, ϖ (long. of perihelion), L (mean longitude at J2000), colour, drawn radius
+    ['mercury', 'Mercury', 0.38710, 0.20563, 7.005, 48.33, 77.46, 252.25, '#A8A39A', 0.012],
+    ['venus', 'Venus', 0.72333, 0.00677, 3.395, 76.68, 131.53, 181.98, '#E8CF9A', 0.018],
+    ['earth', 'Earth', 1.00000, 0.01671, 0.000, 0.0, 102.94, 100.46, '#4F8FE0', 0.019],
+    ['mars', 'Mars', 1.52368, 0.09340, 1.850, 49.56, 336.04, 355.45, '#D0643A', 0.015],
+    ['jupiter', 'Jupiter', 5.20260, 0.04849, 1.303, 100.46, 14.33, 34.40, '#D9B38C', 0.045],
+    ['saturn', 'Saturn', 9.55491, 0.05551, 2.489, 113.66, 93.06, 49.94, '#E3CD95', 0.040],
+    ['uranus', 'Uranus', 19.2184, 0.04630, 0.773, 74.01, 173.01, 313.23, '#9FE0E8', 0.030],
+    ['neptune', 'Neptune', 30.1104, 0.00899, 1.770, 131.78, 48.12, 304.88, '#4F72E0', 0.030],
+    ['pluto', 'Pluto', 39.482, 0.2488, 17.14, 110.30, 224.07, 238.93, '#C9B8A6', 0.011],
+    ['halley', 'Halley\'s comet', 17.834, 0.96714, 162.26, 58.42, 169.75, 169.75 + 360 * 13.9 / 75.3, '#CFE8FF', 0.010]
+  ];
+  let SOLAR = null;
+  function runSolar() {
+    if (SOLAR) return SOLAR;
+    SOLAR = BODIES.map(b => {
+      const [id, name, aAU, e, iD, OmD, wbD, LD, col, rad] = b;
+      const a = aAU * AU, rp = a * (1 - e), vp = Math.sqrt(GMSUN * (1 + e) / rp);
+      let s = [rp, 0, 0, vp];
+      const der = st => { const r = Math.hypot(st[0], st[1]), k = -GMSUN / (r * r * r); return [st[2], st[3], k * st[0], k * st[1]]; };
+      const pts = [[0, s[0], s[1], s[2], s[3]]];
+      let t = 0, th = 0, prev = 0, T = 0;
+      const Tk = TAU * Math.sqrt(a * a * a / GMSUN);
+      while (t < Tk * 1.05) {
+        const r = Math.hypot(s[0], s[1]), hs = TAU * Math.sqrt(r * r * r / GMSUN) / 700;
+        const k1 = der(s), k2 = der(s.map((v, j) => v + k1[j] * hs / 2)), k3 = der(s.map((v, j) => v + k2[j] * hs / 2)), k4 = der(s.map((v, j) => v + k3[j] * hs));
+        const ns = s.map((v, j) => v + hs / 6 * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]));
+        const ang = Math.atan2(ns[1], ns[0]); let da = ang - prev; if (da > Math.PI) da -= TAU; if (da < -Math.PI) da += TAU;
+        if (!T && th < TAU && th + da >= TAU) { T = t + hs * (TAU - th) / da; }
+        s = ns; t += hs; th += da; prev = ang;
+        pts.push([t, s[0], s[1], s[2], s[3]]);
+        if (T && t > T) break;
+      }
+      let rMin = Infinity, rMax = 0, vMax = 0, vMin = Infinity;
+      pts.forEach(q => { const r = Math.hypot(q[1], q[2]), v = Math.hypot(q[3], q[4]); rMin = Math.min(rMin, r); rMax = Math.max(rMax, r); vMax = Math.max(vMax, v); vMin = Math.min(vMin, v); });
+      // into space: R_z(Ω) R_x(i) R_z(ω), ω = ϖ − Ω
+      const O = OmD * Math.PI / 180, I = iD * Math.PI / 180, w = (wbD - OmD) * Math.PI / 180;
+      const cO = Math.cos(O), sO = Math.sin(O), cI = Math.cos(I), sI = Math.sin(I), cw = Math.cos(w), sw = Math.sin(w);
+      const place = (x, y) => {
+        const x1 = x * cw - y * sw, y1 = x * sw + y * cw;               // in the plane, from the node
+        const y2 = y1 * cI, z2 = y1 * sI;                                // tipped
+        return [x1 * cO - y2 * sO, x1 * sO + y2 * cO, z2];
+      };
+      // where it is at J2000: its mean anomaly from the mean longitude
+      const M0 = ((LD - wbD) % 360 + 360) % 360 * Math.PI / 180;
+      return { id, name, aAU, e, iD, col, rad, pts, T: T || Tk, Tk, rMin, rMax, vMax, vMin, place, t0: M0 / TAU * (T || Tk),
+               aM: (rMin + rMax) / 2 / AU, eM: (rMax - rMin) / (rMax + rMin) };
+    });
+    return SOLAR;
+  }
+  function solarAt(B, tSec) {
+    const P = B.pts, tt = ((tSec + B.t0) % B.T + B.T) % B.T;
+    let lo = 0, hi = P.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (P[m][0] <= tt) lo = m; else hi = m; }
+    const f = (tt - P[lo][0]) / (P[hi][0] - P[lo][0]);
+    return P[lo].map((v, k) => v + (P[hi][k] - v) * f);
+  }
+
+  function drawSolar(S, g) {
+    const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, cam = S.cam;
+    const narrow = W < 660;
+    drawSky(ctx, cam, W, H);
+    const F = R3.Frame(ctx, cam, { ambient: 0.3, floorZ: null });
+    const B = runSolar(), zoom = Math.pow(10, p.zoomAU), K = 1.6 / (zoom * AU);
+    const tSec = S.yrs * YR;
+    const fb = B.find(b => b.id === p.focus) || B[2];
+    // the ecliptic, faintly, with rings every AU (or every 10 AU when zoomed out)
+    const step = zoom > 12 ? 10 : zoom > 4 ? 2 : 0.5;
+    for (let rA = step; rA <= zoom * 1.3; rA += step) {
+      const ring = []; for (let j = 0; j <= 96; j++) { const a = j / 96 * TAU; ring.push([rA * AU * K * Math.cos(a), rA * AU * K * Math.sin(a), 0]); }
+      path3(F, ring, '#8FA4CE', { alpha: 0.10, width: 1, chunk: 8, bias: 0.05 });
+      R3.label(F, [rA * AU * K, 0, 0], rA + ' AU', '#63729A', { size: 8.5, dy: 9 });
+    }
+    // the Sun: a hot core inside a wide corona
+    F.push([0, 0, 0], () => {
+      const q = cam.project([0, 0, 0]); if (!q.ok) return;
+      const rs = 0.05 * q.s;
+      const gr = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, rs * 5);
+      gr.addColorStop(0, 'rgba(255,250,220,1)'); gr.addColorStop(0.18, 'rgba(255,215,120,.95)'); gr.addColorStop(0.4, 'rgba(255,150,50,.35)'); gr.addColorStop(1, 'rgba(255,120,30,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(q.x, q.y, rs * 5, 0, TAU); ctx.fill();
+    });
+    if (zoom < 8) R3.label(F, [0, 0, 0], 'Sun', '#FFD36B', { size: 9.5, dy: 22 });
+    B.forEach(b => {
+      if (b.aAU * (1 - b.e) > zoom * 1.6 && b !== fb) return;
+      const W3 = (x, y) => R3.scale(b.place(x, y), K);
+      const dec = Math.max(1, Math.floor(b.pts.length / 360)), path = [];
+      for (let i = 0; i < b.pts.length; i += dec) path.push(W3(b.pts[i][1], b.pts[i][2]));
+      path.push(path[0]);
+      const isF = b === fb;
+      path3(F, path, b.col, { alpha: isF ? 0.85 : 0.35, width: isF ? 1.8 : 1, chunk: 8 });
+      const q = solarAt(b, tSec), pos = W3(q[1], q[2]);
+      // the planet, lit from the Sun's side (so it shows its phase from here)
+      F.push(pos, () => {
+        const c = cam.project(pos), sq = cam.project([0, 0, 0]); if (!c.ok) return;
+        const rp = Math.max(2.2, b.rad * c.s);
+        let dx = sq.ok ? sq.x - c.x : 0, dy = sq.ok ? sq.y - c.y : 0; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+        if (b.id === 'saturn') { ctx.strokeStyle = 'rgba(230,210,160,.7)'; ctx.lineWidth = Math.max(1, rp * 0.35); ctx.beginPath(); ctx.ellipse(c.x, c.y, rp * 2.1, rp * 0.7, -0.35, 0, TAU); ctx.stroke(); }
+        if (b.id === 'halley') {             // the tail points away from the Sun and grows as it closes in
+          const r = Math.hypot(q[1], q[2]) / AU, L = Math.min(90, 40 / Math.max(0.3, r));
+          const gr = ctx.createLinearGradient(c.x, c.y, c.x - dx * L, c.y - dy * L);
+          gr.addColorStop(0, 'rgba(210,235,255,.8)'); gr.addColorStop(1, 'rgba(210,235,255,0)');
+          ctx.strokeStyle = gr; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x - dx * L, c.y - dy * L); ctx.stroke();
+        }
+        const gr = ctx.createRadialGradient(c.x + dx * rp * 0.45, c.y + dy * rp * 0.45, rp * 0.1, c.x, c.y, rp);
+        gr.addColorStop(0, RX.mix(b.col, '#FFFFFF', 0.45)); gr.addColorStop(0.6, b.col); gr.addColorStop(1, RX.mix(b.col, '#05080F', 0.75));
+        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(c.x, c.y, rp, 0, TAU); ctx.fill();
+        if (isF) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(c.x, c.y, rp + 5, 0, TAU); ctx.stroke(); }
+      });
+      // name it only if it stands clear of the Sun on the screen: zoomed out, the inner planets crowd together
+      const cs = cam.project(pos), c0 = cam.project([0, 0, 0]);
+      if (isF || (cs.ok && c0.ok && Math.hypot(cs.x - c0.x, cs.y - c0.y) > 34)) R3.label(F, pos, b.name, isF ? '#FFFFFF' : RX.mix(b.col, '#FFFFFF', 0.3), { size: isF ? 10 : 9, dy: -14 });
+      if (isF) {
+        // perihelion and aphelion, and the line of apsides through the Sun
+        const peri = W3(b.pts[0][1], b.pts[0][2]);
+        let iA = 0; b.pts.forEach((z, i) => { if (Math.hypot(z[1], z[2]) > Math.hypot(b.pts[iA][1], b.pts[iA][2])) iA = i; });
+        const apo = W3(b.pts[iA][1], b.pts[iA][2]);
+        path3(F, [peri, apo], '#8FA4CE', { alpha: 0.45, width: 1, dash: [3, 4], chunk: 1 });
+        R3.sphere(F, peri, 0.008, '#7CF0B0', { shadow: false }); R3.sphere(F, apo, 0.008, '#FF8FB0', { shadow: false });
+        // the apsis labels only when the orbit is big enough on screen to hold them apart
+        const qp = cam.project(peri), qa = cam.project(apo);
+        if (qp.ok && qa.ok && Math.hypot(qp.x - qa.x, qp.y - qa.y) > 120) {
+          R3.label(F, peri, 'perihelion · ' + (b.vMax / 1e3).toFixed(1) + ' km/s', '#7CF0B0', { size: 9, dy: 14 });
+          R3.label(F, apo, 'aphelion · ' + (b.vMin / 1e3).toFixed(1) + ' km/s', '#FF8FB0', { size: 9, dy: 14 });
+        }
+        // equal areas in equal times: eight sectors, the current one bright
+        if (p.sectors) {
+          const n = 8, cur = Math.floor((((tSec + b.t0) % b.T + b.T) % b.T) / b.T * n);
+          for (let k = 0; k < n; k++) {
+            const poly = [[0, 0, 0]];
+            for (let j = 0; j <= 12; j++) { const z = solarAt(b, (k + j / 12) / n * b.T - b.t0); poly.push(W3(z[1], z[2])); }
+            flatPoly(F, poly, k === cur ? RX.rgba(b.col, 0.35) : RX.rgba(b.col, k % 2 ? 0.08 : 0.14));
+          }
+        }
+        // the speed vector
+        const vdir = R3.norm(R3.sub(W3(q[1] + q[3], q[2] + q[4]), pos));
+        R3.arrow(F, pos, R3.add(pos, R3.scale(vdir, 0.12 + 0.25 * Math.hypot(q[3], q[4]) / b.vMax)), 0.005, '#7CF0B0',
+                 { label: (Math.hypot(q[3], q[4]) / 1e3).toFixed(1) + ' km/s', labelSize: 9 });
+      }
+    });
+    F.render();
+    const yr = 2000 + S.yrs;
+    header(g, fb.name + ' · T = ' + (fb.T / YR).toFixed(fb.T / YR < 2 ? 3 : 2) + ' yr, timed',
+      'year ' + yr.toFixed(2) + ' · ' + p.yps.toFixed(2) + ' years per second · distances true, planets enlarged to be seen',
+      'each orbit integrated from perihelion, placed by its real i, Ω and ω (J2000)', th.text);
+    const rows = narrow ? 4 : 7, bw = narrow ? W - 24 : 272, bh = 26 + rows * 15 + 10;
+    const row = gPanel(g, 12, H - bh - 30, bw, bh, fb.name.toUpperCase() + ', MEASURED');
+    const qf = solarAt(fb, tSec), rf = Math.hypot(qf[1], qf[2]), vf = Math.hypot(qf[3], qf[4]);
+    row(0, 'a = (r_min + r_max)/2', fb.aM.toFixed(4) + ' AU', th.phys);
+    row(1, 'period timed · a^1.5', (fb.T / YR).toFixed(4) + ' · ' + Math.pow(fb.aM, 1.5).toFixed(4) + ' yr', th.ok);
+    row(2, 'eccentricity', fb.eM.toFixed(4));
+    row(3, 'now: distance · speed', (rf / AU).toFixed(3) + ' AU · ' + (vf / 1e3).toFixed(2) + ' km/s');
+    if (!narrow) {
+      row(4, 'v_perihelion ÷ v_aphelion', (fb.vMax / fb.vMin).toFixed(3));
+      row(5, 'r_aphelion ÷ r_perihelion', (fb.rMax / fb.rMin).toFixed(3), th.ok);
+      row(6, 'inclination to the ecliptic', fb.iD.toFixed(2) + '°' + (fb.iD > 90 ? ' (retrograde)' : ''));
+    }
+  }
+
   /* the live torsion balance: integrated every frame, so moving the large
      spheres mid-swing is answered by the rod exactly as a real one would */
   function cavLive(S, dt) {
@@ -1707,7 +1916,7 @@
     return (CAVB[key] = { out, near, bMin });
   }
 
-  const FLD = S => S.p.mode === 'field', HOH = S => S.p.mode === 'orbit' && S.p.mission === 'hohmann',
+  const SOL = S => S.p.mode === 'solar', FLD = S => S.p.mode === 'field', HOH = S => S.p.mode === 'orbit' && S.p.mission === 'hohmann',
         RDV = S => S.p.mode === 'orbit' && S.p.mission === 'rendezvous';
   const ORB = S => S.p.mode === 'orbit', BIN = S => S.p.mode === 'binary', INS = S => S.p.mode === 'inside', CAV = S => S.p.mode === 'cavendish';
   const LG = Math.log10;
@@ -1720,32 +1929,38 @@
     weight: 'Very high yield',
     is3D: true, ground: false,
     stageHint: 'Drag to orbit · rings: launch speed/angle and height · tunnel and probe · drag a lead sphere across',
-    lede: 'Nothing here is drawn from a formula for an ellipse. The satellite is <b>launched and then integrated</b> under ' +
+    lede: 'Launch satellites in true 3D, over the poles or on a Molniya loop, and watch their <b>ground track</b> sweep the turning Earth. Fire the engine for a Hohmann transfer, or run the <b>whole solar system</b> from real orbital elements. Nothing here is drawn from a formula for an ellipse. The satellite is <b>launched and then integrated</b> under ' +
       'F = GMm/r², step by step, and every exam result is <b>read off the run</b>: the period with a stopwatch, the semi-major ' +
       'axis from the nearest and furthest points actually reached, Kepler\'s equal areas by adding up the triangles the radius ' +
       'swept. Turn on air drag and watch the satellite <b>speed up</b> as it loses energy. Go inside a cut-away Earth built from ' +
       'the real seismic density model, where g <b>rises</b> on the way down to the core. Then do what Cavendish did: hang two ' +
       'lead balls from a fibre, swing two big ones beside them, and <b>weigh G</b> from the wander of a laser spot.',
 
-    params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, spin: true, drag: false, dragX: 2,
+    params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, spin: true, drag: false, dragX: 2,
               M1: 2, M2: 1, aAU: 1, ecc: 0.3, incl: 70,
               model: 'uniform', dkm: 0, probe: 0.5, lat: 30, dayH: 24,
               pos: 'I', from: 'away', MB: 1.5, mg: 15, bmm: 46.5, T0min: 10, zeta: 0.08, Lm: 5, auto: false,
-              mission: 'free', dv: 500, bdir: 'pro', logH2: LG(35786), autoB: false, lead: 10,
+              incO: 0, argP: 0, mission: 'free', dv: 500, bdir: 'pro', logH2: LG(35786), autoB: false, lead: 10,
+              focus: 'earth', zoomAU: LG(2), yps: 0.3,
               flogq: LG(1 / 81.3), fdR: 60.3, fshell: false, fv: 11.1, fang: 0,
               sectors: true, arrows: true, run: true },
 
     presets: [
-      { name: 'ISS · circular at 408 km', params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, drag: false, spin: true, sectors: true } },
-      { name: 'Geostationary · hangs over one spot', params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(35786), vr: 1, gam: 0, drag: false, spin: true, sectors: false } },
-      { name: 'Newton\'s cannon · 0.8 v_c', params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(200), vr: 0.8, gam: 0, drag: false, spin: false, sectors: false } },
-      { name: '20 % faster · an ellipse', params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1.2, gam: 0, drag: false, spin: false, sectors: true } },
-      { name: 'Same speed, aimed 20° up', params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 20, drag: false, spin: false, sectors: false } },
-      { name: 'Escape · exactly √2 v_c', params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: Math.SQRT2, gam: 0, drag: false, spin: false, sectors: true } },
-      { name: 'Air drag · the satellite paradox', params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: true, dragX: 2, spin: false, sectors: false } },
-      { name: 'Io around Jupiter', params: { mode: 'orbit', mission: 'free', body: 'jupiter', logH: LG(421700 - 69911), vr: 1, gam: 0, drag: false, spin: true, sectors: true } },
-      { name: 'Hohmann · LEO to geostationary (autopilot)', params: { mode: 'orbit', mission: 'hohmann', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: false, spin: false, sectors: false, logH2: LG(35786), autoB: true, dv: 2400, bdir: 'pro' } },
-      { name: 'Rendezvous · the target is 10° ahead', params: { mode: 'orbit', mission: 'rendezvous', body: 'earth', logH: LG(400), vr: 1, gam: 0, drag: false, spin: false, sectors: false, lead: 10, autoB: false, dv: 40, bdir: 'retro' } },
+      { name: 'ISS · circular at 408 km', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, drag: false, spin: true, sectors: true } },
+      { name: 'Geostationary · hangs over one spot', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(35786), vr: 1, gam: 0, drag: false, spin: true, sectors: false } },
+      { name: 'Newton\'s cannon · 0.8 v_c', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(200), vr: 0.8, gam: 0, drag: false, spin: false, sectors: false } },
+      { name: '20 % faster · an ellipse', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1.2, gam: 0, drag: false, spin: false, sectors: true } },
+      { name: 'Same speed, aimed 20° up', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 20, drag: false, spin: false, sectors: false } },
+      { name: 'Escape · exactly √2 v_c', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: Math.SQRT2, gam: 0, drag: false, spin: false, sectors: true } },
+      { name: 'Air drag · the satellite paradox', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: true, dragX: 2, spin: false, sectors: false } },
+      { name: 'Io around Jupiter', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'jupiter', logH: LG(421700 - 69911), vr: 1, gam: 0, drag: false, spin: true, sectors: true } },
+      { name: 'Polar orbit · the Earth turns beneath it', params: { mode: 'orbit', incO: 90, argP: 0, mission: 'free', body: 'earth', logH: LG(800), vr: 1, gam: 0, drag: false, spin: true, sectors: false } },
+      { name: 'Molniya · 63.4°, 12 h, hangs over the north', params: { mode: 'orbit', incO: 63.4, argP: 270, mission: 'free', body: 'earth', logH: LG(600), vr: 1.3180, gam: 0, drag: false, spin: true, sectors: true } },
+      { name: 'Hohmann · LEO to geostationary (autopilot)', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'hohmann', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: false, spin: false, sectors: false, logH2: LG(35786), autoB: true, dv: 2400, bdir: 'pro' } },
+      { name: 'Rendezvous · the target is 10° ahead', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'rendezvous', body: 'earth', logH: LG(400), vr: 1, gam: 0, drag: false, spin: false, sectors: false, lead: 10, autoB: false, dv: 40, bdir: 'retro' } },
+      { name: 'Solar system · the inner planets', params: { mode: 'solar', focus: 'earth', zoomAU: LG(2), yps: 0.3, sectors: true } },
+      { name: 'Solar system · all of it', params: { mode: 'solar', focus: 'jupiter', zoomAU: LG(34), yps: 8, sectors: true } },
+      { name: 'Halley\'s comet · 76 years in a minute', params: { mode: 'solar', focus: 'halley', zoomAU: LG(22), yps: 5, sectors: true } },
       { name: 'Earth and Moon · the neutral point', params: { mode: 'field', flogq: LG(1 / 81.3), fdR: 60.3, fshell: false, fv: 11.0, fang: 0 } },
       { name: 'Just enough to reach the Moon', params: { mode: 'field', flogq: LG(1 / 81.3), fdR: 60.3, fshell: false, fv: 11.09, fang: 0 } },
       { name: 'Inside a hollow shell', params: { mode: 'field', flogq: LG(0.3), fdR: 8, fshell: true, fv: 9, fang: 25 } },
@@ -1763,7 +1978,7 @@
     controls: [
       { group: 'What is set up', items: [
         { key: 'mode', type: 'select', label: 'Experiment', restructure: true, rebuild: true, options: [
-          { value: 'orbit', label: 'Launch a satellite' }, { value: 'field', label: 'Field & potential' }, { value: 'binary', label: 'Binary star' },
+          { value: 'orbit', label: 'Launch a satellite' }, { value: 'solar', label: 'Solar system' }, { value: 'field', label: 'Field & potential' }, { value: 'binary', label: 'Binary star' },
           { value: 'inside', label: 'Inside the Earth' }, { value: 'cavendish', label: 'Cavendish balance' }] }
       ] },
       { group: 'Launch', items: [
@@ -1775,7 +1990,9 @@
           fmt: v => v.toFixed(3), restructure: true },
         { key: 'gam', label: 'Angle above the horizontal', min: -60, max: 60, step: 0.5, unit: '°', when: ORB,
           fmt: v => v.toFixed(1), restructure: true },
-        { key: 'spin', type: 'toggle', label: 'Planet turns at its real rate', when: ORB },
+        { key: 'incO', label: 'Orbit inclination <i>i</i>', min: 0, max: 180, step: 0.5, unit: '°', when: ORB, fmt: v => v.toFixed(1) },
+        { key: 'argP', label: 'Launch point round the orbit ω', min: 0, max: 360, step: 1, unit: '°', when: ORB, fmt: v => v.toFixed(0) },
+        { key: 'spin', type: 'toggle', label: 'Planet turns · draw the ground track', when: ORB },
         { key: 'drag', type: 'toggle', label: 'Air drag (Earth\'s thermosphere)', restructure: true, when: ORB },
         { key: 'dragX', label: 'Drag exaggeration', min: 0, max: 3, step: 0.05, unit: '×', when: ORB,
           fmt: v => Math.pow(10, v).toFixed(0), restructure: true }
@@ -1790,6 +2007,14 @@
           fmt: v => Math.pow(10, v).toFixed(0), restructure: true },
         { key: 'autoB', type: 'toggle', label: 'Autopilot fires both burns', restructure: true, when: HOH },
         { key: 'lead', label: 'Target starts ahead by', min: -60, max: 60, step: 0.5, unit: '°', when: RDV, fmt: v => v.toFixed(1), restructure: true }
+      ] },
+      { group: 'The solar system', items: [
+        { key: 'focus', type: 'select', label: 'Follow', when: SOL, options: [
+          { value: 'mercury', label: 'Mercury' }, { value: 'venus', label: 'Venus' }, { value: 'earth', label: 'Earth' }, { value: 'mars', label: 'Mars' },
+          { value: 'jupiter', label: 'Jupiter' }, { value: 'saturn', label: 'Saturn' }, { value: 'uranus', label: 'Uranus' }, { value: 'neptune', label: 'Neptune' },
+          { value: 'pluto', label: 'Pluto' }, { value: 'halley', label: 'Halley' }] },
+        { key: 'zoomAU', label: 'Show out to', min: 0.2, max: 1.7, step: 0.005, unit: 'AU', when: SOL, fmt: v => Math.pow(10, v).toFixed(Math.pow(10, v) < 10 ? 1 : 0) },
+        { key: 'yps', label: 'Time rate', min: 0.02, max: 12, step: 0.01, unit: 'yr/s', when: SOL, fmt: v => v.toFixed(2) }
       ] },
       { group: 'Two bodies', items: [
         { key: 'flogq', label: 'Second mass ÷ first', min: -3, max: 0, step: 0.001, unit: '', when: FLD,
@@ -1837,6 +2062,7 @@
       const p = S.p;
       if (p.mode === 'orbit') { S.O = runOrbit(p); S.ts = 0; S.hold = 0; missionReset(S); }
       else if (p.mode === 'field') { S.Fd = fieldSetup(p); S.ts = 0; S.hold = 0; }
+      else if (p.mode === 'solar') { runSolar(); S.yrs = S.yrs || 0; }
       else if (p.mode === 'binary') { S.B = runBinary(p); S.ts = 0; }
       else if (p.mode === 'inside') { S.Tn = runTunnel(p); S.ts = 0; }
       else {
@@ -1852,6 +2078,7 @@
       const views = {
         orbit: { theta: -1.18, phi: 0.80, dist: 3.35, target: [0, 0, 0] },
         field: { theta: -1.30, phi: 0.86, dist: 3.0, target: [0, 0, -0.30] },
+        solar: { theta: -1.35, phi: 0.62, dist: 3.3, target: [0, 0, 0] },
         binary: { theta: -1.30, phi: 0.78, dist: 3.1, target: [0, 0, 0] },
         inside: { theta: -0.98, phi: 0.30, dist: 3.5, target: [0, 0, 0.02] },
         cavendish: { theta: -1.92, phi: 0.34, dist: 2.35, target: [0, -0.20, 0.16] }
@@ -1874,6 +2101,7 @@
         if (O.end === 'closed') S.ts %= O.T;
         else if (S.ts >= O.tEnd) { S.ts = O.tEnd; S.hold = 2.2; }
         missionStep(S, wrapped ? 0 : tsOld);
+      } else if (p.mode === 'solar') { S.yrs += dt * p.yps;
       } else if (p.mode === 'field') {
         if (S.hold > 0) { S.hold -= dt; if (S.hold <= 0) S.ts = 0; return; }
         S.ts += dt * S.Fd.tEnd / 10;
@@ -1888,6 +2116,7 @@
       const m = S.p.mode;
       if (m === 'orbit') drawOrbit(S, g);
       else if (m === 'field') drawField(S, g);
+      else if (m === 'solar') drawSolar(S, g);
       else if (m === 'binary') drawBinary(S, g);
       else if (m === 'inside') drawInside(S, g);
       else drawCav(S, g);
@@ -1916,8 +2145,9 @@
     },
 
     plots: [
-      { title: S => ({ orbit: S.p.mission === 'hohmann' ? 'The mission — height against time, burns marked' : S.p.mission === 'rendezvous' ? 'The gap to the target against time' : 'Energy per kg along the run — kinetic, potential, total',
+      { title: S => ({ orbit: S.p.mission === 'hohmann' ? 'The mission — height against time, burns marked' : S.p.mission === 'rendezvous' ? 'The gap to the target against time' : S.p.drag ? 'Energy per kg along the run — kinetic, potential, total' : 'Effective potential — where the orbit may go, and where it turns',
                        field: 'Potential along the line of centres — and the probe\'s energy',
+                       solar: 'Kepler\'s third law, measured — every planet on one line',
                        binary: 'What a telescope records — each star\'s radial velocity',
                        inside: 'g from the centre out to 3R — uniform against the real Earth',
                        cavendish: 'The laser spot against time — your record' })[S.p.mode],
@@ -1941,6 +2171,18 @@
             P.tag(xs[0], rdv ? 0 : (M.plan ? (M.plan.r2 - S.O.R) / 1e3 : 0), rdv ? 'caught up' : 'target orbit', gr, 'left', -8);
             return;
           }
+          if (p.mode === 'solar') {
+            const B = runSolar();
+            const P = g.Plot({ xmin: -0.6, xmax: 1.8, ymin: -1, ymax: 2.8, xlabel: 'semi-major axis a (AU, log)', ylabel: 'period T (yr, log)',
+              xfmt: v => { const x = Math.pow(10, v); return x < 1 ? x.toFixed(1) : x.toFixed(0); }, yfmt: v => { const y = Math.pow(10, v); return y < 1 ? y.toFixed(1) : y.toFixed(0); } }).frame();
+            P.clip(() => {
+              P.line([[-0.6, -0.9], [1.8, 2.7]], g.alpha(th['text-2'], .7), 1.4, [5, 4]);
+              B.forEach(b => P.dot(LG(b.aM), LG(b.T / YR), b.id === p.focus ? 6 : 4, b.col, th['ink-950']));
+            });
+            B.forEach(b => P.tag(LG(b.aM), LG(b.T / YR), b.name, b.id === p.focus ? '#FFFFFF' : RX.mix(b.col, '#FFFFFF', 0.2), 'left', b.id === 'halley' ? 12 : -9));
+            P.tag(-0.55, 2.55, 'slope 3/2: T² ∝ a³ — from the timed runs', th['text-2'], 'left', 0);
+            return;
+          }
           if (p.mode === 'field') {
             const Fd = S.Fd, d = Fd.d, pts = [];
             for (let i = 0; i <= 400; i++) { const x = -0.3 * d + 1.6 * d * i / 400; pts.push([x / d, Fd.V(x, 0) / 1e6]); }
@@ -1956,6 +2198,35 @@
             });
             P.tag(Fd.xN / d, Fd.VN / 1e6, 'neutral point: the top of the hill', am, 'left', -10);
             P.tag(1.28, Ep, 'probe energy ½v² + V', pk, 'right', -8);
+            return;
+          }
+          if (p.mode === 'orbit' && !S.O.drag) {
+            /* the effective potential U(r) = −GM/r + h²/2r² per kg: the orbit
+               lives where the energy line lies above it, and turns where they cross */
+            const O = S.O, h = Math.abs(O.H0), E0 = O.E0 / 1e6, R = O.R;
+            const r1 = Math.max(R * 0.6, O.rMin * 0.55), r2 = O.end === 'closed' ? O.rMax * 1.6 : Math.max(O.r0 * 6, O.rMin * 4);
+            const U = r => (-O.GM / r + h * h / (2 * r * r)) / 1e6;
+            const pts = [];
+            for (let i = 0; i <= 300; i++) { const r = r1 + (r2 - r1) * i / 300; pts.push([r / R, U(r)]); }
+            const umin = Math.min(...pts.map(q => q[1])), top = Math.max(E0 + Math.abs(umin) * 0.6, umin * 0.1, 1);
+            const q = orbitAt(O, S.ts), rn = Math.hypot(q[1], q[2]);
+            const P = g.Plot({ xmin: r1 / R, xmax: r2 / R, ymin: umin * 1.25, ymax: top, xlabel: 'r ÷ R (planet radii)', ylabel: 'MJ per kg',
+              xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => {
+              P.line([[r1 / R, 0], [r2 / R, 0]], g.alpha(th['text-3'], .6), 1);
+              const allowed = pts.filter(z => z[1] <= E0);
+              allowed.forEach((z, i) => { if (i % 3 === 0) P.line([[z[0], z[1]], [z[0], E0]], g.alpha(gr, .22), 1); });
+              P.line(pts.map(z => [z[0], -O.GM / (z[0] * R) / 1e6]), g.alpha(pk, .55), 1.2, [4, 3]);
+              P.line(pts, cy, 2.2);
+              P.hline(E0, g.alpha(am, .9), [6, 3]);
+              P.vline(1, g.alpha(th['text-3'], .5), [2, 3]);
+              if (O.end === 'closed') { P.dot(O.rMin / R, E0, 4, gr, th['ink-950']); P.dot(O.rMax / R, E0, 4, pk, th['ink-950']); }
+              P.dot(rn / R, E0, 5.5, '#FFFFFF', th['ink-950']);
+              P.dot(rn / R, U(rn), 3.5, cy, th['ink-950']);
+            });
+            P.tag(r2 / R * 0.98, E0, 'energy E = ½v² − GM/r', am, 'right', -8);
+            P.tag(r2 / R * 0.98, U(r2), 'U_eff = −GM/r + L²/2r²', cy, 'right', 12);
+            P.tag(r1 / R + (r2 - r1) / R * 0.02, umin * 1.15, 'the gap above the curve is the radial KE', th['text-3'], 'left', 0);
             return;
           }
           if (p.mode === 'orbit') {
@@ -2068,6 +2339,7 @@
         } },
       { title: S => ({ orbit: 'Kepler\'s third law — every moon and satellite, and yours',
                        field: 'Where g vanishes, for every mass ratio',
+                       solar: 'Speed round the orbit — fastest at perihelion',
                        binary: 'Kepler III for a pair — the period fixes the total mass',
                        inside: 'Tunnel transit time against its offset from the centre',
                        cavendish: 'The inverse square, read from the balance' })[S.p.mode],
@@ -2094,6 +2366,17 @@
             Pl.sats.forEach(s => P.tag(LG(s[1] / 1e3), LG(s[2] / 3600), s[0], am, 'left', -10));
             if (O.end === 'closed') P.tag(LG(O.aM / 1e3), LG(O.T / 3600), 'your orbit, timed', '#7CF0B0', 'left', 12);
             P.tag(xmin + 0.05, ymax - 0.15, 'slope 3/2 for every planet · the height is set by GM', th['text-2'], 'left', 0);
+            return;
+          }
+          if (p.mode === 'solar') {
+            const b = runSolar().find(x => x.id === p.focus), sp = [], gr = '#7CF0B0', pk = '#FF8FB0';
+            const n = 300;
+            for (let i = 0; i <= n; i++) { const z = b.pts[Math.min(b.pts.length - 1, Math.round(i / n * (b.pts.length - 1)))]; sp.push([z[0] / b.T, Math.hypot(z[3], z[4]) / 1e3]); }
+            const tt = (((S.yrs * YR + b.t0) % b.T) + b.T) % b.T, qn = solarAt(b, S.yrs * YR);
+            const P = g.Plot({ xmin: 0, xmax: 1, ymin: 0, ymax: b.vMax / 1e3 * 1.15, xlabel: 'time since perihelion ÷ period', ylabel: 'speed (km/s)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => { P.line(sp, b.col, 2.2); P.dot(tt / b.T, Math.hypot(qn[3], qn[4]) / 1e3, 5.5, '#FFFFFF', th['ink-950']); });
+            P.tag(0.02, b.vMax / 1e3, 'perihelion ' + (b.vMax / 1e3).toFixed(1), gr, 'left', -8);
+            P.tag(0.5, b.vMin / 1e3, 'aphelion ' + (b.vMin / 1e3).toFixed(1), pk, 'center', -8);
             return;
           }
           if (p.mode === 'field') {
@@ -2170,6 +2453,17 @@
                       { label: 'Time to that', value: tfmt(O.tEnd), unit: '' });
         return out;
       }
+      if (p.mode === 'solar') {
+        const b = runSolar().find(x => x.id === p.focus);
+        return [
+          { label: 'Period, timed', value: (b.T / YR).toFixed(4), unit: 'yr', flag: 'accent' },
+          { label: 'a^1.5 (a in AU)', value: Math.pow(b.aM, 1.5).toFixed(4), unit: 'yr', hint: 'Kepler III in years and AU' },
+          { label: 'Semi-major axis', value: b.aM.toFixed(4), unit: 'AU' },
+          { label: 'Eccentricity', value: b.eM.toFixed(4), unit: '' },
+          { label: 'v_peri ÷ v_aph', value: (b.vMax / b.vMin).toFixed(3), unit: '', hint: '= r_aph ÷ r_peri: Kepler II' },
+          { label: 'Inclination', value: b.iD.toFixed(2), unit: '°' }
+        ];
+      }
       if (p.mode === 'field') {
         const Fd = S.Fd;
         return [
@@ -2228,6 +2522,11 @@
           E.op('−') + E.frac(E.v('GM'), '2' + E.v('a')) + ' ' + E.op('=') + ' ' + E.n(O.eps0 / 1e6, 'MJ/kg') +
           ' → ' + (O.eps0 < 0 ? 'bound' : 'escapes');
       }
+      if (p.mode === 'solar') {
+        const b = runSolar().find(x => x.id === p.focus);
+        return E.frac(E.v('T') + '²', E.v('a') + '³') + ' ' + E.op('=') + ' ' + E.frac('4π²', E.v('GM') + '☉') + ' → ' + E.v('T') + E.sub('yr') + ' ' + E.op('=') + ' ' + E.v('a') + E.sub('AU') + '^1.5 ' + E.op('=') + ' ' + E.n(Math.pow(b.aM, 1.5), 'yr') +
+          ' · timed ' + E.n(b.T / YR, 'yr') + '<br>' + E.frac(E.v('v') + E.sub('p'), E.v('v') + E.sub('a')) + ' ' + E.op('=') + ' ' + E.frac('1 ' + E.op('+') + ' ' + E.v('e'), '1 ' + E.op('−') + ' ' + E.v('e')) + ' ' + E.op('=') + ' ' + E.n((1 + b.eM) / (1 - b.eM), '');
+      }
       if (p.mode === 'field') {
         const Fd = S.Fd;
         return E.v('g') + ' ' + E.op('=') + ' 0 where ' + E.frac(E.v('GM') + '₁', E.v('x') + '²') + ' ' + E.op('=') + ' ' + E.frac(E.v('GM') + '₂', '(' + E.v('d') + E.op('−') + E.v('x') + ')²') +
@@ -2262,9 +2561,23 @@
       'swings shrink. With both applied, the balance returns G to within a few tenths of a per cent.',
 
     problems: [
+      { source: 'NEET pattern · Kepler\'s third law',
+        q: 'Mars orbits the Sun with semi-major axis 1.524 AU. Find its period in years.',
+        params: { mode: 'solar', focus: 'mars', zoomAU: LG(2), yps: 0.3, sectors: true },
+        predict: { label: 'period', unit: 'yr', tol: 0.01 },
+        measure: S => runSolar().find(b => b.id === 'mars').T / YR,
+        working: 'In years and AU, T² = a³ for anything orbiting the Sun: T = 1.524^1.5 = <b>1.881 yr</b>. The lab integrates Mars round one full turn and times it; ' +
+          'the plot puts all ten bodies on one line of slope 3/2.' },
+      { source: 'JEE Advanced pattern · a comet at both ends',
+        q: 'Halley\'s comet has eccentricity 0.967. How many times faster is it at perihelion than at aphelion?',
+        params: { mode: 'solar', focus: 'halley', zoomAU: LG(22), yps: 5, sectors: true },
+        predict: { label: 'ratio', unit: '×', tol: 0.02 },
+        measure: S => { const b = runSolar().find(x => x.id === 'halley'); return b.vMax / b.vMin; },
+        working: 'Angular momentum is conserved and at the two ends the velocity is perpendicular to r, so v_p r_p = v_a r_a: v_p/v_a = r_a/r_p = (1 + e)/(1 − e) = 1.967/0.033 = <b>about 60</b>. ' +
+          'It crosses the inner solar system in months and spends decades crawling beyond Neptune.' },
       { source: 'JEE Advanced pattern · Hohmann transfer',
         q: 'A satellite in a circular orbit 300 km up fires its engine once to reach geostationary height (35 786 km) at the far side. How long is the coast between the two burns, in hours?',
-        params: { mode: 'orbit', mission: 'hohmann', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: false, spin: false, sectors: false, logH2: LG(35786), autoB: true, dv: 2400, bdir: 'pro' },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'hohmann', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: false, spin: false, sectors: false, logH2: LG(35786), autoB: true, dv: 2400, bdir: 'pro' },
         predict: { label: 'coast time', unit: 'h', tol: 0.01 },
         measure: S => S.M.burns.length ? S.O.T / 2 / 3600 : NaN,
         working: 'The transfer ellipse touches both orbits, so a = (6671 + 42 157)/2 = 24 414 km. The coast is half its period: ' +
@@ -2285,14 +2598,14 @@
           'v = <b>11.07 km/s</b>, just under the 11.19 km/s escape speed. Launch at 11.05 and it falls back; at 11.09 it arrives. Try it.' },
       { source: 'NEET pattern · a low circular orbit',
         q: 'The International Space Station orbits 408 km above the Earth. Taking GM = 3.986 × 10¹⁴ m³/s² and R = 6371 km, find its period in minutes.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, drag: false, spin: true, sectors: true },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, drag: false, spin: true, sectors: true },
         predict: { label: 'period', unit: 'min', tol: 0.01 },
         measure: S => S.O.T / 60,
         working: 'r = 6371 + 408 = 6779 km. T = 2π√(r³/GM) = 2π√((6.779 × 10⁶)³ / 3.986 × 10¹⁴) = 5555 s = <b>92.6 min</b>. ' +
           'The lab times it by watching the radius vector come round a full 2π. It agrees to six figures.' },
       { source: 'JEE Advanced pattern · launched too fast for a circle',
         q: 'A satellite is launched horizontally 400 km above the Earth at 1.20 times the circular speed there (9.207 km/s). How high does it rise, in km above the surface?',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1.2, gam: 0, drag: false, spin: false, sectors: true },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1.2, gam: 0, drag: false, spin: false, sectors: true },
         predict: { label: 'apogee height', unit: 'km', tol: 0.01 },
         measure: S => (S.O.rMax - S.O.R) / 1e3,
         working: 'Conserve angular momentum, r₁v₁ = r₂v₂, and energy, ½v₁² − GM/r₁ = ½v₂² − GM/r₂. Eliminating v₂ gives ' +
@@ -2300,7 +2613,7 @@
           'is <b>11 040 km</b>. The launch point becomes the perigee.' },
       { source: 'JEE Advanced pattern · the right speed, the wrong direction',
         q: 'At 400 km the satellite is given exactly the circular speed, but aimed 20° above the horizontal. How far from the Earth\'s centre is the nearest point of its new orbit, in km? Does it survive?',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 20, drag: false, spin: false, sectors: false },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 20, drag: false, spin: false, sectors: false },
         predict: { label: 'perigee distance', unit: 'km', tol: 0.01 },
         measure: S => { const O = S.O; return O.a0 * (1 - Math.sqrt(Math.max(0, 1 - O.H0 * O.H0 / (O.GM * O.a0)))) / 1e3; },
         working: 'The speed and height are unchanged, so the energy and a are unchanged: a = 6771 km. The angular momentum falls by ' +
@@ -2308,7 +2621,7 @@
           '1916 km <b>inside</b> the Earth. It comes down, which the run shows.' },
       { source: 'JEE Main pattern · beyond escape',
         q: 'From 400 km up, a probe is launched at 1.5 times the circular speed there (11.509 km/s). With what speed does it leave the Earth\'s influence, in km/s?',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1.5, gam: 0, drag: false, spin: false, sectors: true },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1.5, gam: 0, drag: false, spin: false, sectors: true },
         predict: { label: 'speed at infinity', unit: 'km/s', tol: 0.01 },
         measure: S => { const O = S.O, q = O.pts[O.pts.length - 1], r = Math.hypot(q[1], q[2]), v2 = q[3] * q[3] + q[4] * q[4];
                          return Math.sqrt(Math.max(0, v2 - 2 * O.GM / r)) / 1e3; },
@@ -2317,7 +2630,7 @@
           'subtracts the escape speed there. It is not given the answer.' },
       { source: 'NEET pattern · geostationary orbit',
         q: 'A geostationary satellite sits 35 786 km above the equator. Find its orbital speed in km/s.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(35786), vr: 1, gam: 0, drag: false, spin: true, sectors: false },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(35786), vr: 1, gam: 0, drag: false, spin: true, sectors: false },
         predict: { label: 'speed', unit: 'km/s', tol: 0.01 },
         measure: S => Math.hypot(S.O.pts[S.O.pts.length >> 1][3], S.O.pts[S.O.pts.length >> 1][4]) / 1e3,
         working: 'v = √(GM/r) = √(3.986 × 10¹⁴ / 4.2157 × 10⁷) = <b>3.075 km/s</b>. Its period, timed by the lab, is 23 h 56 min: ' +
@@ -2359,37 +2672,37 @@
         body: 'ISS, 408 km, launched horizontally at exactly √(GM/r). Watch the shaded sectors. Each is swept in the same time.',
         ask: 'Are the sectors the same shape? Are they the same area?',
         reveal: '<b>Same shape and same area</b>, because the speed never changes on a circle. The next step is where Kepler\'s second law actually says something.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, drag: false, spin: true, sectors: true } },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(408), vr: 1, gam: 0, drag: false, spin: true, sectors: true } },
       { title: '2 · Launch 20 % faster',
         body: 'Same height, 1.2 v_c. Now the sectors near perigee are short and fat, and the ones near apogee are long and thin.',
         ask: 'The radius is three times longer at apogee. How much slower is the satellite there?',
         reveal: '<b>Three times slower.</b> Equal areas means r × v⊥ is constant: that is angular momentum. The panel shows all twelve areas equal to better than one part in a million.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1.2, gam: 0, drag: false, spin: false, sectors: true } },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1.2, gam: 0, drag: false, spin: false, sectors: true } },
       { title: '3 · Same speed, aimed upward',
         body: 'Back to exactly v_c, but tilted 20° up. Nothing else changes.',
         ask: 'Is the new orbit bigger or smaller than the circle?',
         reveal: '<b>Neither.</b> The energy is the same, so the semi-major axis is the same, 6771 km. But it is now an ellipse with e = sin 20°, and its perigee is inside the Earth. Same a, same period, and it crashes.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 20, drag: false, spin: false, sectors: false } },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 20, drag: false, spin: false, sectors: false } },
       { title: '4 · Exactly √2 times faster',
         body: 'The energy per kilogram is now zero. Try other angles with the green ring.',
         ask: 'Does aiming it straight up make escape easier?',
         reveal: '<b>No.</b> Escape is a statement about energy, ½v² ≥ GM/r, and energy has no direction. Every angle escapes unless the path hits the ground first.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: Math.SQRT2, gam: 0, drag: false, spin: false, sectors: true } },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: Math.SQRT2, gam: 0, drag: false, spin: false, sectors: true } },
       { title: '5 · Friction that speeds you up',
         body: 'Low orbit through the thin top of the atmosphere. Read the energy plot.',
         ask: 'Drag removes energy. Does the satellite slow down?',
         reveal: '<b>It speeds up.</b> For a near-circular orbit KE = −E. When drag removes 1 J, the satellite drops lower, gains 1 J of kinetic energy and loses 2 J of potential. The drag force does negative work; gravity does twice as much positive work.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: true, dragX: 2, spin: false, sectors: false } },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(300), vr: 1, gam: 0, drag: true, dragX: 2, spin: false, sectors: false } },
       { title: '6 · Fire the engine yourself',
         body: 'A circular orbit at 400 km. Set Δv to 500 m/s prograde and press FIRE ENGINE on the stage.',
         ask: 'You pushed forward. Where does the satellite go higher: straight ahead, or on the far side of the planet?',
         reveal: '<b>On the far side.</b> A burn changes the orbit everywhere except where you are: the burn point becomes the perigee, and the apogee rises half an orbit away. That is why every transfer is done in two burns.',
-        params: { mode: 'orbit', mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 0, drag: false, spin: false, sectors: false, dv: 500, bdir: 'pro' } },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1, gam: 0, drag: false, spin: false, sectors: false, dv: 500, bdir: 'pro' } },
       { title: '7 · Catch the satellite ahead',
         body: 'A target is 10° ahead on your orbit. You want to catch it.',
         ask: 'Do you speed up (prograde) or slow down (retrograde)?',
         reveal: '<b>Slow down.</b> A retrograde burn drops you to a lower, faster orbit (T ∝ r^1.5), and you gain on the target every lap. Fire prograde and you climb, slow, and fall further behind. That is the orbital-mechanics paradox, and the gap plot shows it happening.',
-        params: { mode: 'orbit', mission: 'rendezvous', body: 'earth', logH: LG(400), vr: 1, gam: 0, drag: false, spin: false, sectors: false, lead: 10, dv: 40, bdir: 'retro' } },
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'rendezvous', body: 'earth', logH: LG(400), vr: 1, gam: 0, drag: false, spin: false, sectors: false, lead: 10, dv: 40, bdir: 'retro' } },
       { title: '8 · The hill between two wells',
         body: 'Earth and Moon as a potential landscape. The probe is launched straight at the Moon.',
         ask: 'Does the probe need enough energy to escape the Earth completely?',
@@ -2409,10 +2722,33 @@
         body: 'Big lead spheres swing into position I. The rod turns less than half a degree, and the spot on the scale 5 m away moves several centimetres.',
         ask: 'Why does the spot move 2θL and not θL?',
         reveal: '<b>A mirror doubles the angle.</b> Turning the mirror by θ turns the reflected ray by 2θ. Let it settle, drag a big sphere to position II, and the panel works out G from your own record.',
-        params: { mode: 'cavendish', from: 'away', pos: 'I', auto: false, MB: 1.5, mg: 15, bmm: 46.5, T0min: 10, zeta: 0.08, Lm: 5 } }
+        params: { mode: 'cavendish', from: 'away', pos: 'I', auto: false, MB: 1.5, mg: 15, bmm: 46.5, T0min: 10, zeta: 0.08, Lm: 5 } },
+      { title: '12 · Tip the orbit over the poles',
+        body: 'A polar orbit at 800 km with the planet turning. The gold line is the ground track: the ground directly beneath the satellite.',
+        ask: 'The satellite\'s orbit is fixed in space. Why does each pass cross the equator further west?',
+        reveal: '<b>The Earth turns under it</b>, 25° in the 100 minutes one orbit takes. So a polar satellite sees the whole planet strip by strip, which is why weather and mapping satellites fly polar. A geostationary one sees only one face.',
+        params: { mode: 'orbit', incO: 90, argP: 0, mission: 'free', body: 'earth', logH: LG(800), vr: 1, gam: 0, drag: false, spin: true, sectors: false } },
+      { title: '13 · Read the orbit off the effective potential',
+        body: 'An ellipse launched 20% fast. The right-hand plot shows U_eff = −GM/r + L²/2r² and the energy line.',
+        ask: 'Where on the plot are the perigee and apogee?',
+        reveal: '<b>Where the energy line crosses the curve.</b> There all the kinetic energy is sideways, and the radial speed is zero. The hatched gap between them is the radial kinetic energy. Raise E above zero and the right-hand crossing disappears: it escapes.',
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(400), vr: 1.2, gam: 0, drag: false, spin: false, sectors: true } },
+      { title: '14 · The whole solar system on one line',
+        body: 'All ten bodies are integrated round the Sun from their real orbital elements. Open the left-hand plot.',
+        ask: 'Mercury takes 88 days, Neptune 165 years. What single rule do they share?',
+        reveal: '<b>T² ∝ a³.</b> In years and AU it is simply T = a^1.5, and every measured dot, Halley\'s comet included, sits on the line of slope 3/2. The constant depends only on the Sun\'s mass.',
+        params: { mode: 'solar', focus: 'earth', zoomAU: LG(34), yps: 8, sectors: true } },
+      { title: '15 · A comet that crawls and races',
+        body: 'Follow Halley\'s comet. Watch the speed plot and the equal-area sectors.',
+        ask: 'How much faster is it at perihelion than at aphelion?',
+        reveal: '<b>About 60 times</b>: (1 + e)/(1 − e) with e = 0.967. The long thin sectors near aphelion and the short fat ones near the Sun enclose equal areas. The tail always points away from the Sun, and it grows as the comet closes in.',
+        params: { mode: 'solar', focus: 'halley', zoomAU: LG(22), yps: 5, sectors: true } },
     ],
 
     quiz: [
+      { q: 'A planet is 4 times as far from the Sun as the Earth (on average). Its year is:',
+        options: ['8 Earth years', '4 Earth years', '16 Earth years', '2 Earth years'], answer: 0,
+        why: 'T² ∝ a³: T = 4^1.5 = 8 years. Check it against Jupiter at 5.2 AU (11.9 yr) on the measured plot.' },
       { q: 'You are 10° behind a target in the same circular orbit. To catch it up you should first:',
         options: ['Fire retrograde, to drop into a lower, faster orbit', 'Fire prograde, to go faster', 'Fire radially inward', 'Wait: you will meet it'], answer: 0,
         why: 'Going faster along the track raises the orbit and lengthens the period, so you fall behind. Lower orbits are faster (v = √(GM/r), T ∝ r^1.5). Run the rendezvous preset both ways.' },

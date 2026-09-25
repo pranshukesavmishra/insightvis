@@ -226,6 +226,17 @@ and each exam result is **read off the run**.
   10.69 m/s² at the core boundary. A ball in a straight tunnel takes 42.2 min one way for every chord
   of a uniform Earth, but only 38 min through the real one. A plumb line shows the effect of spin, and
   a shortened day can make the equator float.
+- **True 3D orbits**: an inclination control tips the orbit plane, and the launch point can be set
+  anywhere round the orbit. A polar orbit's gold **ground track** sweeps the turning Earth strip by
+  strip. A Molniya orbit (63.4°, 12 h) hangs its apogee over the north. The satellite glows, and
+  darkens in Earth's shadow. The effective potential U = −GM/r + L²/2r² is plotted against the
+  energy line: the turning points are where they cross, and the gap between them is the radial
+  kinetic energy.
+- **The solar system**: the Sun, eight planets, Pluto and Halley's comet on their real J2000
+  elements, each integrated from perihelion. Kepler III is plotted from the *timed* periods, all on
+  the line of slope 3/2 (Mars 1.881 yr, Halley 75.31 yr). Equal-area sectors and a speed plot are
+  shown for the body being followed: Halley moves 59.9× faster at perihelion, and its tail points
+  away from the Sun.
 - **Mission control**: a FIRE ENGINE button on the stage applies a Δv (prograde, retrograde or
   radial) to the live orbit, and the integrator restarts from that exact state. A Hohmann autopilot
   climbs from 300 km to geostationary orbit with two burns (2.43 and 1.47 km/s). The apogee is found

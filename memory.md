@@ -742,6 +742,20 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (a)** — **Client: "large upgrade needed, especially gravitation — unsatisfied".** The orbit
+  bench had been a 2D equatorial picture with an energy-vs-time plot. Added:
+  - Real 3D orbits: an inclination i and an in-plane ω applied as one `rot()` to every drawn point
+    and vector.
+  - A ground track: each past position taken into the Earth frame at the time it was flown, then
+    rotated to now.
+  - Eclipses, a satellite glow, and an effective-potential plot with the turning points.
+  - A **Solar System** mode: ten bodies from J2000 elements (R_z(Ω)R_x(i)R_z(ω)), integrated and
+    timed. Kepler III is plotted from the measurements; Halley's retrograde, e = 0.967 orbit comes
+    out at T = 75.31 yr and v_p/v_a = 59.86.
+  **Lessons:**
+  - A zoomed-out scene must suppress labels crowding the centre (a screen-distance test).
+  - Walkthrough blocks appended in patches need a comma check: two SyntaxErrors came from exactly this.
+
 - **2026-09-24 (a)** — **Client: batch 3 liked, "upgrade very much… think what else you can do, ultra
   level".** I read "ultra level" per §2.10 as **new physics the student drives**, not more polish.
   Every addition computes its result, and each has problems checked against the apparatus.
