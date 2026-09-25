@@ -209,14 +209,15 @@
       while (t < 6 && th < Math.PI / 2) {
         const a = acc(x, th, vx, w, onWall);
         if (onWall && a.Nw < 0) { onWall = false; tLeave = t; thLeave = th; continue; }
-        if (out.length === 0 || t - out[out.length - 1][0] >= 0.005) out.push([t, x, th, a.Nw, a.Nf, onWall]);
+        if (out.length === 0 || t - out[out.length - 1][0] >= 0.005) out.push([t, x, th, a.Nw, a.Nf, onWall, mu * a.Nf]);
         // semi-implicit step (small dt)
         vx += (onWall ? a.xdd : a.xdd) * dt; w += a.thdd * dt; th += w * dt; x = onWall ? h * Math.sin(th) : x + vx * dt;
         if (onWall) vx = h * Math.cos(th) * w;
         t += dt;
       }
     }
-    if (!out.length) out.push([0, x, th, 0, m * G, true]);
+    // standing: statics, with the floor friction equal to the wall force, (mg/2) tan θ
+    if (holds) { const Nw = m * G * Math.tan(th0) / 2; for (let k = 0; k <= 200; k++) out.push([k * 0.005, x, th0, Nw, m * G, true, Nw]); }
     const hTop0 = Ll * Math.cos(th0), hLeave = isFinite(thLeave) ? Ll * Math.cos(thLeave) : NaN;
     return { Ll, m, mu, th0, holds, out, tLeave, thLeave, hTop0, hLeave, ratio: hLeave / hTop0, tEnd: out[out.length - 1][0], h,
              muMin: Math.tan(th0) / 2, at: tt => out[Math.min(out.length - 1, Math.max(0, Math.round(tt / 0.005)))] };
@@ -283,11 +284,17 @@
     const f = (tt, v) => { const w = L0 / (Ir + mb * v[0] * v[0]); return [v[1], v[0] * w * w, w]; };
     while (t < 8) {
       const w = L0 / (Ir + mb * y[0] * y[0]);
-      if (Math.round(t / dt) % 10 === 0) out.push([t, y[0], y[1], w, y[2], 0.5 * (Ir + mb * y[0] * y[0]) * w * w + 0.5 * mb * y[1] * y[1]]);
+      if (Math.round(t / dt) % 10 === 0) out.push([t, y[0], y[1], w, y[2], 0.5 * (Ir + mb * y[0] * y[0]) * w * w + 0.5 * mb * y[1] * y[1], y[0] * Math.cos(y[2]), y[0] * Math.sin(y[2]), true]);
       const y2 = rk4(f, y, t, dt);
       if (y2[0] >= Lh) {                              // the exit, interpolated inside the step
         const fr = (Lh - y[0]) / (y2[0] - y[0]), vr = y[1] + fr * (y2[1] - y[1]);
-        tExit = t + fr * dt; vExit = [vr, Lh * L0 / (Ir + mb * Lh * Lh)]; break;
+        tExit = t + fr * dt; vExit = [vr, Lh * L0 / (Ir + mb * Lh * Lh)];
+        // after it leaves: no force on the bead, so a straight line at its exit velocity; the rod turns on at ω_end
+        const A = y[2] + fr * (y2[2] - y[2]), wE = L0 / (Ir + mb * Lh * Lh), ex = [Math.cos(A), Math.sin(A)], et = [-Math.sin(A), Math.cos(A)];
+        const vx = vr * ex[0] + vExit[1] * et[0], vy = vr * ex[1] + vExit[1] * et[1];
+        for (let k = Math.ceil(tExit / (10 * dt)); k * 10 * dt <= tExit + 1.5; k++) { const tk = k * 10 * dt, s2 = tk - tExit, bx = Lh * ex[0] + vx * s2, by = Lh * ex[1] + vy * s2;
+          out.push([tk, Math.hypot(bx, by), NaN, wE, A + wE * s2, 0.5 * Ir * wE * wE + 0.5 * mb * (vx * vx + vy * vy), bx, by, false]); }
+        break;
       }
       y = y2; t += dt;
     }
@@ -546,22 +553,46 @@
     const X = q => V.add(c0, V.add(A, rotv(V.sub(V.mul(q, ks), A), u, phi)));   // a body point, spun about the axis
     const ex = rotv([1, 0, 0], u, phi), ey = rotv([0, 1, 0], u, phi), ez = rotv([0, 0, 1], u, phi);
     const s = p.size * ks, col = '#6FA8E8';
-    const b = p.body;
-    if (b === 'rod') R3.cylinder(F, X([-0.5 * p.size, 0, 0]), X([0.5 * p.size, 0, 0]), 0.03 * s, '#C9A04A', { segments: 14, shadow: false });
+    let legend = null;
+    const b = p.body, ghost = p.dots && (b === 'sphere' || b === 'cube' || b === 'cyl' || b === 'cone');
+    const L = p.size, edge = (pts, col, a) => path3(F, pts.map(X), col || '#9FD8FF', { alpha: a || 0.75, width: 1.3, chunk: 64 });
+    const circ = (z, r, n) => { const out = []; for (let i = 0; i <= (n || 40); i++) { const t = i / (n || 40) * TAU; out.push([r * Math.cos(t), r * Math.sin(t), z]); } return out; };
+    if (b === 'rod') R3.cylinder(F, X([-0.5 * L, 0, 0]), X([0.5 * L, 0, 0]), 0.03 * s, '#C9A04A', { segments: 14, shadow: false });
     else if (b === 'plate') R3.box(F, X([0, 0, 0]), [1.0 * s, 0.6 * s, 0.02 * s], col, { shadow: false, axes: [ex, ey, ez] });
-    else if (b === 'disc') R3.cylinder(F, X([0, 0, -0.01 * p.size]), X([0, 0, 0.01 * p.size]), 0.5 * s, col, { segments: 48, shadow: false });
-    else if (b === 'ring') { const pts = []; for (let i = 0; i <= 48; i++) { const a = i / 48 * TAU; pts.push(X([0.5 * p.size * Math.cos(a), 0.5 * p.size * Math.sin(a), 0])); } R3.tube(F, pts, 0.025 * s, '#D6B055', { segments: 10 }); }
-    else if (b === 'sphere') R3.sphere(F, X([0, 0, 0]), 0.5 * s, col, { shadow: false });
+    else if (b === 'disc') R3.cylinder(F, X([0, 0, -0.01 * L]), X([0, 0, 0.01 * L]), 0.5 * s, col, { segments: 48, shadow: false });
+    else if (b === 'ring') { const pts = []; for (let i = 0; i <= 48; i++) { const a = i / 48 * TAU; pts.push(X([0.5 * L * Math.cos(a), 0.5 * L * Math.sin(a), 0])); } R3.tube(F, pts, 0.025 * s, '#D6B055', { segments: 10, round: false }); }
     else if (b === 'shell') R3.wireSphere(F, X([0, 0, 0]), 0.5 * s, '#9FD8FF', { lat: 7, lon: 10, alpha: 0.35, limbAlpha: 0.8 });
-    else if (b === 'cyl') R3.cylinder(F, X([0, 0, -0.5 * p.size]), X([0, 0, 0.5 * p.size]), 0.5 * s, col, { segments: 36, shadow: false });
-    else if (b === 'cone') { const zc = Mi.P[0] ? 0 : 0; for (let i = 0; i < 14; i++) { const z0 = -0.5 + i / 14, z1 = z0 + 1 / 14, r = 0.5 * (0.5 - (z0 + z1) / 2) + 0.02; R3.cylinder(F, X([0, 0, (z0 - 0.25 + zc) * p.size]), X([0, 0, (z1 - 0.25 + zc) * p.size]), r * s, col, { segments: 28, shadow: false, caps: i === 0 }); } }
+    else if (ghost) {
+      // see-through: the outline of the solid, so the mass elements inside can be seen
+      if (b === 'sphere') { for (let k = -2; k <= 2; k++) { const z = k / 3 * 0.5 * L; edge(circ(z, Math.sqrt(0.25 * L * L - z * z))); }
+        for (let k = 0; k < 4; k++) { const t = k / 4 * Math.PI, m = []; for (let i = 0; i <= 40; i++) { const a = i / 40 * TAU; m.push([0.5 * L * Math.sin(a) * Math.cos(t), 0.5 * L * Math.sin(a) * Math.sin(t), 0.5 * L * Math.cos(a)]); } edge(m, '#9FD8FF', 0.45); } }
+      else if (b === 'cube') { const h = 0.5 * L, C = []; for (const x of [-h, h]) for (const y of [-h, h]) for (const z of [-h, h]) C.push([x, y, z]);
+        for (let a = 0; a < 8; a++) for (let c = a + 1; c < 8; c++) { const d = [0, 1, 2].filter(k => C[a][k] !== C[c][k]).length; if (d === 1) edge([C[a], C[c]]); } }
+      else if (b === 'cyl') { edge(circ(-0.5 * L, 0.5 * L)); edge(circ(0.5 * L, 0.5 * L)); edge(circ(0, 0.5 * L), '#9FD8FF', 0.35); for (let k = 0; k < 8; k++) { const t = k / 8 * TAU; edge([[0.5 * L * Math.cos(t), 0.5 * L * Math.sin(t), -0.5 * L], [0.5 * L * Math.cos(t), 0.5 * L * Math.sin(t), 0.5 * L]], '#9FD8FF', 0.45); } }
+      else { const zb = -0.25 * L, za = 0.75 * L; edge(circ(zb, 0.5 * L)); edge(circ(zb + 0.5 * L, 0.25 * L), '#9FD8FF', 0.35); for (let k = 0; k < 8; k++) { const t = k / 8 * TAU; edge([[0.5 * L * Math.cos(t), 0.5 * L * Math.sin(t), zb], [0, 0, za]], '#9FD8FF', 0.5); } }
+      R3.sphere(F, X([0, 0, 0]), 0.022, '#FF6B5A', { shadow: false, vivid: true });
+      R3.label(F, V.add(X([0, 0, 0]), [0.07, 0, 0.05]), 'CM', '#FF8A7A', { size: 9, align: 'left' });
+    }
+    else if (b === 'sphere') R3.sphere(F, X([0, 0, 0]), 0.5 * s, col, { shadow: false });
+    else if (b === 'cyl') R3.cylinder(F, X([0, 0, -0.5 * L]), X([0, 0, 0.5 * L]), 0.5 * s, col, { segments: 36, shadow: false });
+    else if (b === 'cone') { for (let i = 0; i < 14; i++) { const z0 = -0.5 + i / 14, z1 = z0 + 1 / 14, r = 0.5 * (0.5 - (z0 + z1) / 2) + 0.02; R3.cylinder(F, X([0, 0, (z0 + 0.25) * L]), X([0, 0, (z1 + 0.25) * L]), r * s, col, { segments: 28, shadow: false, caps: i === 0 }); } }
     else if (b === 'cube') R3.box(F, X([0, 0, 0]), [s, s, s], col, { shadow: false, axes: [ex, ey, ez] });
-    // a sample of the mass elements actually summed
-    if (p.dots) { const sp = sprite('#FFD36B'), list = [], step = Math.max(1, Math.floor(Mi.P.length / 500)); for (let i = 0; i < Mi.P.length; i += step) { const q = X(V.mul(Mi.P[i], p.size)); list.push([q[0], q[1], q[2], 0.012, sp]); } ballCloud(F, list, c0, -0.05); }
+    // a sample of the mass elements actually summed, coloured by their distance from the axis (their share of I goes as r⊥²)
+    if (p.dots) {
+      const pal = ['#3DD6F5', '#7CF0B0', '#FFD36B', '#FF8A5A', '#FF4F7A'].map(c => sprite(c)), list = [], step = Math.max(1, Math.floor(Mi.P.length / 700));
+      let rmax = 1e-9; const rp = [];
+      for (let i = 0; i < Mi.P.length; i += step) { const q = V.mul(Mi.P[i], L), r = V.sub(q, Mi.A), dp = V.dot(r, u), rr = Math.sqrt(Math.max(0, V.dot(r, r) - dp * dp)); rp.push([q, rr]); rmax = Math.max(rmax, rr); }
+      rp.forEach(([q, rr]) => { const w = X(q); list.push([w[0], w[1], w[2], ghost ? 0.016 : 0.012, pal[Math.min(4, Math.floor(rr / rmax * 5))]]); });
+      ballCloud(F, list, c0, ghost ? 0.5 : 0.05);
+      legend = () => { const lx = g.w - 150, ly = 96; ctx.save(); ctx.font = '10px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.fillStyle = th['text-3'] || '#8A93A3';
+      ctx.fillText('mass element, by r⊥ from the axis', lx - 60, ly - 8);
+      ['#3DD6F5', '#7CF0B0', '#FFD36B', '#FF8A5A', '#FF4F7A'].forEach((c, k) => { ctx.fillStyle = c; ctx.fillRect(lx - 60 + k * 30, ly, 26, 7); });
+      ctx.fillStyle = th['text-3'] || '#8A93A3'; ctx.fillText('near', lx - 60, ly + 19); ctx.textAlign = 'right'; ctx.fillText('far → large r⊥²', lx + 86, ly + 19); ctx.restore(); };
+    }
     // the axis, and the drum + string + hanging mass
-    const a0 = V.add(c0, V.add(A, V.mul(u, -1.2))), a1 = V.add(c0, V.add(A, V.mul(u, 1.2)));
+    const a0 = V.add(c0, V.add(A, V.mul(u, -1.45))), a1 = V.add(c0, V.add(A, V.mul(u, 1.45)));
     R3.cylinder(F, a0, a1, 0.012, '#DDE3EE', { segments: 10, shadow: false });
-    const drum = V.add(c0, V.add(A, V.mul(u, 1.0)));
+    const drum = V.add(c0, V.add(A, V.mul(u, 1.25)));
     R3.cylinder(F, V.add(drum, V.mul(u, -0.04)), V.add(drum, V.mul(u, 0.04)), Math.max(0.03, Mi.r * ks * 3), '#8A93A3', { segments: 18, shadow: false });
     const side = V.norm(Math.abs(u[2]) > 0.9 ? [1, 0, 0] : V.cross(u, [0, 0, 1])), top = V.add(drum, V.mul(side, Math.max(0.03, Mi.r * ks * 3)));
     const hang = V.add(top, [0, 0, -0.35 - drop * 0.9]);
@@ -570,15 +601,16 @@
     R3.label(F, V.add(a1, [0, 0, 0.1]), 'axis', '#DDE3EE', { size: 9.5 });
     R3.label(F, V.add(hang, [0.1, 0, -0.1]), (Mi.mh * 1000).toFixed(0) + ' g', '#F2C879', { size: 9, align: 'left' });
     F.render();
+    if (legend) legend();
     header(g, BODIES[p.body].name + ' · ' + p.Mkg.toFixed(2) + ' kg · size ' + p.size.toFixed(2) + ' m · axis ' + ({ x: 'x', y: 'y', z: 'z', diag: 'along a body diagonal', dxy: 'along the plate diagonal' })[p.ax] + (Mi.d ? ', offset ' + Mi.d.toFixed(2) + ' m' : ' through the CM'),
       'I = Σ m r⊥² over ' + Mi.P.length + ' equal mass elements · then spun by a falling ' + (Mi.mh * 1000).toFixed(0) + ' g on a ' + (Mi.r * 200).toFixed(1) + ' cm axle',
       'parallel axes: I = I_cm + Md² · perpendicular axes (flat bodies only): I_z = I_x + I_y', th.text);
     panel(g, 'SUMMED, THEN MEASURED', [
-      ['I summed about this axis', Mi.I.toExponential(4) + ' kg·m²', th.phys],
-      ['formula (I_cm + Md²)', Mi.IfPar.toExponential(4) + ' kg·m²', th.ok],
+      ['I summed about this axis', Mi.I.toPrecision(5) + ' kg·m²', th.phys],
+      ['formula (I_cm + Md²)', Mi.IfPar.toPrecision(5) + ' kg·m²', th.ok],
       ['radius of gyration √(I/M)', (Mi.k * 100).toFixed(2) + ' cm'],
-      ['I from the fall time', isFinite(Mi.Imeas) ? Mi.Imeas.toExponential(4) + ' (t = ' + Mi.tFall.toFixed(3) + ' s)' : 'friction wins: no fall'],
-      [Mi.lam ? 'I_x + I_y vs I_z (summed)' : 'I_x · I_y · I_z (summed)', Mi.lam ? (Mi.Iax[0] + Mi.Iax[1]).toExponential(3) + ' vs ' + Mi.Iax[2].toExponential(3) : Mi.Iax.map(v => v.toExponential(2)).join(' · ')],
+      ['I from the fall time', isFinite(Mi.Imeas) ? Mi.Imeas.toPrecision(5) + ' (t = ' + Mi.tFall.toFixed(3) + ' s)' : 'friction wins: no fall'],
+      [Mi.lam ? 'I_x + I_y vs I_z (summed)' : 'I_x · I_y · I_z (summed)', Mi.lam ? (Mi.Iax[0] + Mi.Iax[1]).toPrecision(4) + ' vs ' + Mi.Iax[2].toPrecision(4) : Mi.Iax.map(v => v.toPrecision(3)).join(' · ')],
       ['acceleration of the weight', Mi.acc.toFixed(4) + ' m/s²']
     ]);
   }
@@ -633,15 +665,19 @@
     const bot = [(x + Ld.h * Math.sin(ang)) * ks, 0, 0], top = [(x - Ld.h * Math.sin(ang)) * ks, 0, 2 * Ld.h * Math.cos(ang) * ks];
     [-0.12, 0.12].forEach(yy => R3.cylinder(F, V.add(bot, [0, yy, 0.02]), V.add(top, [0, yy, 0.02]), 0.018, '#C9A04A', { segments: 10, shadow: false }));
     for (let i = 1; i < 10; i++) { const q = V.add(bot, V.mul(V.sub(top, bot), i / 10)); R3.cylinder(F, V.add(q, [0, -0.12, 0.02]), V.add(q, [0, 0.12, 0.02]), 0.01, '#B08A3A', { segments: 8, shadow: false }); }
-    const cm = V.mul(V.add(bot, top), 0.5), sc = 0.4 / (Ld.m * G);
-    R3.arrow(F, cm, V.add(cm, [0, 0, -0.4]), 0.012, '#7CF0B0', { vivid: true });
+    const cm = V.mul(V.add(bot, top), 0.5), sc = 0.55 / (Ld.m * G);
+    R3.arrow(F, cm, V.add(cm, [0, 0, -0.55]), 0.012, '#7CF0B0', { vivid: true });
     if (o[5] && o[3] > 0) R3.arrow(F, top, V.add(top, [o[3] * sc + 0.02, 0, 0]), 0.012, '#FF8FB0', { vivid: true });
     R3.arrow(F, bot, V.add(bot, [0, 0, Math.max(0.02, o[4] * sc)]), 0.012, '#7FD0FF', { vivid: true });
+    if (o[6] > 1e-6) { R3.arrow(F, V.add(bot, [0, 0, 0.012]), V.add(bot, [-o[6] * sc - 0.02, 0, 0.012]), 0.012, '#FFB347', { vivid: true }); R3.label(F, V.add(bot, [-o[6] * sc - 0.06, 0, 0.07]), 'f', '#FFB347', { size: 10 }); }
+    R3.label(F, V.add(bot, [0.06, 0, Math.max(0.02, o[4] * sc) + 0.05]), 'N_floor', '#7FD0FF', { size: 9.5, align: 'left' });
+    R3.label(F, V.add(cm, [0.05, 0, -0.6]), 'mg', '#7CF0B0', { size: 9.5, align: 'left' });
+    if (o[5] && o[3] > 0) R3.label(F, V.add(top, [o[3] * sc + 0.08, 0, 0.06]), 'N_wall', '#FF8FB0', { size: 9.5, align: 'left' });
     // the CM's path: a quarter circle about the corner while the top is on the wall
     const arc = []; for (let i = 0; i <= 30; i++) { const a = i / 30 * Math.PI / 2; arc.push([Ld.h * Math.sin(a) * ks, 0, Ld.h * Math.cos(a) * ks]); }
     path3(F, arc, '#FFD36B', { alpha: 0.35, width: 1, dash: [3, 3], chunk: 3 });
     if (isFinite(Ld.hLeave)) { path3(F, [[-0.02, -0.3, Ld.hLeave * ks], [-0.02, 0.3, Ld.hLeave * ks]], '#FF8FB0', { alpha: 0.9, width: 1.6, chunk: 1 }); R3.label(F, [-0.05, 0.4, Ld.hLeave * ks], 'leaves the wall here', '#FF8FB0', { size: 9.5, align: 'right' }); }
-    R3.label(F, V.add(cm, [0.15, 0, 0]), o[5] ? 'on the wall' : 'off the wall', o[5] ? '#DCE3EE' : '#FF8FB0', { size: 9.5, align: 'left' });
+    R3.label(F, V.add(cm, [0.15, 0, 0.12]), Ld.holds ? 'standing' : o[5] ? 'on the wall' : 'off the wall', o[5] ? '#DCE3EE' : '#FF8FB0', { size: 9.5, align: 'left' });
     F.render();
     header(g, 'A ' + Ld.Ll.toFixed(1) + ' m ladder at ' + p.lth0.toFixed(0) + '° from a frictionless wall · floor μ = ' + p.muf.toFixed(2),
       Ld.holds ? 'tan θ ≤ 2μ: friction holds it — it stands' : 't = ' + o[0].toFixed(2) + ' s · Newton\'s laws for the rod solved as a 3 × 3 system each step (θ\'\', N_wall, N_floor)',
@@ -651,7 +687,7 @@
       ['top height when it leaves', isFinite(Ld.hLeave) ? (Ld.hLeave).toFixed(4) + ' m' : '—', th.phys],
       ['÷ starting height', isFinite(Ld.ratio) ? Ld.ratio.toFixed(4) : '—', th.ok],
       ['time on the wall', isFinite(Ld.tLeave) ? Ld.tLeave.toFixed(3) + ' s' : '—'],
-      ['wall force · floor force now', (o[3] / (Ld.m * G)).toFixed(3) + ' · ' + (o[4] / (Ld.m * G)).toFixed(3) + ' mg'],
+      ['wall · floor · friction now', (o[3] / (Ld.m * G)).toFixed(3) + ' · ' + (o[4] / (Ld.m * G)).toFixed(3) + ' · ' + ((o[6] || 0) / (Ld.m * G)).toFixed(3) + ' mg'],
       ['angle from the wall now', (ang * 180 / Math.PI).toFixed(2) + '°']
     ]);
   }
@@ -681,11 +717,14 @@
     // the ball
     const yb = St.x * ks, xb = tt < t0 ? -1.3 + (tt / t0) * 1.3 - 0.06 : -0.06 + St.vb * tA * ks;
     R3.sphere(F, [xb, yb, 0.06], 0.06, '#FF6B5A', { shadow: false, vivid: true });
-    // at impact: velocity arrows along the rod, and the point at rest
+    // the true velocity of each point of the rod now, v = v_cm + ω × r, and the instantaneous axis (the point of the ice
+    // plane with zero velocity: at impact it lies on the rod at k²/x beyond the CM, afterwards it moves with v_cm)
     if (tt >= t0 - 0.02) {
-      for (let i = 0; i <= 8; i++) { const y = -St.Lr / 2 + St.Lr * i / 8, v = St.hinged ? St.w * (y + St.Lr / 2) : St.vcm + St.w * y; const base = rodPt(y);
-        if (Math.abs(v) > 1e-3) R3.arrow(F, V.add(base, [0, 0, 0.08]), V.add(base, [v * 0.12, 0, 0.08]), 0.008, '#7FD0FF', {}); }
-      if (isFinite(St.iar) && Math.abs(St.iar) < 3 * St.Lr) { const q = St.hinged ? piv : rodPt(St.iar); if (q) { R3.sphere(F, V.add(q, [0, 0, 0.08]), 0.03, '#FFD36B', { shadow: false, vivid: true }); R3.label(F, V.add(q, [0, 0, 0.22]), 'at rest', '#FFD36B', { size: 9.5 }); } }
+      const cmNow = St.hinged ? [0, -St.Lr / 2 * ks, 0.03] : [cmx, 0, 0.03], vc = St.hinged ? 0 : St.vcm;
+      for (let i = 0; i <= 8; i++) { const y = -St.Lr / 2 + St.Lr * i / 8, base = rodPt(y), r = V.mul(V.sub(base, cmNow), 1 / ks), vx = vc + St.w * r[1], vy = -St.w * r[0];
+        if (Math.hypot(vx, vy) > 1e-3) R3.arrow(F, V.add(base, [0, 0, 0.08]), V.add(base, [vx * 0.12, vy * 0.12, 0.08]), 0.008, '#7FD0FF', {}); }
+      if (Math.abs(St.w) > 1e-9) { const q = St.hinged ? [0, -St.Lr / 2 * ks, 0.03] : [cmx, -vc / St.w * ks, 0.03];
+        if (Math.abs(q[1]) < 1.7) { R3.sphere(F, V.add(q, [0, 0, 0.06]), 0.03, '#FFD36B', { shadow: false, vivid: true }); R3.label(F, V.add(q, [0, 0, 0.22]), tA < 0.05 ? 'at rest' : 'instantaneous axis', '#FFD36B', { size: 9.5 }); } }
     }
     F.render();
     header(g, 'A ' + (St.m * 1000).toFixed(0) + ' g ball at ' + St.u.toFixed(1) + ' m/s strikes a ' + St.M.toFixed(2) + ' kg rod ' + (St.hinged ? 'hinged at one end' : 'lying free on ice') + ' · e = ' + St.e.toFixed(2),
@@ -713,10 +752,37 @@
       for (let k = 0; k < 12; k++) { const a = ph + k / 12 * TAU; path3(F, [[0.2 * Math.cos(a), 0.2 * Math.sin(a), 0.125], [0.68 * Math.cos(a), 0.68 * Math.sin(a), 0.125]], '#8FA4CE', { alpha: 0.5, width: 1, chunk: 1 }); }
       R3.cylinder(F, [0, 0, 0.12], [0, 0, 0.5], 0.05, '#9AA6B8', { segments: 12, shadow: false });
       R3.cylinder(F, [0, 0, 0.5], [0, 0, 0.56], 0.22, '#3A4458', { segments: 24, shadow: false });
-      R3.cylinder(F, [0, 0, 0.56], [0, 0, 1.15], 0.14, '#4A6FA8', { segments: 20, shadow: false });
+      const rad = [Math.cos(ph), Math.sin(ph), 0], tan = [-Math.sin(ph), Math.cos(ph), 0], at = (a, t, z) => V.add(V.add(V.mul(rad, a), V.mul(tan, t)), [0, 0, z]);
+      // legs: thighs forward along the tangent (the way the stool faces), shins down
+      [-0.07, 0.07].forEach(o2 => { const hip = at(o2, 0.02, 0.62), knee = at(o2, 0.3, 0.6), foot = at(o2, 0.33, 0.2);
+        R3.cylinder(F, hip, knee, 0.05, '#2E3A52', { segments: 10, shadow: false }); R3.cylinder(F, knee, foot, 0.042, '#2E3A52', { segments: 10, shadow: false });
+        R3.box(F, V.add(foot, V.mul(tan, 0.04)), [0.08, 0.08, 0.04], '#1E222A', { shadow: false, axes: [rad, tan, [0, 0, 1]] }); });
+      // torso (with a stripe that turns with it), neck, head and nose
+      R3.cylinder(F, [0, 0, 0.56], [0, 0, 1.12], 0.14, '#4A6FA8', { segments: 22, shadow: false });
+      path3(F, [at(0, 0.142, 0.6), at(0, 0.142, 1.1)], '#FFD36B', { alpha: 0.95, width: 3, chunk: 1 });
+      R3.cylinder(F, [0, 0, 1.12], [0, 0, 1.19], 0.045, '#E8C8A8', { segments: 10, shadow: false });
       R3.sphere(F, [0, 0, 1.3], 0.11, '#E8C8A8', { shadow: false });
-      [1, -1].forEach(sg => { const hand = [sg * r * sc * Math.cos(ph), sg * r * sc * Math.sin(ph), 1.02], sh = [sg * 0.14 * Math.cos(ph), sg * 0.14 * Math.sin(ph), 1.08];
-        R3.cylinder(F, sh, hand, 0.035, '#4A6FA8', { segments: 10, shadow: false }); R3.sphere(F, hand, 0.08, '#2B2F38', { shadow: false }); });
+      R3.sphere(F, at(0, 0.105, 1.3), 0.022, '#D9A888', { shadow: false });
+      // arms: a two-link arm from the shoulder to a hand at radius r; the elbow is solved (drops and bends as r shrinks)
+      const ua = Math.max(0.3, (Sp.out[0][2] - 0.17) / 2 + 0.03), fa = ua;
+      [1, -1].forEach(sg => {
+        const S0 = at(sg * 0.17, 0, 1.08), H = at(sg * Math.max(r, 0.12), r < 0.3 ? 0.2 * (0.3 - r) / 0.15 + 0.08 : 0, 0.98);
+        const dv = V.sub(H, S0), d = Math.min(ua + fa - 1e-6, Math.hypot(...dv)), u2 = V.norm(dv);
+        const Hc = V.add(S0, V.mul(u2, d));
+        const w0 = V.add(V.add([0, 0, -1], V.mul(rad, sg * 0.3)), V.mul(tan, -0.25)), down = V.norm(V.sub(w0, V.mul(u2, V.dot(w0, u2)))), hh = Math.sqrt(Math.max(0, ua * ua - d * d / 4));
+        const El = V.add(V.add(S0, V.mul(u2, d / 2)), V.mul(down, hh));
+        R3.sphere(F, S0, 0.055, '#4A6FA8', { shadow: false });
+        R3.cylinder(F, S0, El, 0.042, '#4A6FA8', { segments: 10, shadow: false });
+        R3.cylinder(F, El, Hc, 0.034, '#E8C8A8', { segments: 10, shadow: false });
+        // the dumbbell: a bar along the tangent with two plates
+        const b0 = V.add(Hc, V.mul(tan, -0.09)), b1 = V.add(Hc, V.mul(tan, 0.09));
+        R3.cylinder(F, b0, b1, 0.014, '#AEB6C4', { segments: 8, shadow: false });
+        [b0, b1].forEach(q => R3.cylinder(F, V.add(q, V.mul(tan, -0.02)), V.add(q, V.mul(tan, 0.02)), 0.07, '#B8C2D6', { segments: 16, shadow: false }));
+      });
+      // the dumbbells' circle, and the radius now
+      const circ = []; for (let k = 0; k <= 48; k++) { const a = k / 48 * TAU; circ.push([r * Math.cos(a), r * Math.sin(a), 0.98]); }
+      path3(F, circ, '#FFD36B', { alpha: 0.35, width: 1, dash: [3, 3], chunk: 4 });
+      R3.label(F, at(Math.max(r, 0.2) + 0.12, 0, 0.9), 'r = ' + (r * 100).toFixed(0) + ' cm', '#FFD36B', { size: 9.5, align: 'left' });
       R3.arrow(F, [0, 0, 1.45], [0, 0, 1.45 + 0.12 * o[5] / Sp.L0 * 3], 0.02, '#7CF0B0', { vivid: true });
       R3.label(F, [0, 0, 1.95], 'L = ' + o[5].toFixed(3) + ' kg·m²/s (constant)', '#7CF0B0', { size: 10 });
       F.render();
@@ -746,12 +812,15 @@
     R3.cylinder(F, [0, 0, 0.05], [0, 0, 0.5], 0.04, '#9AA6B8', { segments: 12, shadow: false });
     const d = [Math.cos(ang), Math.sin(ang), 0];
     R3.cylinder(F, V.add([0, 0, 0.5], V.mul(d, -Sp.Lh * ks)), V.add([0, 0, 0.5], V.mul(d, Sp.Lh * ks)), 0.018, '#C9A04A', { segments: 10, shadow: false });
-    const bp = V.add([0, 0, 0.5], V.mul(d, r * ks));
-    R3.sphere(F, bp, 0.05, '#FF6B5A', { shadow: false, vivid: true });
-    const trail = Sp.out.filter((q, j) => j <= i && j % 3 === 0).map(q => [q[1] * ks * Math.cos(q[4]), q[1] * ks * Math.sin(q[4]), 0.5]);
-    if (trail.length > 1) path3(F, trail, '#FF8A7A', { alpha: 0.6, width: 1.4, chunk: 4 });
+    // on the rod it is carried round; once off the end it is a projectile: a straight line seen from above, and it falls
+    const zOf = q => q[8] ? 0.5 : Math.max(0.05, 0.5 - 0.5 * G * Math.pow(q[0] - Sp.tExit, 2) * ks);
+    const bp = [o[6] * ks, o[7] * ks, zOf(o)];
+    if (Math.hypot(bp[0], bp[1]) < 2.6) R3.sphere(F, bp, 0.05, '#FF6B5A', { shadow: !o[8], vivid: true });
+    const trail = Sp.out.filter((q, j) => j <= i && j % 2 === 0 && Math.hypot(q[6], q[7]) * ks < 2.6).map(q => [q[6] * ks, q[7] * ks, zOf(q)]);
+    if (trail.length > 1) path3(F, trail, '#FF8A7A', { alpha: 0.7, width: 1.6, chunk: 3 });
+    if (!o[8]) { R3.label(F, V.add(bp, [0, 0, 0.14]), 'off the end: v = (v_r, v_t) = (' + Sp.vExit[0].toFixed(2) + ', ' + Sp.vExit[1].toFixed(2) + ') m/s', '#FF8A7A', { size: 9.5 }); }
     F.render();
-    header(g, 'A bead slides out along a freely turning rod', 't = ' + tt.toFixed(3) + ' s · r = ' + (r * 100).toFixed(1) + ' cm · ω = ' + o[3].toFixed(3) + ' rad/s · no friction, no torque on the axle',
+    header(g, 'A bead slides out along a freely turning rod', 't = ' + tt.toFixed(3) + ' s · ' + (o[8] ? 'r = ' + (r * 100).toFixed(1) + ' cm' : 'OFF THE ROD — flying free') + ' · ω = ' + o[3].toFixed(3) + ' rad/s · no friction, no torque on the axle',
       'r\'\' = rω² with ω = L/(I_rod + mr²): the bead flings outward while the rod slows · the red trail is its path seen from above', th.text);
     panel(g, 'THE BEAD LEAVES THE END', [['ω when it leaves', Sp.wEnd.toFixed(4) + ' rad/s', th.phys], ['radial speed then (integrated)', Sp.vExit ? Sp.vExit[0].toFixed(4) + ' m/s' : '—', th.phys],
       ['radial speed from energy + L', Sp.vrF.toFixed(4) + ' m/s', th.ok], ['tangential speed then', Sp.vExit ? Sp.vExit[1].toFixed(4) + ' m/s' : '—'], ['time to reach the end', isFinite(Sp.tExit) ? Sp.tExit.toFixed(4) + ' s' : '—'], ['energy (kept)', o[5].toFixed(4) + ' J']]);
@@ -773,11 +842,19 @@
     const tr = []; for (let j = 0; j < Tp.out.length && Tp.out[j][0] <= o[0]; j += 2) { const q = Tp.out[j], nn = [Math.sin(q[1]) * Math.cos(q[2]), Math.sin(q[1]) * Math.sin(q[2]), Math.cos(q[1])]; tr.push(V.add(piv, V.mul(nn, Tp.d * ks + 0.08))); }
     if (tr.length > 1) path3(F, tr.slice(-900), '#FFD36B', { alpha: 0.75, width: 1.4, chunk: 6 });
     // L along the axle, gravity torque horizontal (r × mg), precession about the vertical
-    R3.arrow(F, c, V.add(c, V.mul(n, 0.45)), 0.014, '#7CF0B0', { vivid: true });
+    // L along the spin axis (starting clear of the wheel), the torque of gravity about the pivot (horizontal, drawn at the
+    // pivot), the weight at the CM, and the precession Ω about the vertical: dL/dt = τ turns L towards τ
+    const Ls = Math.sign(p.spin || 1), l0 = V.add(c, V.mul(n, Tp.R * ks * 0.35 + 0.05));
+    R3.arrow(F, l0, V.add(l0, V.mul(n, 0.42 * Ls)), 0.014, '#7CF0B0', { vivid: true });
+    R3.label(F, V.add(l0, V.mul(n, 0.52 * Ls)), 'L = I₃ω₃', '#7CF0B0', { size: 10.5 });
     const tq = V.norm(V.cross(n, [0, 0, -1]));
-    R3.arrow(F, c, V.add(c, V.mul(tq, 0.35)), 0.012, '#FF8FB0', { vivid: true });
-    R3.label(F, V.add(c, V.mul(n, 0.55)), 'L', '#7CF0B0', { size: 11 });
-    R3.label(F, V.add(c, V.mul(tq, 0.45)), 'τ = r × mg', '#FF8FB0', { size: 10 });
+    R3.arrow(F, piv, V.add(piv, V.mul(tq, 0.42)), 0.012, '#FF8FB0', { vivid: true });
+    R3.label(F, V.add(piv, V.add(V.mul(tq, 0.5), [0, 0, 0.06])), 'τ = r × mg', '#FF8FB0', { size: 10 });
+    R3.arrow(F, c, V.add(c, [0, 0, -0.3]), 0.01, '#9FE0B8', {});
+    R3.label(F, V.add(c, [0.06, 0, -0.34]), 'mg', '#9FE0B8', { size: 9.5, align: 'left' });
+    const Og = Tp.Omeas >= 0 ? 1 : -1, pz = V.add(piv, [0, 0, 0.12]);
+    R3.arrow(F, pz, V.add(pz, [0, 0, 0.3 * Og]), 0.011, '#FFD36B', { vivid: true });
+    R3.label(F, V.add(pz, [0.05, 0, 0.36 * Og]), 'Ω (precession)', '#FFD36B', { size: 9.5, align: 'left' });
     F.render();
     header(g, 'A gyroscope · wheel ' + (Tp.m * 1000).toFixed(0) + ' g, radius ' + (Tp.R * 100).toFixed(1) + ' cm, spinning ' + p.spin.toFixed(0) + ' rev/s, ' + (Tp.d * 100).toFixed(1) + ' cm from the pivot',
       'the full heavy-top equations (Euler angles, RK4) · θ = ' + (tht * 180 / Math.PI).toFixed(2) + '° from vertical · ' + (p.start === 'smooth' ? 'launched at the exact steady precession' : 'released from rest: it dips and nods (nutation)'),
@@ -921,7 +998,7 @@
         hinge: { theta: -1.57, phi: 0.12, dist: 4.4, target: [0, 0, 0.5] },
         ladder: { theta: -1.35, phi: 0.2, dist: 4.4, target: [0.6, 0, 0.8] },
         strike: { theta: -1.0, phi: 0.85, dist: 4.2, target: [0.2, 0, 0] },
-        spin: { theta: -1.3, phi: 0.35, dist: 4.2, target: [0, 0, 0.6] },
+        spin: { theta: -1.3, phi: 0.35, dist: 3.4, target: [0, 0, 0.7] },
         gyro: { theta: -1.2, phi: 0.35, dist: 3.4, target: [0, 0, 0.8] }
       };
       if (!S.cam || S._view !== p.mode) { S.cam = Camera(views[p.mode]); S.cam.minDist = 1; S.cam.maxDist = 14; S._view = p.mode; S._narrowCam = false; }
@@ -944,7 +1021,7 @@
           const p = S.p, th = g.theme, cy = '#3DD6F5', gr = '#7CF0B0', am = '#F5B451', pk = '#FF8FB0';
           if (p.mode === 'moi') {
             const Mi = S.Mi, f = []; for (let d = -p.size; d <= p.size + 1e-9; d += p.size / 40) f.push([d, Mi.Icm + Mi.M * d * d]);
-            const P = g.Plot({ xmin: -p.size, xmax: p.size, ymin: 0, ymax: Math.max(...f.map(q => q[1])) * 1.1, xlabel: 'axis offset d (m)', ylabel: 'I (kg·m²)', xfmt: v => v.toFixed(2), yfmt: v => v.toExponential(1) }).frame();
+            const P = g.Plot({ xmin: -p.size, xmax: p.size, ymin: 0, ymax: Math.max(...f.map(q => q[1])) * 1.1, xlabel: 'axis offset d (m)', ylabel: 'I (kg·m²)', xfmt: v => v.toFixed(2), yfmt: v => v === 0 ? '0' : Math.abs(v) >= 1 ? v.toFixed(2) : v.toFixed(3) }).frame();
             P.clip(() => { P.line(f, am, 1.6, [5, 3]); Mi.curve.forEach(q => P.dot(q[0], q[1], 3.5, cy)); P.dot(Mi.d, Mi.I, 6, gr, th['ink-950']); });
             P.tag(0, Mi.Icm, 'I_cm: the least of all parallel axes', th['text-2'], 'center', -10);
             return;
@@ -961,8 +1038,8 @@
           if (p.mode === 'ladder') {
             const Ld = S.Ld, mg = Ld.m * G;
             const P = g.Plot({ xmin: 0, xmax: Math.max(0.5, Ld.tEnd), ymin: -0.1, ymax: 1.2, xlabel: 't (s)', ylabel: 'force ÷ mg', xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(1) }).frame();
-            P.clip(() => { P.line(Ld.out.map(q => [q[0], q[3] / mg]), pk, 2.2); P.line(Ld.out.map(q => [q[0], q[4] / mg]), cy, 2.2); if (isFinite(Ld.tLeave)) P.vline(Ld.tLeave, g.alpha(am, .8), [3, 3]); });
-            P.tag(0.02, Ld.out[0][4] / mg, 'floor', cy, 'left', -8); P.tag(0.02, Ld.out[0][3] / mg, 'wall', pk, 'left', 12);
+            P.clip(() => { P.line(Ld.out.map(q => [q[0], q[3] / mg]), pk, 2.2); P.line(Ld.out.map(q => [q[0], q[4] / mg]), cy, 2.2); P.line(Ld.out.map(q => [q[0], (q[6] || 0) / mg]), am, 1.8, [5, 3]); if (isFinite(Ld.tLeave)) P.vline(Ld.tLeave, g.alpha(am, .8), [3, 3]); });
+            P.tag(0.02, Ld.out[0][4] / mg, 'floor', cy, 'left', -8); P.tag(0.02, Ld.out[0][3] / mg, 'wall', pk, 'left', 12); P.tag(Math.max(0.5, Ld.tEnd) * 0.5, (Ld.out[Ld.out.length >> 1][6] || 0) / mg, 'floor friction', am, 'center', -8);
             if (isFinite(Ld.tLeave)) P.tag(Ld.tLeave, 1.1, 'off the wall', am, 'right', 0);
             return;
           }
@@ -971,7 +1048,7 @@
             const lo = Math.min(0, ...pts.map(q => q[1])), hi = Math.max(...pts.map(q => q[1]));
             const P = g.Plot({ xmin: -St.Lr / 2, xmax: St.Lr / 2, ymin: lo - 0.1 * (hi - lo) - 0.01, ymax: hi * 1.1 + 0.01, xlabel: 'position along the rod from its centre (m)', ylabel: 'velocity (m/s)', xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(2) }).frame();
             P.clip(() => { P.hline(0, g.alpha(th['text-3'], .7)); P.line(pts, cy, 2.4); P.vline(St.x, g.alpha(pk, .8), [3, 3]); if (!St.hinged && Math.abs(St.iar) <= St.Lr / 2) P.dot(St.iar, 0, 5, am, th['ink-950']); });
-            P.tag(St.x, hi, 'struck here', pk, 'left', 0);
+            P.tag(St.x, hi, 'struck here', pk, St.x > 0.2 * St.Lr ? 'right' : 'left', 0);
             return;
           }
           if (p.mode === 'spin') {
@@ -989,16 +1066,21 @@
               P.tag(5.9, Sp.wc, 'common ω', th['text-2'], 'right', -8);
               return;
             }
-            const P = g.Plot({ xmin: 0, xmax: Sp.tEnd, ymin: 0, ymax: Math.max(p.wr0, 1) * 1.1, xlabel: 't (s)', ylabel: 'ω (rad/s) · r × 20 (m)', xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(0) }).frame();
-            P.clip(() => { P.line(Sp.out.map(q => [q[0], q[3]]), cy, 2.2); P.line(Sp.out.map(q => [q[0], q[1] * 20]), pk, 2.2); P.vline(tt, g.alpha(gr, .7), [3, 3]); });
+            const on = Sp.out.filter(q => q[8]), xm = isFinite(Sp.tExit) ? Sp.tExit * 1.6 : Sp.tEnd;
+            const P = g.Plot({ xmin: 0, xmax: xm, ymin: 0, ymax: Math.max(p.wr0, 1) * 1.1, xlabel: 't (s)', ylabel: 'ω (rad/s) · r × 20 (m)', xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => { P.line(Sp.out.map(q => [q[0], q[3]]), cy, 2.2); P.line(on.map(q => [q[0], q[1] * 20]), pk, 2.2); if (isFinite(Sp.tExit)) P.vline(Sp.tExit, g.alpha(am, .8), [4, 3]); if (tt <= xm) P.vline(tt, g.alpha(gr, .7), [3, 3]); });
+            if (isFinite(Sp.tExit)) P.tag(Sp.tExit, Math.max(p.wr0, 1) * 0.55, 'leaves the end: ω then stays ' + Sp.wEnd.toFixed(2), am, 'left', 0);
+            if (on.length) P.tag(on[on.length - 1][0], on[on.length - 1][1] * 20, 'r × 20 ', pk, 'right', 4);
             P.tag(Sp.tEnd * 0.02, p.wr0, 'ω of the rod', cy, 'left', -8);
             return;
           }
-          const Tp = S.Tp, pts = Tp.out.filter((_, i) => i % 2 === 0).map(q => [q[0], q[1] * 180 / Math.PI]);
+          // nutation is fast (period 2πI₁/I₃ω₃), so the plot shows its first six nods, where the cusps can be seen
+          const Tp = S.Tp, Tn = TAU * Tp.I1 / Math.max(1e-9, Tp.I3 * Tp.w3), xm = Math.min(Tp.tEnd, Math.max(0.2, 6 * Tn));
+          const pts = Tp.out.filter(q => q[0] <= xm * 1.02).map(q => [q[0], q[1] * 180 / Math.PI]);
           const lo = Math.min(...pts.map(q => q[1])), hi = Math.max(...pts.map(q => q[1]));
-          const P = g.Plot({ xmin: 0, xmax: Tp.tEnd, ymin: lo - 0.5 - (hi - lo) * 0.1, ymax: hi + 0.5 + (hi - lo) * 0.1, xlabel: 't (s)', ylabel: 'θ (°)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) }).frame();
-          P.clip(() => { P.line(pts, am, 1.8); P.vline(S.ts % Tp.tEnd, g.alpha(gr, .7), [3, 3]); });
-          P.tag(Tp.tEnd * 0.98, hi, 'nutation: ' + Tp.nut.toFixed(2) + '°', am, 'right', -8);
+          const P = g.Plot({ xmin: 0, xmax: xm, ymin: lo - 0.5 - (hi - lo) * 0.1, ymax: hi + 0.5 + (hi - lo) * 0.1, xlabel: 't (s)', ylabel: 'θ (°)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) }).frame();
+          P.clip(() => { P.line(pts, am, 2); if (S.ts % Tp.tEnd <= xm) P.vline(S.ts % Tp.tEnd, g.alpha(gr, .7), [3, 3]); });
+          P.tag(xm * 0.98, hi, 'nutation: ' + Tp.nut.toFixed(2) + '° · period ' + (Tn * 1000).toFixed(0) + ' ms ≈ 2πI₁/I₃ω₃', am, 'right', -8);
         } },
       { title: S => ({ moi: 'The falling weight: distance against time', hinge: 'Period against pivot position (small swings)', ladder: 'The path of the centre of mass',
                        strike: S.p.hinged ? 'Impulse from the hinge against the strike point' : 'Where the point at rest lies, for each strike point',
@@ -1034,6 +1116,17 @@
           if (p.mode === 'strike') {
             const St = S.St, pts = [];
             for (let x = -1; x <= 1.0001; x += 0.02) { const r = runStrike(Object.assign({}, p, { xs: x })); pts.push([(x + 1) / 2, St.hinged ? r.Jh : (Math.abs(r.iar) < 5 * St.Lr ? r.iar : NaN)]); }
+            if (!St.hinged) {
+              // y_rest = −k²/x: a hyperbola, so it is drawn in two branches and clipped to ±L; the band is the rod itself
+              const Lr = St.Lr, P = g.Plot({ xmin: 0, xmax: 1, ymin: -Lr, ymax: Lr, xlabel: 'strike position (0 = one end, 1 = other)', ylabel: 'point at rest, from CM (m)', xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(2) }).frame();
+              const b1 = pts.filter(q => q[0] < 0.5 - 1e-9 && isFinite(q[1])), b2 = pts.filter(q => q[0] > 0.5 + 1e-9 && isFinite(q[1]));
+              P.clip(() => { g.ctx.fillStyle = g.alpha(am, .08); g.ctx.fillRect(P.x0, P.Y(Lr / 2), P.x1 - P.x0, P.Y(-Lr / 2) - P.Y(Lr / 2));
+                P.hline(Lr / 2, g.alpha(am, .5), [4, 4]); P.hline(-Lr / 2, g.alpha(am, .5), [4, 4]); P.hline(0, g.alpha(th['text-3'], .7)); P.vline(0.5, g.alpha(th['text-3'], .5), [2, 4]);
+                P.line(b1, cy, 2.2); P.line(b2, cy, 2.2); P.dot((p.xs + 1) / 2, St.iar, 5.5, pk, th['ink-950']); });
+              P.tag(0.02, Lr / 2, 'the rod (±L/2): inside the band the point at rest lies on the rod', am, 'left', 10);
+              P.tag(0.5, -Lr * 0.9, 'hit the CM: pure translation, no point at rest', th['text-3'], 'center', 0);
+              return;
+            }
             const vals = pts.map(q => q[1]).filter(isFinite), lo = Math.min(...vals), hi = Math.max(...vals);
             const P = g.Plot({ xmin: 0, xmax: 1, ymin: lo - 0.1 * (hi - lo), ymax: hi + 0.1 * (hi - lo), xlabel: St.hinged ? 'strike distance from the hinge (× L)' : 'strike position (0 = one end, 1 = other)', ylabel: St.hinged ? 'hinge impulse (N·s)' : 'point at rest, from CM (m)', xfmt: v => v.toFixed(2), yfmt: v => v.toFixed(2) }).frame();
             P.clip(() => { P.hline(0, g.alpha(th['text-3'], .7)); P.line(pts.filter(q => isFinite(q[1])), cy, 2.2); if (St.hinged) P.vline(2 / 3, g.alpha(am, .8), [3, 3]); P.dot((p.xs + 1) / 2, St.hinged ? St.Jh : St.iar, 5.5, pk, th['ink-950']); });
@@ -1054,10 +1147,13 @@
               P.tag(5.9, Sp.out[Sp.out.length - 1][3], 'kinetic', am, 'right', -8); P.tag(5.9, Sp.heat, 'heat', pk, 'right', -8);
               return;
             }
-            const pts = Sp.out.map(q => [q[1] * Math.cos(q[4]), q[1] * Math.sin(q[4])]), R = Sp.Lh * 1.1;
-            const P = g.Plot({ xmin: -R, xmax: R, ymin: -R * 0.6, ymax: R * 0.6, xlabel: 'x (m)', ylabel: 'y (m)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) }).frame();
-            const circ = []; for (let i = 0; i <= 60; i++) { const a = i / 60 * TAU; circ.push([Sp.Lh * Math.cos(a), Sp.Lh * Math.sin(a)]); }
-            P.clip(() => { P.line(circ, g.alpha(th['text-3'], .6), 1, [3, 3]); P.line(pts, pk, 2.2); });
+            // seen from above, to scale (equal axes): the spiral on the rod, then a straight line once it is free
+            const on = Sp.out.filter(q => q[8]).map(q => [q[6], q[7]]), off = Sp.out.filter(q => !q[8]).map(q => [q[6], q[7]]);
+            const asp = Math.max(0.2, (g.h - 44) / Math.max(1, g.w - 66)), R = Math.max(Sp.Lh * 1.6, Sp.Lh * 1.15 / asp);
+            const P = g.Plot({ xmin: -R, xmax: R, ymin: -R * asp, ymax: R * asp, xlabel: 'x (m) — seen from above, equal scales', ylabel: 'y (m)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) }).frame();
+            const circ = []; for (let i = 0; i <= 90; i++) { const a = i / 90 * TAU; circ.push([Sp.Lh * Math.cos(a), Sp.Lh * Math.sin(a)]); }
+            P.clip(() => { P.line(circ, g.alpha(th['text-3'], .6), 1, [3, 3]); P.line(on, pk, 2.2); if (off.length) P.line([on[on.length - 1]].concat(off), am, 2, [6, 3]); });
+            if (off.length) { const q = off[Math.min(off.length - 1, 4)]; P.tag(q[0], q[1], 'free: a straight line', am, q[0] < 0 ? 'left' : 'right', -10); }
             return;
           }
           const Tp = S.Tp, pts = Tp.out.filter((_, i) => i % 3 === 0).map(q => [q[0], q[2]]);
@@ -1070,8 +1166,8 @@
     readouts(S) {
       const p = S.p;
       if (p.mode === 'moi') { const Mi = S.Mi; return [
-        { label: 'I (summed)', value: Mi.I.toExponential(4), unit: 'kg·m²', flag: 'accent' }, { label: 'Formula', value: Mi.IfPar.toExponential(4), unit: 'kg·m²' },
-        { label: 'k = √(I/M)', value: (Mi.k * 100).toFixed(2), unit: 'cm' }, { label: 'I from the fall', value: isFinite(Mi.Imeas) ? Mi.Imeas.toExponential(4) : '—', unit: 'kg·m²', flag: 'ok' },
+        { label: 'I (summed)', value: Mi.I.toPrecision(5), unit: 'kg·m²', flag: 'accent' }, { label: 'Formula', value: Mi.IfPar.toPrecision(5), unit: 'kg·m²' },
+        { label: 'k = √(I/M)', value: (Mi.k * 100).toFixed(2), unit: 'cm' }, { label: 'I from the fall', value: isFinite(Mi.Imeas) ? Mi.Imeas.toPrecision(5) : '—', unit: 'kg·m²', flag: 'ok' },
         { label: 'Fall time (1 m)', value: isFinite(Mi.tFall) ? Mi.tFall.toFixed(3) : '—', unit: 's' } ]; }
       if (p.mode === 'hinge') { const Hn = S.Hn; return [
         { label: 'Hinge force at release', value: (Hn.Nrel / (Hn.Mt * G)).toFixed(3), unit: 'Mg', flag: 'accent' }, { label: 'At the bottom', value: (Hn.Nbot / (Hn.Mt * G)).toFixed(3), unit: 'Mg' },
@@ -1439,13 +1535,25 @@
     // skid marks where the ball slid
     const skid = []; Bw.out.forEach((q, j) => { if (q[5] && j <= i) skid.push([q[1], 0, 0.002]); });
     if (skid.length > 1) path3(F, skid, '#E8E2D0', { alpha: 0.55, width: 3, chunk: 6 });
-    R3.sphere(F, [x, 0, r], r, Bw.k === 1 ? '#8A93A3' : '#3A5FA8', { shadow: true, rim: 0.7 });
-    // a painted stripe, turned by the ball's own angle so the spin shows
-    const stripe = []; for (let k = 0; k <= 40; k++) { const t = k / 40 * TAU, d = [Math.cos(-o[4]) * Math.cos(t) * 1.001, Math.sin(t) * 1.001, Math.sin(-o[4]) * Math.cos(t) * 1.001]; stripe.push([x + d[0] * r, d[1] * r, r + d[2] * r]); }
-    path3(F, stripe, '#FFD36B', { alpha: 0.95, width: 2.2, chunk: 4 });
-    R3.arrow(F, [x, 0, r * 2.4], [x + o[2] * 0.12, 0, r * 2.4], 0.008, '#7FD0FF', {});
-    R3.arrow(F, [x, 0, r * 2.9], [x + o[3] * 0.12, 0, r * 2.9], 0.008, '#FF8FB0', {});
-    R3.label(F, [x + Math.max(o[2], o[3]) * 0.12 + 0.1, 0, r * 2.65], 'v = ' + o[2].toFixed(2) + ' · Rω = ' + o[3].toFixed(2) + ' m/s', '#DCE3EE', { size: 10, align: 'left' });
+    // the body in its own shape; each carries marks turned by its own angle, so spin and slip can be seen
+    const sh = p.rshape, c = [x, 0, r], rotP = (a, rr, yy) => [x + rr * Math.cos(a), yy, r + rr * Math.sin(a)];
+    if (sh === 'ring') {
+      const pts = []; for (let k = 0; k <= 56; k++) pts.push(rotP(k / 56 * TAU, r * 0.93, 0));
+      R3.tube(F, pts, r * 0.11, '#D8DEE8', { segments: 10, round: false });
+      R3.sphere(F, rotP(-o[4] + Math.PI / 2, r * 0.93, -r * 0.08), r * 0.08, '#FF6B5A', { shadow: false, vivid: true });
+    } else if (sh === 'cylinder') {
+      R3.cylinder(F, [x, -r * 0.9, r], [x, r * 0.9, r], r, '#C9824A', { segments: 36, shadow: true });
+      for (let k = 0; k < 3; k++) { const a = -o[4] + k * TAU / 3; path3(F, [[x, -r * 0.905, r], rotP(a, r * 0.95, -r * 0.905)], '#FFE2B8', { alpha: 0.95, width: 2, chunk: 1 }); }
+    } else {
+      R3.sphere(F, c, r, sh === 'shell' ? '#7FC8A8' : '#3A5FA8', { shadow: true, rim: 0.7 });
+      const stripe = []; for (let k = 0; k <= 40; k++) { const t = k / 40 * TAU, d = [Math.cos(-o[4]) * Math.cos(t) * 1.001, Math.sin(t) * 1.001, Math.sin(-o[4]) * Math.cos(t) * 1.001]; stripe.push([x + d[0] * r, d[1] * r, r + d[2] * r]); }
+      path3(F, stripe, '#FFD36B', { alpha: 0.95, width: 2.2, chunk: 4 });
+    }
+    const z1 = 2 * r + 0.12, z2 = 2 * r + 0.3, tip = v => x + v * 0.12;
+    R3.arrow(F, [x, 0, z1], [tip(o[2]), 0, z1], 0.009, '#7FD0FF', { vivid: true });
+    R3.arrow(F, [x, 0, z2], [tip(o[3]), 0, z2], 0.009, '#FF8FB0', { vivid: true });
+    R3.label(F, [tip(o[2]) + (o[2] >= 0 ? 0.06 : -0.06), 0, z1], 'v = ' + o[2].toFixed(2), '#7FD0FF', { size: 10, align: o[2] >= 0 ? 'left' : 'right' });
+    R3.label(F, [tip(o[3]) + (o[3] >= 0 ? 0.06 : -0.06), 0, z2], 'Rω = ' + o[3].toFixed(2), '#FF8FB0', { size: 10, align: o[3] >= 0 ? 'left' : 'right' });
     if (o[5]) R3.arrow(F, [x, 0, 0.004], [x - Math.sign(o[2] - o[3]) * 0.3, 0, 0.004], 0.01, '#FFB347', { vivid: true });
     F.render();
     header(g, 'A ' + Bw.B.name + ' launched at ' + p.v0.toFixed(1) + ' m/s with ' + (p.spin0 === 0 ? 'no spin' : Math.abs(p.spin0).toFixed(1) + ' rev/s of ' + (p.spin0 > 0 ? 'topspin' : 'backspin')) + ' · μ = ' + p.mub.toFixed(2),
@@ -1489,7 +1597,8 @@
     for (let k = 0; k < 6; k++) { const t = -ang + k * Math.PI / 3; path3(F, [[c[0] + Sq.r * ks * 1.05 * Math.cos(t), -0.192, c[2] + Sq.r * ks * 1.05 * Math.sin(t)], [c[0] + Sq.R * ks * 0.92 * Math.cos(t), -0.192, c[2] + Sq.R * ks * 0.92 * Math.sin(t)]], '#5A3A18', { alpha: 0.9, width: 1.6, chunk: 1 }); }
     // the thread leaves the bottom of the hub along the pull direction
     const hb = [c[0], 0, c[2] - Sq.r * ks], dirF = [Math.cos(Sq.phi), 0, Math.sin(Sq.phi)], end = V.add(hb, V.mul(dirF, 1.1));
-    path3(F, [hb, end], '#E8E2D0', { alpha: 0.95, width: 1.6, chunk: 1 });
+    const thr = []; for (let k = 0; k <= 40; k++) thr.push(V.add(hb, V.mul(dirF, 1.1 * k / 40)));
+    path3(F, thr, '#E8E2D0', { alpha: 0.95, width: 1.6, chunk: 1 });   // many short pieces, so the flange hides the part behind it
     R3.arrow(F, end, V.add(end, V.mul(dirF, 0.35)), 0.012, '#7CF0B0', { vivid: true });
     R3.label(F, V.add(end, V.mul(dirF, 0.5)), 'F at ' + p.phsp.toFixed(0) + '°', '#7CF0B0', { size: 10 });
     const f = Sq.slipping ? null : Sq.st.fRoll;
@@ -1656,9 +1765,9 @@
       const views = {
         wheel: { theta: -1.57, phi: 0.12, dist: 4.6, target: [0, 0, 0.45] },
         bowl: { theta: -1.3, phi: 0.3, dist: 3.2, target: [0, 0, 0.1] },
-        spool: { theta: -1.45, phi: 0.2, dist: 4.0, target: [0.3, 0, 0.6] },
+        spool: { theta: -0.95, phi: 0.38, dist: 3.4, target: [0.3, 0, 0.45] },
         yoyo: { theta: -1.57, phi: 0.1, dist: 3.6, target: [0, 0, 1.2] },
-        plank: { theta: -1.4, phi: 0.3, dist: 4.2, target: [0, 0, 0.2] },
+        plank: { theta: -1.25, phi: 0.3, dist: 2.7, target: [0, 0, 0.15] },
         topple: { theta: -1.5, phi: 0.2, dist: 4.2, target: [0, 0, 0.6] }
       };
       const vk = p.mode === 'spool' && p.spsub === 'yoyo' ? 'yoyo' : p.mode;
@@ -1675,7 +1784,7 @@
 
     plots: [
       { title: S => ({ wheel: 'Speed of each rim point, by its angle from the contact point', bowl: 'v and Rω until they meet', spool: S.p.spsub === 'yoyo' ? 'Falling speed against time' : 'Acceleration against the angle of the pull',
-                       plank: 'Speeds in the ground frame', topple: 'The push, the friction, and where the normal force acts' })[S.p.mode],
+                       plank: 'Speeds in the ground frame', topple: 'The push and the friction, against time' })[S.p.mode],
         draw(S, g) {
           const p = S.p, th = g.theme, cy = '#3DD6F5', gr = '#7CF0B0', am = '#F5B451', pk = '#FF8FB0';
           if (p.mode === 'wheel') {
@@ -1704,7 +1813,7 @@
             const hi = Math.max(...pts.map(q => Math.abs(q[1]))) * 1.15;
             const P = g.Plot({ xmin: 0, xmax: 90, ymin: -hi, ymax: hi, xlabel: 'pull angle φ (°)', ylabel: 'acceleration if rolling (m/s²)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(2) }).frame();
             P.clip(() => { P.hline(0, g.alpha(th['text-3'], .7)); P.line(pts.map(q => [q[0], q[1]]), cy, 2.2); pts.forEach(q => { if (!q[2]) P.dot(q[0], q[1], 2, pk); }); P.vline(Sq.crit, g.alpha(am, .8), [3, 3]); P.dot(p.phsp, Sq.st.a, 5.5, gr, th['ink-950']); });
-            P.tag(Sq.crit, hi * 0.85, 'cos φ = r/R', am, 'left', 0); P.tag(2, -hi * 0.85, 'pink: friction cannot hold it — slips', pk, 'left', 0);
+            P.tag(Sq.crit, hi * 0.85, 'cos φ = r/R', am, 'left', 0); P.tag(2, -hi * 0.85, pts.some(q => !q[2]) ? 'pink dots: friction cannot hold it — it slips there' : 'friction holds at every angle (μ = ' + p.musp.toFixed(2) + ')', pts.some(q => !q[2]) ? pk : gr, 'left', 0);
             return;
           }
           if (p.mode === 'plank') {
@@ -1716,9 +1825,9 @@
           }
           const Tb = S.Tb, pts = Tb.out;
           const P = g.Plot({ xmin: 0, xmax: Tb.tEnd, ymin: 0, ymax: Math.max(Tb.Fs, Tb.Ft) * 1.15, xlabel: 't (s)', ylabel: 'N', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) }).frame();
-          P.clip(() => { P.hline(Tb.Ft, g.alpha(pk, .8), [4, 3]); P.hline(Tb.Fs, g.alpha(am, .8), [4, 3]); P.line(pts.map(q => [q[0], q[1]]), gr, 2.4); P.line(pts.map(q => [q[0], q[2] / (Tb.b / 2) * Tb.Ft]), cy, 1.6); });
+          P.clip(() => { P.hline(Tb.Ft, g.alpha(pk, .8), [4, 3]); P.hline(Tb.Fs, g.alpha(am, .8), [4, 3]); P.line(pts.map(q => [q[0], q[1]]), gr, 2.6); P.line(pts.map(q => [q[0], q[5]]), cy, 2, [6, 3]); P.vline(Tb.tEvent, g.alpha(th['text-3'], .6), [2, 4]); });
           P.tag(Tb.tEnd * 0.02, Tb.Ft, 'tips at ' + Tb.Ft.toFixed(1) + ' N', pk, 'left', -8); P.tag(Tb.tEnd * 0.02, Tb.Fs, 'slides at ' + Tb.Fs.toFixed(1) + ' N', am, 'left', -8);
-          P.tag(Tb.tEnd * 0.98, Tb.Ft * 0.5, 'blue: normal force position (edge = top line)', cy, 'right', 0);
+          P.tag(Tb.tEnd * 0.98, Math.min(Tb.Fs, Tb.Ft) * 0.45, 'green: the push F · blue dashed: friction (= F while static, μmg once sliding)', cy, 'right', 0);
         } },
       { title: S => ({ wheel: 'The paths: cycloid (rim) and curtate cycloid (halfway out)', bowl: 'Final speed against the spin it was launched with', spool: S.p.spsub === 'yoyo' ? 'Acceleration against hub size' : 'Friction the spool needs, against μN',
                        plank: 'Accelerations against the pull — rolling, then slipping', topple: 'Tip or slide: the map of push height against μ' })[S.p.mode],
@@ -1736,7 +1845,7 @@
             const lo = Math.min(...pts.map(q => q[1])), hi = Math.max(...pts.map(q => q[1]));
             const P = g.Plot({ xmin: -30, xmax: 30, ymin: lo, ymax: hi, xlabel: 'launch spin (rev/s, + topspin)', ylabel: 'final speed (m/s)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(1) }).frame();
             P.clip(() => { P.hline(0, g.alpha(th['text-3'], .7)); P.line(pts, cy, 2.2); P.dot(p.spin0, Bw.vRun, 5.5, gr, th['ink-950']); });
-            P.tag(-29, 0, 'below zero: it comes back', pk, 'left', 10);
+            if (lo < -0.3) P.tag(-29, 0, 'below zero: it comes back', pk, 'left', 10);
             return;
           }
           if (p.mode === 'spool') {

@@ -4176,7 +4176,7 @@
       // the cart: a deck on four wheels
       B.texBox(F, m(0, 0, -0.025), [0.52 * K, 0.22 * K, 0.03 * K], B.wood('#7A5230', 71), { ambient: 0.5 });
       [[-0.2, -0.1], [0.2, -0.1], [-0.2, 0.1], [0.2, 0.1]].forEach(q => R3.cylinder(F, m(q[0], q[1] - 0.012, -0.045), m(q[0], q[1] + 0.012, -0.045), 0.022 * K, '#1E2533',
-        { segments: 16, shadow: false, spokes: 4, phase: -(0.5 * A.a * S.ts * S.ts) / 0.022 }));
+        { segments: 16, shadow: false, spokes: 4, phase: (0.5 * A.a * S.ts * S.ts) / 0.022 }));
       // the tank and its liquid, the surface tilted by s
       const L = TK.L, Wd = TK.W, zS = (x) => clamp(TK.h0 - s * x, 0, TK.H);
       const xL = -L / 2, xR = L / 2;

@@ -158,7 +158,7 @@ window.InsightLab = (function () {
       ctx.fillStyle = theme['text-2'];
       if (cfg.xlabel) { ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(cfg.xlabel, P.x1, h - 2); }
       if (cfg.ylabel) {
-        ctx.save(); ctx.translate(11, P.y1 + 2); ctx.rotate(-Math.PI / 2);
+        ctx.save(); ctx.translate(2, P.y1 + 2); ctx.rotate(-Math.PI / 2);
         ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText(cfg.ylabel, 0, 0); ctx.restore();
       }
       return P;

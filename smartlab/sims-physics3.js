@@ -102,15 +102,17 @@
       // they hide behind one another.
       {
         const run = S.len * Math.cos(th), rise = S.len * Math.sin(th);
-        const span = run + S.runout;
-        const tgt = [(-run + S.runout) / 2, 0, rise * 0.34];
+        // The camera sits on the downhill side, a little above the slope: from the uphill side a steep ramp
+        // face turns away and only its side wall is seen. The distance also fits the height, not just the run.
+        const span = Math.max(run + S.runout, rise * 2.1);
+        const tgt = [(-run + S.runout) / 2, 0, rise * 0.5];
         if (!S.cam) {
-          S.cam = Camera({ theta: -2.12, phi: 0.33, dist: span * 1.00, target: tgt });
+          S.cam = Camera({ theta: -1.05, phi: 0.36, dist: span * 1.05, target: tgt });
           S.cam.minDist = 1.0; S.cam.maxDist = 20;
         } else {
           S.cam.target = tgt;
-          S.cam.home.dist = span * 1.00;
-          if (!S.camTouched) S.cam.dist = span * 1.00;
+          S.cam.home.dist = span * 1.05;
+          if (!S.camTouched) S.cam.dist = span * 1.05;
         }
       }
       S.tSim = 0; S.finished = 0; S.hold = 0;
@@ -161,7 +163,15 @@
             // needs no friction: it carries on at constant speed. Letting it run
             // out is what stops the four piling up on the finish line — and it
             // is the same fact the notes make a point of.
-            r.a = 0; r.f = 0; r.alpha = 0;
+            // ...but a body that arrives still SLIPPING (v > ωR) meets kinetic friction μMg on the flat,
+            // which slows v and spins ω up until v = ωR; after that it rolls on with no friction at all.
+            const slip = r.v - r.w * S.R;
+            if (slip > 1e-9 && p.mu > 0) {
+              const fk = p.mu * S.M * G, a2 = -fk / S.M, al2 = fk * S.R / (r.sh.k * S.M * S.R * S.R);
+              let v2 = r.v + a2 * h, w2 = r.w + al2 * h;
+              if (v2 - w2 * S.R <= 0) { const vr = (r.v + r.sh.k * r.w * S.R) / (1 + r.sh.k); v2 = vr; w2 = vr / S.R; }
+              r.v = v2; r.w = w2; r.a = a2; r.f = fk; r.alpha = al2;
+            } else { r.a = 0; r.f = 0; r.alpha = 0; }
           }
           r.s += r.v * h; r.phi += r.w * h;
           if (r.s >= S.len + S.runout) { r.s = S.len + S.runout; r.done = true; }
@@ -317,7 +327,7 @@
             const t = i / 30 * TAU;
             const ca = Math.cos(r.phi), sa = Math.sin(r.phi);
             const lx = Math.cos(t) * S.R * 0.99, lz = Math.sin(t) * S.R * 0.99;
-            mer.push([centre[0] + lx * ca - lz * sa, lane, centre[2] + lx * sa + lz * ca]);
+            mer.push([centre[0] + lx * ca + lz * sa, lane, centre[2] - lx * sa + lz * ca]);   // top moves downhill (+x)
           }
           R3.tube(F, mer, S.R * 0.055, RX.mix(r.col, '#05080F', 0.45),
                   { round: false, shadow: false, bias: -S.R * 0.9 });
@@ -332,7 +342,7 @@
           R3.callout(F, [centre[0], lane, centre[2] + S.R * 1.25], 0, -10 - idx * 11,
                      (r.place ? '#' + r.place + ' ' : '') + r.sh.name, r.col, { size: 9 });
         }
-        if (!r.rolls) {
+        if (r.v - r.w * S.R > 1e-4) {
           R3.label(F, [centre[0], lane, centre[2] - S.R * 1.5], 'SLIPPING', th.crit, { size: 8.5 });
         }
       });
@@ -345,7 +355,7 @@
         const c = along(r.s);
         const foot = [c.p[0], lane, c.p[2]];
         const cen = [c.p[0] + c.n[0] * S.R, lane, c.p[2] + c.n[2] * S.R];
-        const sc = S.R * 0.11;                       // metres per newton
+        const sc = S.R * 0.2;                        // metres per newton
         const ar = S.R * 0.085;
         R3.arrow(F, cen, [cen[0], lane, cen[2] - S.M * 9.80665 * sc], ar, '#FFD36B',
                  { label: 'Mg', head: S.R * 0.36 });
@@ -354,7 +364,7 @@
                  ar, '#8FA3C0', { label: 'N', head: S.R * 0.36 });
         if (r.f > 0.01) {
           R3.arrow(F, foot, [foot[0] - c.t[0] * r.f * sc, lane, foot[2] - c.t[2] * r.f * sc],
-                   ar, r.rolls ? '#7CE0A8' : '#FB7185',
+                   ar, r.v - r.w * S.R <= 1e-4 ? '#7CE0A8' : '#FB7185',
                    { label: 'f = ' + r.f.toFixed(2) + ' N', head: S.R * 0.36 });
         }
         // and the angular velocity, about the axis it actually turns on
@@ -399,7 +409,9 @@
       const sel = S.runs.find(q => q.sh.id === p.shape) || S.runs[0];
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = '700 19px "IBM Plex Sans Condensed",sans-serif'; ctx.fillStyle = th.text;
-      ctx.fillText(sel.rolls ? 'ROLLING WITHOUT SLIPPING' : 'SLIPPING — v ≠ ωR', 14, 8);
+      const slipNow = sel.v - sel.w * S.R > 1e-4, onFlat = sel.s > S.len;
+      ctx.fillText(slipNow ? (onFlat ? 'SLIPPING ON THE FLAT — friction spins it up' : 'SLIPPING — v ≠ ωR')
+                           : (sel.rolls || !onFlat ? 'ROLLING WITHOUT SLIPPING' : 'ROLLING NOW — friction caught it up on the flat'), 14, 8);
       ctx.font = '500 10px "IBM Plex Mono",monospace';
       ctx.fillStyle = sel.rolls ? th.ok : th.crit;
       ctx.fillText(sel.rolls
@@ -502,6 +514,11 @@
               muC.push([k, (k * Math.tan(S.th) / (1 + k)) * aF * 1.12]);
             }
             P.line(muC, '#FB7185', 1.6, [4, 3]);
+            // the μ actually available, on the same (right-hand) scale: every body whose dashed μ_needed lies
+            // above this line cannot be held by friction and slips
+            const muA = S.p.mu * aF * 1.12;
+            if (muA <= aF * 1.12) { P.hline(muA, g.alpha('#FB7185', .55), [1, 3]);
+              P.tag(1.14, muA, 'μ available = ' + S.p.mu.toFixed(2), '#FB7185', 'right', -8); }
             SHAPES.forEach(sh => {
               const on = sh.id === S.p.shape;
               P.dot(sh.k, aF / (1 + sh.k), on ? 5 : 3.4, COL[sh.id], on);
@@ -511,6 +528,11 @@
             P.hline(aF, g.alpha(g.theme['text-3'], .7), [3, 3]);
           });
           P.tag(0.02, aF, 'a slider, k = 0', g.theme['text-3'], 'left', -8);
+          // the right-hand axis for the dashed curve: μ needed to roll, k tanθ/(1 + k)
+          { const ctx = g.ctx, top = aF * 1.12, muTop = top / (aF * 1.12), st = muTop > 0.6 ? 0.2 : muTop > 0.3 ? 0.1 : 0.05;
+            ctx.save(); ctx.font = '10px "IBM Plex Mono",monospace'; ctx.fillStyle = '#FB7185'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+            for (let m = 0; m <= muTop + 1e-9; m += st) if (P.Y(m * aF * 1.12) > P.y1 + 16) ctx.fillText(m.toFixed(2), P.x1 + 6, P.Y(m * aF * 1.12));
+            ctx.textBaseline = 'top'; ctx.fillText('μ needed', P.x1 + 6, P.y1 - 2); ctx.restore(); }
         },
         hover(S, x) {
           const k = clamp(x, 0, 1.15);

@@ -742,6 +742,37 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (g)** — **Client: "a lot of graphical and simulation mistakes in all these three [rotational labs], check and
+  correct them."** Went through every preset of `rolling`, `rigidbody` and `rollingadv`, checking the stage, both plots and the
+  readouts. **Fixed:**
+  - **Physics.**
+    - A standing ladder showed zero wall force and empty graphs. Statics gives N_wall = f = (mg/2) tanθ; floor friction is now
+      plotted too.
+    - In `rolling`, a body that slid down arrived on the flat still slipping, and friction was then switched off, so it slipped
+      forever. Kinetic friction now acts on the flat until v = ωR.
+    - The bead stuck at the rod's end after leaving it. It now flies off in a straight line (seen from above) and falls.
+    - The struck rod's velocity arrows and "at rest" mark were impulse-instant values painted on a moving rod. The arrows are
+      now v_cm + ω × r at every instant, and the instantaneous axis is drawn in space at −v_cm/ω.
+  - **Engine bug (`render3d.js`).** `cylinder` turned the spokes on its two end caps in OPPOSITE directions ("mirror images").
+    A rigid body turns one way at both ends, so bodies appeared to spin backwards depending on which cap faced the camera.
+    Both caps now use the same right-handed phase about a→b. The one caller that had compensated (the accelerating cart in
+    `_f6.js` / physics11) had its sign flipped.
+  - **Global UI (`index.html`).** `.tooltip{display:flex}` overrode the `hidden` attribute, leaving an empty box on EVERY plot
+    in every lab. Added `.tooltip[hidden]{display:none}`.
+  - **Global UI (`lab-core.js`).** Moved the rotated y-axis label to x = 2 so it no longer collides with the top tick.
+  - **Graphics.**
+    - Moment of inertia: the solid cone was drawn half a unit low. Solids become wireframes when mass elements show, and the
+      elements are coloured by r⊥. Tick labels and readouts use plain decimals, not 1.0e-1.
+    - The turntable student is now a jointed figure: two-link arms with the elbow solved each frame, dumbbells, legs.
+    - The bowling set-up always drew a sphere; it now draws a ring, cylinder, shell or sphere as chosen.
+    - Gyroscope: L, τ (at the pivot), mg and Ω arrows. The nutation plot is zoomed to six nods, not a solid band.
+    - Rolling camera moved to the downhill side: from uphill, a steep ramp's face turns away. Its μ-needed curve now has a
+      right-hand axis and the μ-available line.
+    - Spool: a 3/4 view shows the hub between the flanges, and the thread is split into short pieces so the flange hides it.
+    - Plank: camera zoomed in. Topple: the plot shows push and friction, not a unit-less normal-force position.
+  **Lesson:** a sim can pass every numeric problem and still be wrong on stage. Physics that only happens in the animation
+  (after an exit, on a run-out, after an impact) needs its own check.
+
 - **2026-09-25 (f)** — **Client: "before [batch 5] let's make Rotational Motion… JEE Advanced makes tougher questions from
   it… ultra advanced level of visualization… all aspects."** Built two labs in `sims-physics13.js` (46 sims):
   - `rigidbody`: moment of inertia, hinge, ladder, strike, spin, gyro.
