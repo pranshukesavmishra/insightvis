@@ -101,9 +101,9 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v12 (shipped)
+## 4. Insight Smart Lab — v13 (shipped)
 
-Source: [`smartlab/`](./smartlab). **Forty-four experiments across twenty-nine chapters.**
+Source: [`smartlab/`](./smartlab). **Forty-six experiments across twenty-nine chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
 **Physics now spans nineteen chapters** — seventeen of its benches are built in true 3D on `render3d.js`,
 and the student can drag the apparatus into shape rather than only dial it in.
@@ -367,6 +367,26 @@ Four set-ups. No curve on them is drawn from a formula.
 Nothing is told to roll. The friction that rolling *requires* is computed every step and tested
 against μN; when it cannot be supplied the two equations decouple and the body genuinely slips.
 Four bodies race from the same height, and mass and radius cancel out of the answer entirely.
+
+**Rigid-Body Dynamics — Moment of Inertia, Torque and Angular Momentum** (v13, JEE Advanced)
+Six benches, every number integrated rather than quoted:
+- **Moment of inertia.** Nine bodies are built as point clouds and summed about any axis, including a cube's body
+  diagonal. It is also measured with a falling-mass flywheel.
+- **A released rod on a hinge.** The hinge force is shown as components along the rod and across it (0.25 mg at
+  release, 2.5 mg at the bottom).
+- **A sliding ladder.** A 3×3 linear solve at every step; the ladder leaves the wall at 2/3 of its starting height.
+- **A rod struck on ice.** Shows the centre of percussion and the point at rest.
+- **Conserving angular momentum.** A skater, two discs pressed together, and a bead sliding out along a spinning rod.
+- **A heavy symmetric top.** Solved from the Euler–Lagrange equations, showing precession and nutation.
+
+**Rolling and Friction — the Point at Rest, Spin and Slip, Spools, Planks and Toppling** (v13, JEE Advanced)
+- **The rolling wheel.** Velocity arrows turn about the point at rest, and the rim point's path is summed to 8R.
+  Wheelspin and a skidding wheel are handled too.
+- **A bowling ball launched with spin.** It slides, then rolls at (v₀ + kRω₀)/(1 + k).
+- **A spool pulled by its thread.** It rolls toward the pull, away from it, or stays put at arccos(r/R).
+- **A yo-yo.**
+- **A cylinder on a pulled plank.** It slips above a critical force.
+- **A pushed block.** It either slides or tips over its edge.
 
 ### Physics · Oscillations
 **28 · Resonance, Damping and Normal Modes**

@@ -742,6 +742,24 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (f)** — **Client: "before [batch 5] let's make Rotational Motion… JEE Advanced makes tougher questions from
+  it… ultra advanced level of visualization… all aspects."** Built two labs in `sims-physics13.js` (46 sims):
+  - `rigidbody`: moment of inertia, hinge, ladder, strike, spin, gyro.
+  - `rollingadv`: wheel, bowling ball, spool and yo-yo, plank, topple.
+  - 18 problems, all measured within tolerance.
+  **Techniques:**
+  - Moment of inertia from point clouds summed about an arbitrary axis, so any axis works with no table.
+  - The ladder is a 3×3 solve for (α, N_wall, N_floor) at each step. Contact loss is detected when N_wall < 0.
+  - The top uses the Euler–Lagrange equations under RK4. The steady precession root seeds a nutation-free start.
+  - A wheel's display cycle is the time the axle takes to move 2πR, not one revolution. One revolution is infinite
+    when ω = 0 (skidding), which threw the wheel off the stage and printed 10⁷ m "per turn".
+  **Bugs:**
+  - The bead leaving the rod overshot by one step (4.0794 against 4.0722). Interpolate the event inside the step.
+  - `R3.tube` puts a gradient-filled sphere at every joint by default. On a large wheel this cost 4 fps against 41 fps
+    without. Pass `round: false` for closed rings.
+  - `R3.plane` spanning a whole trajectory (40 m) vanished. Use a window of floor that travels with the body, with
+    marks fixed to the ground so they stream past. The camera follows by setting `cam.target`.
+
 - **2026-09-25 (e)** — **Client: "a lot of upgrade needed in this [batch 4], specially JEE Mains and Advanced".** Added
   JEE Advanced physics, each result computed and verified:
   - **Nuclei**: a decay series (applying the rules, not a lookup); Rutherford scattering; neutron moderation (Monte
