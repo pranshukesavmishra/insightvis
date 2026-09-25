@@ -742,6 +742,21 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (b)** — **Client: "more upgrades according to the JEE Main and Advanced point of view".** I read this as
+  covering the syllabus's classic problem types, each one computed:
+  - **Gravitation 'shapes' mode**: a brute-force superposition over up to 3000 point masses (ring, disc,
+    shell, sphere, cavity, polygon), with a softened sum and the axis peak refined by a parabola.
+  - A `vr = 0` drop panel.
+  - **Fluids**: a hydraulic lift (effort integrated over the stroke), the force on a wall (800
+    strips, oil layer, tilt), and merging drops (the area summed as they absorb).
+  - 12 new problems, all measured within tolerance: gravitation 4, fluids 8.
+  **Lessons:**
+  - 1000 `R3.sphere` calls a frame stalled the page (a screenshot timeout). Pre-shade one sprite per
+    colour and depth-sort the drops by hand with `drawImage`.
+  - Pressure arrows inside a translucent volume get hidden by the wall slab. Put them on the near
+    glass plane.
+  - A new mode with sub-modes needs its own camera key (`pascal-lift`/`pascal-dam`).
+
 - **2026-09-25 (a)** — **Client: "large upgrade needed, especially gravitation — unsatisfied".** The orbit
   bench had been a 2D equatorial picture with an energy-vs-time plot. Added:
   - Real 3D orbits: an inclination i and an in-plane ω applied as one `rot()` to every drawn point

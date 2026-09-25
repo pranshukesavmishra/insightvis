@@ -1032,6 +1032,13 @@
         row(6, 'drag slows it, and it', 'SPEEDS UP', th.warn);
       }
     } else {
+      if (O.v0 < 1) {
+        const lp = O.pts[O.pts.length - 1], vImp = Math.hypot(lp[3], lp[4]), h = O.h0;
+        row(0, 'fall time', tfmt(O.tEnd), th.phys);
+        row(1, 'speed at the ground (integrated)', (vImp / 1e3).toFixed(3) + ' km/s', th.ok);
+        row(2, '√(2GMh / R(R + h))', (Math.sqrt(2 * O.GM * h / (R * (R + h))) / 1e3).toFixed(3) + ' km/s');
+        row(3, '√(2gh) — constant g, wrong', (Math.sqrt(2 * O.GM / (R * R) * h) / 1e3).toFixed(3) + ' km/s', th.crit);
+      } else {
       row(0, 'downrange distance', km(O.rangeKm * 1e3) + ' km', th.crit);
       row(1, 'flight time', tfmt(O.tEnd));
       row(2, O.bound ? 'ellipse it was on: a' : 'energy per kg', O.bound ? km(O.a0) + ' km' : (O.eps0 / 1e6).toFixed(2) + ' MJ/kg');
@@ -1040,6 +1047,7 @@
         row(4, 'needed for orbit here', (O.vc / 1e3).toFixed(3) + ' km/s');
         row(5, 'it had', (O.v0 / 1e3).toFixed(3) + ' km/s');
         row(6, 'angle to horizontal', p.gam.toFixed(0) + '°');
+      }
       }
     }
     /* the engine: a real button on the stage, and the mission's own panel */
@@ -1867,6 +1875,181 @@
     }
   }
 
+  /* =========================================================================
+     THE FIELD OF A SHAPE — superposition, done by brute force
+
+     Every shape is built from thousands of point masses (a ring from 720, a
+     shell from 3000 on a Fibonacci lattice, a solid sphere from forty nested
+     shells weighted by 3r²dr, a disc as a sunflower of equal areas), and the
+     field and potential are summed over all of them. Nothing is assumed: the
+     zero inside a shell, the uniform field inside an off-centre cavity and
+     the maximum on a ring's axis at R/√2 come out of the sums. G = M = R = 1,
+     so fields read in GM/R² and potentials in GM/R. A tiny softening (0.02 R)
+     keeps a probe that lands next to one of the points from seeing a spike.
+     ========================================================================= */
+  function fib(n, r, o, w) {
+    const out = [], ga = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < n; i++) {
+      const z = 1 - 2 * (i + 0.5) / n, rr = Math.sqrt(1 - z * z), a = i * ga;
+      out.push([o[0] + r * rr * Math.cos(a), o[1] + r * rr * Math.sin(a), o[2] + r * z, w]);
+    }
+    return out;
+  }
+  function shapePoints(p) {
+    const sh = p.shape;
+    if (sh === 'ring') { const n = 720, o = []; for (let i = 0; i < n; i++) { const a = i / n * TAU; o.push([Math.cos(a), Math.sin(a), 0, 1 / n]); } return o; }
+    if (sh === 'shell') return fib(3000, 1, [0, 0, 0], 1 / 3000);
+    if (sh === 'disc') {
+      const n = 3000, o = [], ga = Math.PI * (3 - Math.sqrt(5));
+      for (let i = 0; i < n; i++) { const r = Math.sqrt((i + 0.5) / n), a = i * ga; o.push([r * Math.cos(a), r * Math.sin(a), 0, 1 / n]); }
+      return o;
+    }
+    if (sh === 'poly') {
+      const n = p.npoly, o = [];
+      for (let i = 0; i < n; i++) { const a = i / n * TAU + Math.PI / n; o.push([Math.cos(a), Math.sin(a), 0, 1 / n]); }
+      return o;
+    }
+    // solid sphere (M = 1 for the WHOLE sphere), optionally with a cavity hollowed out
+    const NS = 40, o = [];
+    for (let k = 0; k < NS; k++) {
+      const r = (k + 0.5) / NS, dm = 3 * r * r / NS, n = Math.max(8, Math.round(5200 * r * r / NS * 3));
+      fib(n, r, [0, 0, 0], dm / n).forEach(q => {
+        if (sh === 'cavity' && Math.hypot(q[0] - p.cd, q[1], q[2]) < p.cr) return;
+        o.push(q);
+      });
+    }
+    return o;
+  }
+  function sumAt(P, x, y, z) {
+    let gx = 0, gy = 0, gz = 0, V = 0;
+    const e2 = 0.02 * 0.02;
+    for (let i = 0; i < P.length; i++) {
+      const q = P[i], dx = q[0] - x, dy = q[1] - y, dz = q[2] - z, r2 = dx * dx + dy * dy + dz * dz + e2, r = Math.sqrt(r2), k = q[3] / (r2 * r);
+      gx += k * dx; gy += k * dy; gz += k * dz; V -= q[3] / r;
+    }
+    return [gx, gy, gz, V];
+  }
+  /* the textbook answer along the probe axis, for comparison */
+  function shapeFormula(p, s) {
+    const sh = p.shape, a = Math.abs(s), sg = s < 0 ? -1 : 1;
+    if (sh === 'ring' || sh === 'poly') { const d = Math.pow(1 + s * s, 1.5); return { g: -s / d, V: -1 / Math.sqrt(1 + s * s) }; }
+    if (sh === 'disc') return { g: -2 * sg * (1 - a / Math.sqrt(a * a + 1)), V: -2 * (Math.sqrt(a * a + 1) - a) };
+    if (sh === 'shell') return a < 1 ? { g: 0, V: -1 } : { g: -sg / (a * a), V: -1 / a };
+    const whole = a < 1 ? { g: -s, V: -(3 - a * a) / 2 } : { g: -sg / (a * a), V: -1 / a };
+    if (sh === 'sphere') return whole;
+    // cavity = whole sphere − a small sphere of mass c³ at x = d
+    const m = Math.pow(p.cr, 3), u = s - p.cd, b = Math.abs(u), c = p.cr;
+    const small = b < c ? { g: -m * u / (c * c * c), V: -m * (3 * c * c - b * b) / (2 * c * c * c) } : { g: -m * Math.sign(u) / (b * b), V: -m / b };
+    return { g: whole.g - small.g, V: whole.V - small.V };
+  }
+  /* the probe runs up the axis for flat shapes, along x through the centres otherwise */
+  const axisOf = sh => (sh === 'ring' || sh === 'disc' || sh === 'poly') ? 2 : 0;
+  function runShape(p) {
+    const P = shapePoints(p), ax = axisOf(p.shape);
+    const pos = s => ax === 2 ? [0, 0, s] : [s, 0, 0];
+    const line = [];
+    for (let s = -3; s <= 3.0001; s += 0.02) {
+      if (p.shape === 'disc' && Math.abs(s) < 0.03) continue;
+      if ((p.shape === 'shell' || p.shape === 'sphere' || p.shape === 'cavity') && Math.abs(Math.abs(s) - 1) < 0.03) continue;
+      const q = sumAt(P, ...pos(s)); line.push([s, q[ax], q[3]]);
+    }
+    // the arrow field, in the vertical plane through the axis (x–z)
+    const grid = [];
+    for (let i = -6; i <= 6; i++) for (let j = -4; j <= 4; j++) {
+      const x = i * 0.4, z = j * 0.4, q = sumAt(P, x, 0, z);
+      grid.push([x, z, q[0], q[2], Math.hypot(q[0], q[1], q[2])]);
+    }
+    if (p.shape === 'cavity') {             // and a close grid inside the cavity itself
+      for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+        const x = p.cd + i * p.cr * 0.33, z = j * p.cr * 0.33;
+        if (Math.hypot(x - p.cd, z) > p.cr * 0.8) continue;
+        const q = sumAt(P, x, 0, z); grid.push([x, z, q[0], q[2], Math.hypot(q[0], q[1], q[2]), 1]);
+      }
+    }
+    const pr = p.pr, qp = sumAt(P, ...pos(pr)), fp = shapeFormula(p, pr);
+    // the system's own potential energy, for a few point masses
+    let Usys = 0;
+    if (p.shape === 'poly') for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++)
+      Usys -= P[i][3] * P[j][3] / Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]);
+    // where the axial field is strongest (for the ring)
+    let smax = 0, gmax = 0;
+    let im = -1;
+    line.forEach((l, i) => { if (l[0] > 0 && Math.abs(l[1]) > gmax) { gmax = Math.abs(l[1]); smax = l[0]; im = i; } });
+    // refine the peak between samples with a parabola through its neighbours
+    if (im > 0 && im < line.length - 1) {
+      const a = Math.abs(line[im - 1][1]), b = Math.abs(line[im][1]), c = Math.abs(line[im + 1][1]), den = a - 2 * b + c;
+      if (den < 0) { const off = 0.5 * (a - c) / den; smax = line[im][0] + off * (line[im + 1][0] - line[im][0]); gmax = b - 0.25 * (a - c) * off; }
+    }
+    const mass = P.reduce((u, q) => u + q[3], 0);
+    return { P, ax, line, grid, qp, fp, Usys, smax, gmax, mass, n: P.length };
+  }
+
+  function drawShape(S, g) {
+    const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, cam = S.cam, Sh = S.Sh;
+    const narrow = W < 660;
+    drawSky(ctx, cam, W, H);
+    const F = R3.Frame(ctx, cam, { ambient: 0.35, floorZ: null });
+    const K = 0.55, w = (x, y, z) => [x * K, y * K, z * K];
+    // the body itself
+    const sh = p.shape;
+    if (sh === 'ring') {
+      const pts = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * TAU; pts.push(w(Math.cos(a), Math.sin(a), 0)); }
+      R3.tube(F, pts, 0.018, '#C9A04A', { segments: 8 });
+    } else if (sh === 'disc') {
+      const pts = []; for (let i = 0; i < 64; i++) { const a = i / 64 * TAU; pts.push(w(Math.cos(a), Math.sin(a), 0)); }
+      flatPoly(F, pts, 'rgba(201,160,74,.45)');
+      path3(F, pts.concat([pts[0]]), '#E8C878', { alpha: 0.9, width: 1.5, chunk: 8 });
+    } else if (sh === 'poly') {
+      Sh.P.forEach(q => R3.sphere(F, w(q[0], q[1], q[2]), 0.06, '#C9A04A', { shadow: false }));
+      const loop = Sh.P.map(q => w(q[0], q[1], q[2])); loop.push(loop[0]);
+      path3(F, loop, '#8FA4CE', { alpha: 0.4, width: 1, dash: [3, 3], chunk: 1 });
+    } else {
+      R3.wireSphere(F, [0, 0, 0], K, sh === 'shell' ? '#E8C878' : '#C9A04A', { lat: 6, lon: 10, alpha: sh === 'shell' ? 0.55 : 0.3 });
+      if (sh !== 'shell') F.push([0, 0, 0], () => {
+        const c = cam.project([0, 0, 0]); if (!c.ok) return;
+        const rp = K * c.s, gr = ctx.createRadialGradient(c.x - rp * 0.3, c.y - rp * 0.3, rp * 0.1, c.x, c.y, rp);
+        gr.addColorStop(0, 'rgba(230,190,120,.30)'); gr.addColorStop(1, 'rgba(150,100,50,.18)');
+        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(c.x, c.y, rp, 0, TAU); ctx.fill();
+      }, 0.3);
+      if (sh === 'cavity') {
+        R3.wireSphere(F, w(p.cd, 0, 0), p.cr * K, '#7FD0FF', { lat: 4, lon: 8, alpha: 0.7 });
+        R3.label(F, w(p.cd, 0, p.cr + 0.12), 'cavity', '#7FD0FF', { size: 9.5 });
+      }
+    }
+    // the field, as arrows in the vertical plane through the axis
+    const gRef = sh === 'poly' || sh === 'ring' ? 0.4 : 1;
+    Sh.grid.forEach(q => {
+      const m = q[4]; if (m < 1e-4) return;
+      const L = clamp(0.20 * Math.sqrt(m / gRef), 0.03, 0.22) * (q[5] ? 0.8 : 1);
+      const at = w(q[0], 0, q[1]), d = R3.norm([q[2], 0, q[3]]);
+      const col = q[5] ? '#7FD0FF' : RX.mix('#3E6FB8', '#FFD36B', clamp(Math.sqrt(m / gRef), 0, 1));
+      R3.arrow(F, R3.add(at, R3.scale(d, -L / 2)), R3.add(at, R3.scale(d, L / 2)), 0.006, col, { bias: -0.01 });
+    });
+    // the probe on its axis, and the pull the sum gives it
+    const ax = Sh.ax, pp = ax === 2 ? w(0, 0, p.pr) : w(p.pr, 0, 0);
+    path3(F, ax === 2 ? [w(0, 0, -3), w(0, 0, 3)] : [w(-3, 0, 0), w(3, 0, 0)], '#8FA4CE', { alpha: 0.35, width: 1, dash: [5, 4], chunk: 1 });
+    R3.sphere(F, pp, 0.035, '#FF5A7A', { shadow: false });
+    const gq = [Sh.qp[0], Sh.qp[2]], gm = Math.hypot(Sh.qp[0], Sh.qp[1], Sh.qp[2]);
+    if (gm > 1e-3) R3.arrow(F, pp, R3.add(pp, R3.scale(R3.norm([gq[0], 0, gq[1]]), clamp(0.35 * Math.sqrt(gm / gRef), 0.05, 0.45))), 0.009, '#FF5A7A', { label: 'g ' + gm.toFixed(3), labelSize: 9.5 });
+    else R3.label(F, pp, 'g = ' + gm.toExponential(1) + ' — the pulls cancel', '#FF8FB0', { size: 9.5, dy: -16 });
+    F.render();
+    const hp = cam.project(pp), hp2 = cam.project(ax === 2 ? w(0, 0, p.pr + 0.5) : w(p.pr + 0.5, 0, 0));
+    if (hp.ok && hp2.ok) { S._axS = axis2(hp, hp2, 0.5); ringHandle(g, hp, 'prb2', '#FF5A7A'); }
+    const names = { ring: 'A ring', shell: 'A thin spherical shell', sphere: 'A uniform solid sphere', cavity: 'A sphere with a cavity', disc: 'A uniform disc', poly: p.npoly + ' equal masses on a circle' };
+    header(g, names[sh] + ' · ' + Sh.n.toLocaleString('en-US') + ' point masses, summed',
+      'probe at ' + p.pr.toFixed(2) + ' R · g (sum) ' + (Sh.qp[ax]).toFixed(4) + ' · formula ' + Sh.fp.g.toFixed(4) + '  (GM/R²) · V (sum) ' + Sh.qp[3].toFixed(4) + ' · formula ' + Sh.fp.V.toFixed(4) + ' (GM/R)',
+      'g = Σ Gm r̂/r², V = −Σ Gm/r over every point · nothing assumed: the shell theorem is what the sum returns', th.text);
+    const rows = narrow ? 3 : 5, bw = narrow ? W - 24 : 290, bh = 26 + rows * 15 + 10;
+    const row = gPanel(g, 12, H - bh - 30, bw, bh, 'WHAT THE SUM SAYS');
+    if (sh === 'ring') { row(0, 'strongest on the axis at', Sh.smax.toFixed(3) + ' R', th.phys); row(1, 'R/√2', (1 / Math.SQRT2).toFixed(3) + ' R', th.ok); row(2, 'g there · 2/(3√3)', Sh.gmax.toFixed(4) + ' · ' + (2 / (3 * Math.sqrt(3))).toFixed(4)); }
+    else if (sh === 'shell') { const c = sumAt(Sh.P, 0.3, 0.2, -0.1); row(0, 'g inside (at an odd point)', Math.hypot(c[0], c[1], c[2]).toExponential(2), th.ok); row(1, 'V inside', c[3].toFixed(4) + ' = −GM/R', th.phys); row(2, 'outside: as if all at the centre', 'GM/r²'); }
+    else if (sh === 'cavity') { const c = sumAt(Sh.P, p.cd, 0, 0), c2 = sumAt(Sh.P, p.cd + p.cr * 0.5, 0, p.cr * 0.4); row(0, 'g at the cavity centre', Math.hypot(c[0], c[1], c[2]).toFixed(4), th.phys); row(1, 'g elsewhere in the cavity', Math.hypot(c2[0], c2[1], c2[2]).toFixed(4), th.ok); row(2, '(4/3)πGρ·d = GMd/R³', p.cd.toFixed(4)); }
+    else if (sh === 'sphere') { row(0, 'inside: g ∝ r', 'GMr/R³', th.phys); row(1, 'V at the centre', sumAt(Sh.P, 0, 0, 0)[3].toFixed(4) + ' = −3GM/2R', th.ok); row(2, 'mass summed', Sh.mass.toFixed(4) + ' M'); }
+    else if (sh === 'disc') { row(0, 'g on the axis at z = R', (-sumAt(Sh.P, 0, 0, 1)[2]).toFixed(4), th.phys); row(1, '2(1 − 1/√2)', (2 * (1 - 1 / Math.SQRT2)).toFixed(4), th.ok); row(2, 'just above the centre', '→ 2πGσ = 2GM/R²'); }
+    else { const c = sumAt(Sh.P, 0, 0, 0); row(0, 'g at the centre', Math.hypot(c[0], c[1], c[2]).toExponential(2), th.ok); row(1, 'V at the centre', c[3].toFixed(4) + ' = −GM/R', th.phys); row(2, 'system PE ÷ (Gm²/a)', (Sh.Usys / (Math.pow(1 / p.npoly, 2) / (2 * Math.sin(Math.PI / p.npoly)))).toFixed(4)); }
+    if (!narrow) { row(3, 'probe: g sum · formula', Sh.qp[ax].toFixed(4) + ' · ' + Sh.fp.g.toFixed(4)); row(4, 'probe: V sum · formula', Sh.qp[3].toFixed(4) + ' · ' + Sh.fp.V.toFixed(4)); }
+  }
+
   /* the live torsion balance: integrated every frame, so moving the large
      spheres mid-swing is answered by the rod exactly as a real one would */
   function cavLive(S, dt) {
@@ -1916,6 +2099,7 @@
     return (CAVB[key] = { out, near, bMin });
   }
 
+  const SHP = S => S.p.mode === 'shapes', CAVI = S => S.p.mode === 'shapes' && S.p.shape === 'cavity', POLY = S => S.p.mode === 'shapes' && S.p.shape === 'poly';
   const SOL = S => S.p.mode === 'solar', FLD = S => S.p.mode === 'field', HOH = S => S.p.mode === 'orbit' && S.p.mission === 'hohmann',
         RDV = S => S.p.mode === 'orbit' && S.p.mission === 'rendezvous';
   const ORB = S => S.p.mode === 'orbit', BIN = S => S.p.mode === 'binary', INS = S => S.p.mode === 'inside', CAV = S => S.p.mode === 'cavendish';
@@ -1941,6 +2125,7 @@
               model: 'uniform', dkm: 0, probe: 0.5, lat: 30, dayH: 24,
               pos: 'I', from: 'away', MB: 1.5, mg: 15, bmm: 46.5, T0min: 10, zeta: 0.08, Lm: 5, auto: false,
               incO: 0, argP: 0, mission: 'free', dv: 500, bdir: 'pro', logH2: LG(35786), autoB: false, lead: 10,
+              shape: 'ring', pr: 0.7, cd: 0.5, cr: 0.4, npoly: 4,
               focus: 'earth', zoomAU: LG(2), yps: 0.3,
               flogq: LG(1 / 81.3), fdR: 60.3, fshell: false, fv: 11.1, fang: 0,
               sectors: true, arrows: true, run: true },
@@ -1961,6 +2146,11 @@
       { name: 'Solar system · the inner planets', params: { mode: 'solar', focus: 'earth', zoomAU: LG(2), yps: 0.3, sectors: true } },
       { name: 'Solar system · all of it', params: { mode: 'solar', focus: 'jupiter', zoomAU: LG(34), yps: 8, sectors: true } },
       { name: 'Halley\'s comet · 76 years in a minute', params: { mode: 'solar', focus: 'halley', zoomAU: LG(22), yps: 5, sectors: true } },
+      { name: 'Ring · where is g strongest on its axis?', params: { mode: 'shapes', shape: 'ring', pr: 0.707 } },
+      { name: 'Shell · nothing inside', params: { mode: 'shapes', shape: 'shell', pr: 0.45 } },
+      { name: 'Sphere with a cavity · a uniform field', params: { mode: 'shapes', shape: 'cavity', cd: 0.5, cr: 0.4, pr: 0.5 } },
+      { name: 'Four masses on a square', params: { mode: 'shapes', shape: 'poly', npoly: 4, pr: 0.6 } },
+      { name: 'Dropped from h = R · not √(2gh)', params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(6371), vr: 0, gam: 0, drag: false, spin: false, sectors: false } },
       { name: 'Earth and Moon · the neutral point', params: { mode: 'field', flogq: LG(1 / 81.3), fdR: 60.3, fshell: false, fv: 11.0, fang: 0 } },
       { name: 'Just enough to reach the Moon', params: { mode: 'field', flogq: LG(1 / 81.3), fdR: 60.3, fshell: false, fv: 11.09, fang: 0 } },
       { name: 'Inside a hollow shell', params: { mode: 'field', flogq: LG(0.3), fdR: 8, fshell: true, fv: 9, fang: 25 } },
@@ -1978,7 +2168,7 @@
     controls: [
       { group: 'What is set up', items: [
         { key: 'mode', type: 'select', label: 'Experiment', restructure: true, rebuild: true, options: [
-          { value: 'orbit', label: 'Launch a satellite' }, { value: 'solar', label: 'Solar system' }, { value: 'field', label: 'Field & potential' }, { value: 'binary', label: 'Binary star' },
+          { value: 'orbit', label: 'Launch a satellite' }, { value: 'solar', label: 'Solar system' }, { value: 'field', label: 'Field & potential' }, { value: 'shapes', label: 'Field of a shape' }, { value: 'binary', label: 'Binary star' },
           { value: 'inside', label: 'Inside the Earth' }, { value: 'cavendish', label: 'Cavendish balance' }] }
       ] },
       { group: 'Launch', items: [
@@ -1986,7 +2176,7 @@
           { value: 'earth', label: 'Earth' }, { value: 'moon', label: 'Moon' }, { value: 'mars', label: 'Mars' }, { value: 'jupiter', label: 'Jupiter' }] },
         { key: 'logH', label: 'Launch altitude <i>h</i>', min: 2, max: 5.7, step: 0.001, unit: 'km', when: ORB,
           fmt: v => { const h = Math.pow(10, v); return h < 1e4 ? h.toFixed(0) : h.toExponential(3); }, restructure: true },
-        { key: 'vr', label: 'Launch speed ÷ circular speed', min: 0.3, max: 1.8, step: 0.001, unit: '× v_c', when: ORB,
+        { key: 'vr', label: 'Launch speed ÷ circular speed', min: 0, max: 1.8, step: 0.001, unit: '× v_c', when: ORB,
           fmt: v => v.toFixed(3), restructure: true },
         { key: 'gam', label: 'Angle above the horizontal', min: -60, max: 60, step: 0.5, unit: '°', when: ORB,
           fmt: v => v.toFixed(1), restructure: true },
@@ -2007,6 +2197,15 @@
           fmt: v => Math.pow(10, v).toFixed(0), restructure: true },
         { key: 'autoB', type: 'toggle', label: 'Autopilot fires both burns', restructure: true, when: HOH },
         { key: 'lead', label: 'Target starts ahead by', min: -60, max: 60, step: 0.5, unit: '°', when: RDV, fmt: v => v.toFixed(1), restructure: true }
+      ] },
+      { group: 'The shape', items: [
+        { key: 'shape', type: 'select', label: 'Mass distribution', restructure: true, rebuild: true, when: SHP, options: [
+          { value: 'ring', label: 'Ring' }, { value: 'disc', label: 'Disc' }, { value: 'shell', label: 'Shell' }, { value: 'sphere', label: 'Solid sphere' },
+          { value: 'cavity', label: 'Sphere with a cavity' }, { value: 'poly', label: 'Point masses' }] },
+        { key: 'pr', label: 'Probe position along the axis', min: -3, max: 3, step: 0.005, unit: 'R', when: SHP, fmt: v => v.toFixed(3), restructure: true },
+        { key: 'cd', label: 'Cavity centre from the centre <i>d</i>', min: 0, max: 0.55, step: 0.005, unit: 'R', when: CAVI, fmt: v => v.toFixed(3), restructure: true },
+        { key: 'cr', label: 'Cavity radius', min: 0.1, max: 0.45, step: 0.005, unit: 'R', when: CAVI, fmt: v => v.toFixed(3), restructure: true },
+        { key: 'npoly', label: 'Number of masses', min: 2, max: 8, step: 1, unit: '', when: POLY, fmt: v => v.toFixed(0), restructure: true }
       ] },
       { group: 'The solar system', items: [
         { key: 'focus', type: 'select', label: 'Follow', when: SOL, options: [
@@ -2063,6 +2262,13 @@
       if (p.mode === 'orbit') { S.O = runOrbit(p); S.ts = 0; S.hold = 0; missionReset(S); }
       else if (p.mode === 'field') { S.Fd = fieldSetup(p); S.ts = 0; S.hold = 0; }
       else if (p.mode === 'solar') { runSolar(); S.yrs = S.yrs || 0; }
+      else if (p.mode === 'shapes') {
+        if (p.cd + p.cr > 0.95) p.cr = Math.max(0.1, 0.95 - p.cd);        // the cavity must stay inside the sphere
+        p.npoly = Math.round(p.npoly);
+        const key = [p.shape, p.cd, p.cr, p.npoly].join('|');
+        if (!S.Sh || S._shKey !== key) { S.Sh = runShape(p); S._shKey = key; }
+        else { const ax = S.Sh.ax, pos = ax === 2 ? [0, 0, p.pr] : [p.pr, 0, 0]; S.Sh.qp = sumAt(S.Sh.P, pos[0], pos[1], pos[2]); S.Sh.fp = shapeFormula(p, p.pr); }
+      }
       else if (p.mode === 'binary') { S.B = runBinary(p); S.ts = 0; }
       else if (p.mode === 'inside') { S.Tn = runTunnel(p); S.ts = 0; }
       else {
@@ -2079,6 +2285,7 @@
         orbit: { theta: -1.18, phi: 0.80, dist: 3.35, target: [0, 0, 0] },
         field: { theta: -1.30, phi: 0.86, dist: 3.0, target: [0, 0, -0.30] },
         solar: { theta: -1.35, phi: 0.62, dist: 3.3, target: [0, 0, 0] },
+        shapes: { theta: -1.40, phi: 0.30, dist: 3.4, target: [0, 0, 0] },
         binary: { theta: -1.30, phi: 0.78, dist: 3.1, target: [0, 0, 0] },
         inside: { theta: -0.98, phi: 0.30, dist: 3.5, target: [0, 0, 0.02] },
         cavendish: { theta: -1.92, phi: 0.34, dist: 2.35, target: [0, -0.20, 0.16] }
@@ -2108,7 +2315,7 @@
         if (S.ts >= S.Fd.tEnd) { S.ts = S.Fd.tEnd; S.hold = 2.5; }
       } else if (p.mode === 'binary') S.ts += dt * S.B.T / 8;
       else if (p.mode === 'inside') S.ts += dt * S.Tn.T / 10;
-      else cavLive(S, dt);
+      else if (p.mode === 'cavendish') cavLive(S, dt);
     },
 
     drawStage(S, g) {
@@ -2117,6 +2324,7 @@
       if (m === 'orbit') drawOrbit(S, g);
       else if (m === 'field') drawField(S, g);
       else if (m === 'solar') drawSolar(S, g);
+      else if (m === 'shapes') drawShape(S, g);
       else if (m === 'binary') drawBinary(S, g);
       else if (m === 'inside') drawInside(S, g);
       else drawCav(S, g);
@@ -2125,8 +2333,9 @@
     onDrag(S, e) {
       const p = S.p, along = a => a ? e.dx * a.ux + e.dy * a.uy : 0;
       if (e.id === 'burn') { if (e.phase === 'start') fireBurn(S, p.dv, p.bdir); return; }
+      if (e.id === 'prb2' && S._axS) { p.pr = clamp(p.pr + (e.dx * S._axS.ux + e.dy * S._axS.uy) * S._axS.per, -3, 3); this.setup(S); return; }
       if (e.id === 'vel' && S._axT) {
-        p.vr = clamp(p.vr + along(S._axT) * 0.004, 0.3, 1.8);
+        p.vr = clamp(p.vr + along(S._axT) * 0.004, 0, 1.8);
         p.gam = clamp(p.gam + along(S._axR) * 0.35, -60, 60);
         this.setup(S);
       } else if (e.id === 'alt' && S._axR) {
@@ -2148,6 +2357,7 @@
       { title: S => ({ orbit: S.p.mission === 'hohmann' ? 'The mission — height against time, burns marked' : S.p.mission === 'rendezvous' ? 'The gap to the target against time' : S.p.drag ? 'Energy per kg along the run — kinetic, potential, total' : 'Effective potential — where the orbit may go, and where it turns',
                        field: 'Potential along the line of centres — and the probe\'s energy',
                        solar: 'Kepler\'s third law, measured — every planet on one line',
+                       shapes: 'g along the axis — the sum over every point, against the formula',
                        binary: 'What a telescope records — each star\'s radial velocity',
                        inside: 'g from the centre out to 3R — uniform against the real Earth',
                        cavendish: 'The laser spot against time — your record' })[S.p.mode],
@@ -2169,6 +2379,22 @@
             });
             M.burns.forEach((b, i) => P.tag(b.clock / 3600, hi * 0.9, 'burn ' + (i + 1), am, 'left', 0));
             P.tag(xs[0], rdv ? 0 : (M.plan ? (M.plan.r2 - S.O.R) / 1e3 : 0), rdv ? 'caught up' : 'target orbit', gr, 'left', -8);
+            return;
+          }
+          if (p.mode === 'shapes') {
+            const Sh = S.Sh, L = Sh.line.map(l => [l[0], l[1]]), fl = [];
+            for (let s = -3; s <= 3.0001; s += 0.01) fl.push([s, shapeFormula(p, s).g]);
+            const m = Math.max(0.2, ...fl.map(q => Math.abs(q[1])).filter(v => isFinite(v))) * 1.15;
+            const P = g.Plot({ xmin: -3, xmax: 3, ymin: -m, ymax: m, xlabel: 'position along the axis (R)', ylabel: 'g along the axis (GM/R²)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(2) }).frame();
+            P.clip(() => {
+              P.line([[-3, 0], [3, 0]], g.alpha(th['text-3'], .6), 1);
+              P.line(fl, g.alpha(am, .9), 1.6, [5, 3]);
+              L.forEach((q, i) => { if (i % 3 === 0) P.dot(q[0], q[1], 2.2, cy); });
+              P.vline(p.pr, g.alpha(pk, .7), [3, 3]);
+              P.dot(p.pr, S.Sh.qp[S.Sh.ax], 5, pk, th['ink-950']);
+            });
+            P.tag(-2.9, m * 0.9, 'dots: the brute-force sum · dashes: the textbook formula', th['text-2'], 'left', 0);
+            if (p.shape === 'ring' || p.shape === 'poly') P.tag(Sh.smax, -Sh.gmax, 'peak at ' + Sh.smax.toFixed(2) + ' R', pk, 'left', 12);
             return;
           }
           if (p.mode === 'solar') {
@@ -2340,6 +2566,7 @@
       { title: S => ({ orbit: 'Kepler\'s third law — every moon and satellite, and yours',
                        field: 'Where g vanishes, for every mass ratio',
                        solar: 'Speed round the orbit — fastest at perihelion',
+                       shapes: 'Potential along the axis — summed and from the formula',
                        binary: 'Kepler III for a pair — the period fixes the total mass',
                        inside: 'Tunnel transit time against its offset from the centre',
                        cavendish: 'The inverse square, read from the balance' })[S.p.mode],
@@ -2366,6 +2593,19 @@
             Pl.sats.forEach(s => P.tag(LG(s[1] / 1e3), LG(s[2] / 3600), s[0], am, 'left', -10));
             if (O.end === 'closed') P.tag(LG(O.aM / 1e3), LG(O.T / 3600), 'your orbit, timed', '#7CF0B0', 'left', 12);
             P.tag(xmin + 0.05, ymax - 0.15, 'slope 3/2 for every planet · the height is set by GM', th['text-2'], 'left', 0);
+            return;
+          }
+          if (p.mode === 'shapes') {
+            const Sh = S.Sh, fl = [];
+            for (let s = -3; s <= 3.0001; s += 0.01) fl.push([s, shapeFormula(p, s).V]);
+            const lo = Math.min(...fl.map(q => q[1]), ...Sh.line.map(l => l[2])) * 1.1;
+            const P = g.Plot({ xmin: -3, xmax: 3, ymin: lo, ymax: 0, xlabel: 'position along the axis (R)', ylabel: 'V (GM/R)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(2) }).frame();
+            P.clip(() => {
+              P.line(fl, g.alpha(am, .9), 1.6, [5, 3]);
+              Sh.line.forEach((q, i) => { if (i % 3 === 0) P.dot(q[0], q[2], 2.2, cy); });
+              P.dot(p.pr, S.Sh.qp[3], 5, pk, th['ink-950']);
+            });
+            P.tag(-2.9, lo * 0.08, 'g = −dV/dx: where V is flat, g is zero', th['text-2'], 'left', 0);
             return;
           }
           if (p.mode === 'solar') {
@@ -2453,6 +2693,16 @@
                       { label: 'Time to that', value: tfmt(O.tEnd), unit: '' });
         return out;
       }
+      if (p.mode === 'shapes') {
+        const Sh = S.Sh;
+        return [
+          { label: 'g at the probe (sum)', value: Sh.qp[Sh.ax].toFixed(4), unit: 'GM/R²', flag: 'accent', hint: 'component along the axis' },
+          { label: 'g at the probe (formula)', value: Sh.fp.g.toFixed(4), unit: 'GM/R²' },
+          { label: 'V at the probe (sum)', value: Sh.qp[3].toFixed(4), unit: 'GM/R' },
+          { label: 'V at the probe (formula)', value: Sh.fp.V.toFixed(4), unit: 'GM/R' },
+          { label: 'Point masses summed', value: Sh.n.toLocaleString('en-US'), unit: '', hint: 'mass ' + Sh.mass.toFixed(3) + ' M' }
+        ];
+      }
       if (p.mode === 'solar') {
         const b = runSolar().find(x => x.id === p.focus);
         return [
@@ -2522,6 +2772,15 @@
           E.op('−') + E.frac(E.v('GM'), '2' + E.v('a')) + ' ' + E.op('=') + ' ' + E.n(O.eps0 / 1e6, 'MJ/kg') +
           ' → ' + (O.eps0 < 0 ? 'bound' : 'escapes');
       }
+      if (p.mode === 'shapes') {
+        const f = { ring: E.v('g') + ' ' + E.op('=') + ' ' + E.frac(E.v('GMx'), '(' + E.v('R') + '² ' + E.op('+') + ' ' + E.v('x') + '²)^{3/2}') + ' · max at ' + E.v('x') + ' ' + E.op('=') + ' ' + E.v('R') + '/√2',
+          disc: E.v('g') + ' ' + E.op('=') + ' ' + E.frac('2' + E.v('GM'), E.v('R') + '²') + '(1 ' + E.op('−') + ' ' + E.frac(E.v('x'), '√(' + E.v('x') + '² ' + E.op('+') + ' ' + E.v('R') + '²)') + ')',
+          shell: E.v('g') + ' ' + E.op('=') + ' 0 inside, ' + E.frac(E.v('GM'), E.v('r') + '²') + ' outside · ' + E.v('V') + ' ' + E.op('=') + ' ' + E.op('−') + E.frac(E.v('GM'), E.v('R')) + ' inside',
+          sphere: E.v('g') + ' ' + E.op('=') + ' ' + E.frac(E.v('GMr'), E.v('R') + '³') + ' inside · ' + E.v('V') + ' ' + E.op('=') + ' ' + E.op('−') + E.frac(E.v('GM') + '(3' + E.v('R') + '² ' + E.op('−') + ' ' + E.v('r') + '²)', '2' + E.v('R') + '³'),
+          cavity: E.v('g') + E.sub('cavity') + ' ' + E.op('=') + ' ' + E.frac('4', '3') + 'π' + E.v('G') + 'ρ ' + E.v('d') + ' — the same everywhere inside, pointing along d',
+          poly: E.v('g') + ' ' + E.op('=') + ' 0 at the centre · ' + E.v('U') + ' ' + E.op('=') + ' ' + E.op('−') + 'Σ' + E.frac(E.v('Gm') + '²', E.v('r') + E.sub('ij')) + ' over pairs' }[p.shape];
+        return f + '<br>at the probe: sum ' + E.n(S.Sh.qp[S.Sh.ax], 'GM/R²') + ' · formula ' + E.n(S.Sh.fp.g, 'GM/R²');
+      }
       if (p.mode === 'solar') {
         const b = runSolar().find(x => x.id === p.focus);
         return E.frac(E.v('T') + '²', E.v('a') + '³') + ' ' + E.op('=') + ' ' + E.frac('4π²', E.v('GM') + '☉') + ' → ' + E.v('T') + E.sub('yr') + ' ' + E.op('=') + ' ' + E.v('a') + E.sub('AU') + '^1.5 ' + E.op('=') + ' ' + E.n(Math.pow(b.aM, 1.5), 'yr') +
@@ -2561,6 +2820,30 @@
       'swings shrink. With both applied, the balance returns G to within a few tenths of a per cent.',
 
     problems: [
+      { source: 'JEE Main pattern · field on the axis of a ring',
+        q: 'A ring of mass M and radius R. At what distance from its centre, along the axis, is the gravitational field strongest? Answer in units of R.',
+        params: { mode: 'shapes', shape: 'ring', pr: 0.707 },
+        predict: { label: 'distance', unit: 'R', tol: 0.02 },
+        measure: S => S.Sh.smax,
+        working: 'g = GMx/(R² + x²)^{3/2}. Setting dg/dx = 0 gives (R² + x²) = 3x², so x = R/√2 = <b>0.707 R</b>, where g = 2GM/3√3R². The lab sums 720 point masses along the axis and finds the same peak.' },
+      { source: 'JEE Advanced pattern · a cavity in a sphere',
+        q: 'A uniform sphere of mass M (before hollowing) and radius R has a spherical cavity whose centre is R/2 from the sphere\'s centre. Find the field at the centre of the cavity, in units of GM/R².',
+        params: { mode: 'shapes', shape: 'cavity', cd: 0.5, cr: 0.4, pr: 0.5 },
+        predict: { label: 'field', unit: 'GM/R²', tol: 0.03 },
+        measure: S => { const c = sumAt(S.Sh.P, S.p.cd, 0, 0); return Math.hypot(c[0], c[1], c[2]); },
+        working: 'Superpose the full sphere (field −(4/3)πGρ r at any inside point r) and a sphere of negative mass filling the cavity (field +(4/3)πGρ (r − d)). Their sum is −(4/3)πGρ d: the same at every point of the cavity. With ρ = 3M/4πR³ it is GMd/R³ = <b>0.5 GM/R²</b>. The sum over about 8000 points gives it everywhere in the cavity to within a few per cent.' },
+      { source: 'JEE Main pattern · a system of four masses',
+        q: 'Four equal masses m sit at the corners of a square of side a. What is the gravitational potential energy of the system, in units of Gm²/a?',
+        params: { mode: 'shapes', shape: 'poly', npoly: 4, pr: 0.6 },
+        predict: { label: 'U', unit: 'Gm²/a', tol: 0.01 },
+        measure: S => S.Sh.Usys / (Math.pow(1 / S.p.npoly, 2) / (2 * Math.sin(Math.PI / S.p.npoly))),
+        working: 'Six pairs: four sides of length a and two diagonals of a√2. U = −Gm²(4/a + 2/(a√2)) = −(4 + √2) Gm²/a = <b>−5.41 Gm²/a</b>. The work needed to pull them apart to infinity is +5.41 Gm²/a. The field at the centre is zero, but the potential there is not.' },
+      { source: 'JEE Main pattern · a fall from a great height',
+        q: 'A body is released from rest at a height equal to the Earth\'s radius (6371 km). With what speed does it hit the ground, in km/s? (Ignore air.)',
+        params: { mode: 'orbit', incO: 0, argP: 0, mission: 'free', body: 'earth', logH: LG(6371), vr: 0, gam: 0, drag: false, spin: false, sectors: false },
+        predict: { label: 'speed', unit: 'km/s', tol: 0.01 },
+        measure: S => { const q = S.O.pts[S.O.pts.length - 1]; return Math.hypot(q[3], q[4]) / 1e3; },
+        working: 'Energy, not √(2gh): ½v² = GM/R − GM/2R, so v = √(GM/R) = <b>7.91 km/s</b>. √(2gh) would give 11.2 km/s, because it pretends g stays at 9.8 m/s² all the way up. The integration shows g weakening with height.' },
       { source: 'NEET pattern · Kepler\'s third law',
         q: 'Mars orbits the Sun with semi-major axis 1.524 AU. Find its period in years.',
         params: { mode: 'solar', focus: 'mars', zoomAU: LG(2), yps: 0.3, sectors: true },
@@ -2743,9 +3026,25 @@
         ask: 'How much faster is it at perihelion than at aphelion?',
         reveal: '<b>About 60 times</b>: (1 + e)/(1 − e) with e = 0.967. The long thin sectors near aphelion and the short fat ones near the Sun enclose equal areas. The tail always points away from the Sun, and it grows as the comet closes in.',
         params: { mode: 'solar', focus: 'halley', zoomAU: LG(22), yps: 5, sectors: true } },
+      { title: '16 · Add up the pulls of a shell',
+        body: 'A thin shell as 3000 point masses. The probe is inside it.',
+        ask: 'The near side is much closer. Why doesn\'t it win?',
+        reveal: '<b>Because there is more mass on the far side.</b> The cone of shell on the far side is larger by exactly the square of the distance, and the pull falls off by that same square. The sum returns g ≈ 10⁻³ anywhere inside, which is zero to the accuracy of the sum. The potential is not zero: it is flat, −GM/R.',
+        params: { mode: 'shapes', shape: 'shell', pr: 0.45 } },
+      { title: '17 · A hole in a planet',
+        body: 'A uniform sphere with a cavity hollowed out at d = R/2. Look at the blue arrows inside the cavity.',
+        ask: 'Which way does the field point inside the cavity, and how does it change from place to place?',
+        reveal: '<b>All the same: parallel to the line of centres, with magnitude GMd/R³.</b> It is the field of the full sphere minus the field of the missing piece, and the r-dependence cancels. That is the JEE Advanced result, read off the arrows.',
+        params: { mode: 'shapes', shape: 'cavity', cd: 0.5, cr: 0.4, pr: 0.5 } },
     ],
 
     quiz: [
+      { q: 'The gravitational field inside a spherical cavity cut anywhere in a uniform solid sphere is:',
+        options: ['Uniform, parallel to the line of centres', 'Zero', 'Strongest at the cavity\'s centre', 'Directed toward the cavity\'s centre'], answer: 0,
+        why: 'Superposition: the full sphere gives −(4/3)πGρ r, the missing sphere gives +(4/3)πGρ(r − d). Their sum, −(4/3)πGρ d, does not depend on r. Look at the parallel blue arrows in the cavity.' },
+      { q: 'On the axis of a ring, the field is greatest at a distance:',
+        options: ['R/√2', 'R', '0 (the centre)', 'R√2'], answer: 0,
+        why: 'At the centre the pulls cancel; far away they fall off as 1/x². dg/dx = 0 at x = R/√2.' },
       { q: 'A planet is 4 times as far from the Sun as the Earth (on average). Its year is:',
         options: ['8 Earth years', '4 Earth years', '16 Earth years', '2 Earth years'], answer: 0,
         why: 'T² ∝ a³: T = 4^1.5 = 8 years. Check it against Jupiter at 5.2 AU (11.9 yr) on the measured plot.' },
@@ -4076,6 +4375,239 @@
     row(3, 'period: integrated · formula', (U.Tm ? U.Tm.toFixed(3) : '—') + ' · ' + U.T.toFixed(3) + ' s');
     if (!narrow) row(4, 'water alone would give', (TAU * Math.sqrt(UT.Lw / (2 * GF))).toFixed(3) + ' s = 2π√(L/2g)');
   }
+  /* =========================================================================
+     PASCAL, WALLS AND DROPS — three JEE staples, each computed, not quoted
+
+     · The hydraulic lift. p = F₁/A₁ reaches the big piston, but the two
+       pistons do not stay level: pushing the small one down x raises the big
+       one xA₁/A₂, so the oil the effort holds up grows by x(1 + A₁/A₂). The
+       effort is worked out at every point of the stroke, its work integrated,
+       and checked against the load's gain plus the oil's.
+     · The force on a wall. The wetted face is cut into 800 strips; each
+       strip's pressure (with an oil layer on top, if there is one) times its
+       area is summed, and so is its moment about the bottom edge. Tilt the
+       wall and the horizontal part does not change; the vertical part is the
+       weight of the water standing on it.
+     · Merging drops. n = k³ drops of radius r are absorbed one by one into
+       the central one, nearest first. The surface area is summed at every
+       instant, so the energy set free and the temperature rise are what the
+       area actually lost.
+     ========================================================================= */
+  const OILH = { rho: 870, col: '#D9A93A' };
+  const LF = { xs: -0.22, xb: 0.14, zTop: 0.40, z0: 0.25 };          // the two cylinders, in metres
+  function runLift(p) {
+    const A1 = Math.PI * Math.pow(p.d1 / 200, 2), A2 = Math.PI * Math.pow(p.d2 / 200, 2), r = A1 / A2;
+    const M = p.Mkg, rho = OILH.rho, X = p.xs / 100;
+    const F1 = x => A1 * (M * GF / A2 + rho * GF * x * (1 + r));   // big piston stands x(1 + r) above the small one
+    let W = 0; const N = 600;
+    for (let i = 0; i < N; i++) { const a = X * i / N, b = X * (i + 1) / N; W += (F1(a) + F1(b)) / 2 * (b - a); }
+    const y = X * r, Eload = M * GF * y, Eoil = rho * GF * A1 * X * (X + y) / 2;
+    const pts = [];
+    for (let x = 0; x <= 0.300001; x += 0.005) pts.push([x * 100, F1(x)]);
+    return { A1, A2, r, M, X, y, F1, F0: F1(0), Fx: F1(X), W, Eload, Eoil, pts, MA: A2 / A1,
+             p0: M * GF / A2, strokes: 0.10 / (0.30 * r) };
+  }
+  function runDam(p) {
+    const hw = p.dH / 100, ho = p.doil / 100, H = hw + ho, al = p.dang * Math.PI / 180, w = p.dw / 100;
+    const rw = LIQ.water.rho, ro = OILH.rho, sa = Math.sin(al);
+    const pr = d => d <= ho ? ro * GF * d : ro * GF * ho + rw * GF * (d - ho);
+    const Ls = H / sa, N = 800, ds = Ls / N;
+    let F = 0, Mb = 0;
+    for (let i = 0; i < N; i++) { const s = (i + 0.5) * ds, d = H - s * sa, f = pr(d) * w * ds; F += f; Mb += f * s; }
+    const sCp = Mb / F, zCp = sCp * sa;
+    const Fform = w / sa * (ro * GF * ho * ho / 2 + ro * GF * ho * hw + rw * GF * hw * hw / 2);
+    const Fx = F * sa, Fz = F * Math.cos(al);
+    return { hw, ho, H, al, w, pr, Ls, F, Fx, Fz, Mb, sCp, zCp, Fform, pBase: pr(H),
+             Fvert: w * (ro * GF * ho * ho / 2 + ro * GF * ho * hw + rw * GF * hw * hw / 2) };
+  }
+  const CSP = { water: 4186, mercury: 140, soapy: 4186 };
+  function runDrops(p) {
+    const k = Math.round(p.nk), n = k * k * k, r = p.rdr / 1000, Lq = LIQ[p.dliq], T = Lq.sig, c = CSP[p.dliq];
+    const pos = [];
+    for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) for (let l = 0; l < k; l++)
+      pos.push([(i - (k - 1) / 2) * 3, (j - (k - 1) / 2) * 3, (l - (k - 1) / 2) * 3]);   // in units of r
+    pos.sort((a, b) => Math.hypot(...a) - Math.hypot(...b));
+    const a1 = 4 * Math.PI * r * r;
+    const area = m => (n - 1 - m) * a1 + 4 * Math.PI * Math.pow(r * Math.cbrt(m + 1), 2);   // m drops absorbed into the centre one
+    const A0 = n * a1, R = r * Math.cbrt(n), E = T * (A0 - area(n - 1));
+    const mass = Lq.rho * n * 4 / 3 * Math.PI * r * r * r, dT = E / (mass * c);
+    const tE = 6;
+    return { k, n, r, T, c, Lq, pos, area, A0, R, E, dT, tE, mass,
+             Eform: 4 * Math.PI * R * R * T * (Math.cbrt(n) - 1), dTform: 3 * T / (Lq.rho * c) * (1 / r - 1 / R) };
+  }
+  const SPR = {};
+  function dropSprite(col, metal) {
+    const key = col + metal;
+    if (SPR[key]) return SPR[key];
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    RX.ball(c.getContext('2d'), 64, 64, 62, col, { rim: metal ? 0.9 : 0.6, sub: 0.35, vivid: !metal });
+    return (SPR[key] = c);
+  }
+  const dropsAbsorbed = (D, t) => Math.max(0, Math.min(D.n - 1, Math.floor((D.n - 1) * clamp(t / D.tE, 0, 1))));
+
+  function drawLift(S, g) {
+    const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, cam = S.cam, Lt = S.Lt;
+    const narrow = W < 660, K = 4, B = window.BENCH;
+    const F = R3.Frame(ctx, cam, { ambient: 0.3, floorZ: null });
+    const m = (x, y, z) => [x * K, y * K, z * K];
+    B.table(F, -0.40 * K, 0.36 * K, -0.2 * K, 0.2 * K, -0.03 * K, { legs: false, tone: '#6E4A2C', seed: 41, thick: 0.05 });
+    const xNow = Lt.X * clamp(S.ts / 3, 0, 1), yNow = xNow * Lt.r;
+    const r1 = p.d1 / 200, r2 = p.d2 / 200, zs = LF.z0 - xNow, zb = LF.z0 + yNow, oc = OILH.col;
+    // the oil: two columns joined by a pipe along the bench
+    const pipe = [m(LF.xs, 0, 0.02), m(LF.xb, 0, 0.02)];
+    path3(F, pipe, oc, { alpha: 0.85, width: 9, chunk: 1, bias: 0.02 });
+    path3(F, pipe, '#DCEBFA', { alpha: 0.2, width: 12, chunk: 1, bias: 0.01 });
+    liquidCyl(F, m(LF.xs, 0, 0.0), r1 * K, zs * K, oc, { alpha: 0.75 });
+    liquidCyl(F, m(LF.xb, 0, 0.0), r2 * K, zb * K, oc, { alpha: 0.6 });
+    glassCyl(F, m(LF.xs, 0, 0), (r1 + 0.003) * K, LF.zTop * K);
+    glassCyl(F, m(LF.xb, 0, 0), (r2 + 0.003) * K, LF.zTop * K);
+    // pistons: steel discs riding on the oil, a rod and a push-pad on the small one
+    R3.cylinder(F, m(LF.xs, 0, zs), m(LF.xs, 0, zs + 0.02), r1 * K, '#B8C2D0', { segments: 18, shadow: false });
+    R3.cylinder(F, m(LF.xs, 0, zs + 0.02), m(LF.xs, 0, zs + 0.24), 0.004 * K, '#9AA6B8', { segments: 10, shadow: false, caps: false });
+    R3.cylinder(F, m(LF.xs, 0, zs + 0.24), m(LF.xs, 0, zs + 0.255), 0.03 * K, '#2A3242', { segments: 18, shadow: false });
+    R3.cylinder(F, m(LF.xb, 0, zb), m(LF.xb, 0, zb + 0.025), r2 * K, '#B8C2D0', { segments: 30, shadow: false });
+    // the load: a steel block, its size growing gently with the mass
+    const bs = 0.10 + 0.05 * Math.cbrt(Lt.M / 1000);
+    R3.box(F, m(LF.xb, 0, zb + 0.025 + bs / 2), [bs * K, bs * K, bs * K], '#5C6A80', { shadow: false });
+    R3.label(F, m(LF.xb, 0, zb + 0.025 + bs / 2), Lt.M.toFixed(0) + ' kg', '#F2F6FF', { size: 11 });
+    // forces
+    const Fnow = Lt.F1(xNow), aTop = m(LF.xs, 0, zs + 0.40), aBot = m(LF.xs, 0, zs + 0.265);
+    R3.arrow(F, aTop, aBot, 0.006 * K, '#7CF0B0', { vivid: true });
+    R3.label(F, aTop, 'F₁ = ' + Fnow.toFixed(2) + ' N', '#7CF0B0', { size: 10, dy: -10 });
+    const lTop = m(LF.xb + bs / 2 + 0.05, 0, zb + 0.025 + bs), lBot = m(LF.xb + bs / 2 + 0.05, 0, zb + 0.025);
+    R3.arrow(F, lTop, lBot, 0.006 * K, '#FF8FB0', { vivid: true });
+    R3.label(F, lTop, 'Mg = ' + (Lt.M * GF).toFixed(0) + ' N', '#FF8FB0', { size: 10, dy: -10 });
+    // the pressure is one number along any level in the oil
+    const pS = Fnow / Lt.A1;
+    R3.callout(F, m(LF.xs, 0, zs), -40, 6, 'p under it ' + (pS / 1000).toFixed(2) + ' kPa', '#F2C879', { size: 9.5 });
+    R3.callout(F, m(LF.xb + r2, 0, zb), 40, 10, 'p under it ' + (Lt.p0 / 1000).toFixed(2) + ' kPa', '#F2C879', { size: 9.5 });
+    path3(F, [m(LF.xs, -0.012, zs), m(LF.xb, -0.012, zs)], '#FFD36B', { alpha: 0.6, width: 1, dash: [4, 3], chunk: 1, bias: -0.05 });
+    R3.label(F, m((LF.xs + LF.xb) / 2, -0.012, zs), 'big piston ' + ((zb - zs) * 1000).toFixed(1) + ' mm higher', '#FFD36B', { size: 9, dy: -8 });
+    F.render();
+    // drag the push-pad to set the stroke
+    const q = cam.project(m(LF.xs, 0, zs + 0.255)), q2 = cam.project(m(LF.xs, 0, zs + 0.155));
+    if (q.ok && q2.ok) { S._axP = axis2(q, q2, 0.1); ringHandle(g, q, 'pst', '#7CF0B0'); }
+    header(g, 'Pascal: a small push holds up a car',
+      'pistons ⌀ ' + p.d1.toFixed(1) + ' cm and ⌀ ' + p.d2.toFixed(1) + ' cm · area ratio ' + Lt.MA.toFixed(1) + ' · stroke ' + (xNow * 100).toFixed(1) + ' of ' + p.xs.toFixed(1) + ' cm',
+      'F₁ = A₁(Mg/A₂ + ρg·x(1 + A₁/A₂)) — the head of oil grows as you push', th.text);
+    const rows = narrow ? 4 : 6, bw = narrow ? W - 24 : 290, bh = 26 + rows * 15 + 10;
+    const row = gPanel(g, 12, H - bh - 30, bw, bh, 'THE STROKE, INTEGRATED');
+    row(0, 'effort at the start, Mg·A₁/A₂', Lt.F0.toFixed(3) + ' N', th.phys);
+    row(1, 'effort at the end of the stroke', Lt.Fx.toFixed(3) + ' N');
+    row(2, 'load rises', (Lt.y * 1000).toFixed(3) + ' mm');
+    row(3, 'work in: ∫F₁dx', Lt.W.toFixed(4) + ' J', th.ok);
+    if (!narrow) {
+      row(4, 'load Mgy + oil lifted', Lt.Eload.toFixed(4) + ' + ' + Lt.Eoil.toFixed(4) + ' J');
+      row(5, '30 cm strokes to lift it 10 cm', Lt.strokes.toFixed(1));
+    }
+  }
+
+  const DT = { xL: -0.45, top: 1.0, Wd: 0.5 };
+  function drawDam(S, g) {
+    const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, cam = S.cam, D = S.Dm;
+    const narrow = W < 660, K = 2.4, B = window.BENCH;
+    const F = R3.Frame(ctx, cam, { ambient: 0.3, floorZ: null });
+    const m = (x, y, z) => [x * K, y * K, z * K];
+    const ca = Math.cos(D.al), sa = Math.sin(D.al), wy = D.w / 2, xw = 0;
+    const xAt = z => xw + z * ca / sa;                          // the wall's face at height z
+    B.table(F, (DT.xL - 0.12) * K, (xAt(DT.top) + 0.30) * K, -(wy + 0.12) * K, (wy + 0.12) * K, -0.02 * K, { legs: false, tone: '#5A4632', seed: 57, thick: 0.05 });
+    // water, and oil on top: prisms between the back wall and the tilted face
+    const prism = (z0, z1, col, a, bias) => {
+      const P8 = [m(DT.xL, -wy, z0), m(xAt(z0), -wy, z0), m(DT.xL, wy, z0), m(xAt(z0), wy, z0),
+                  m(DT.xL, -wy, z1), m(xAt(z1), -wy, z1), m(DT.xL, wy, z1), m(xAt(z1), wy, z1)];
+      F.push(m((DT.xL + xAt((z0 + z1) / 2)) / 2, 0, (z0 + z1) / 2), () => {
+        const Hh = convexFill(ctx, cam, P8, RX.rgba(col, a), null);
+        const top = [P8[4], P8[5], P8[7], P8[6]].map(q => cam.project(q));
+        if (Hh && top.every(q => q.ok)) { ctx.fillStyle = RX.rgba(RX.mix(col, '#FFFFFF', 0.3), a + 0.1); polyPath(ctx, top); ctx.fill();
+          ctx.strokeStyle = RX.rgba(RX.mix(col, '#FFFFFF', 0.6), 0.8); ctx.lineWidth = 1; polyPath(ctx, top); ctx.stroke(); }
+      }, bias);
+    };
+    prism(0, D.hw, LIQ.water.col, 0.42, -0.02);
+    if (D.ho > 0) prism(D.hw, D.H, OILH.col, 0.5, -0.03);
+    // glass sides and the back wall
+    [[-wy], [wy]].forEach(([y]) => {
+      const pts = [m(DT.xL, y, 0), m(xw, y, 0), m(xAt(DT.top), y, DT.top), m(DT.xL, y, DT.top)];
+      flatPoly(F, pts, 'rgba(170,215,240,.07)', { bias: -0.05 });
+      path3(F, pts.concat([pts[0]]), '#D2EBFF', { alpha: 0.45, width: 1, chunk: 1, bias: -0.05 });
+    });
+    flatPoly(F, [m(DT.xL, -wy, 0), m(DT.xL, wy, 0), m(DT.xL, wy, DT.top), m(DT.xL, -wy, DT.top)], 'rgba(170,215,240,.07)', { bias: -0.05 });
+    // the wall itself: a concrete slab along the slant
+    const th2 = 0.06, n = [sa, 0, -ca], t = [ca, 0, sa], Lw = DT.top / sa;
+    const wc = [xw + t[0] * Lw / 2 + n[0] * th2 / 2, 0, t[2] * Lw / 2 + n[2] * th2 / 2];
+    R3.box(F, m(...wc), [th2 * K, (D.w + 0.02) * K, Lw * K], '#8E8A80', { shadow: false, axes: [n, [0, 1, 0], t] });
+    // pressure on the face: one arrow per strip, length ∝ p, pointing into the wall
+    const pMax = Math.max(1, D.pBase), NA = 11;
+    for (let i = 0; i < NA; i++) {
+      const s = (i + 0.5) / NA * D.Ls, z = s * sa, pr = D.pr(D.H - z), len = 0.28 * pr / pMax;
+      if (len < 0.006) continue;
+      const P = [xw + s * ca, -wy - 0.01, z], Q = [P[0] - n[0] * len, P[1], P[2] - n[2] * len];
+      R3.arrow(F, m(...Q), m(...P), 0.0045 * K, z > D.hw ? '#F2C879' : '#7FD0FF', { vivid: true });
+    }
+    // the resultant, at the centre of pressure
+    const Pc = [xw + D.sCp * ca, -wy - 0.01, D.zCp], Lr = 0.34, Qc = [Pc[0] - n[0] * Lr, Pc[1], Pc[2] - n[2] * Lr];
+    R3.arrow(F, m(...Qc), m(...Pc), 0.011 * K, '#FF8FB0', { vivid: true });
+    R3.label(F, m(...Qc), 'F = ' + D.F.toFixed(1) + ' N', '#FF8FB0', { size: 11, dy: -12 });
+    R3.callout(F, m(xw + D.sCp * ca, wy, D.zCp), 44, 10, 'centre of pressure ' + (D.zCp * 100).toFixed(2) + ' cm up', '#FFB8CC', { size: 9.5 });
+    if (D.ho > 0) R3.callout(F, m(DT.xL, -wy, D.hw), -40, 0, 'oil on water at ' + (D.hw * 100).toFixed(0) + ' cm', '#F2C879', { size: 9.5 });
+    F.render();
+    const q = cam.project(m(DT.xL + 0.08, -wy, D.H)), q2 = cam.project(m(DT.xL + 0.08, -wy, D.H + 0.1));
+    if (q.ok && q2.ok && D.ho === 0) { S._axD = axis2(q, q2, 0.1); ringHandle(g, q, 'dlv', '#7FD0FF', 9); }
+    header(g, 'The force on a wall: pressure summed strip by strip',
+      (D.ho > 0 ? 'oil ' + p.doil.toFixed(0) + ' cm on ' : '') + 'water ' + p.dH.toFixed(0) + ' cm · wall ' + p.dw.toFixed(0) + ' cm wide, at ' + p.dang.toFixed(0) + '° · 800 strips',
+      'F = ∫p w ds · horizontal part = ρgwH²/2 whatever the tilt · it acts H/3 above the base', th.text);
+    const rows = narrow ? 4 : 6, bw = narrow ? W - 24 : 292, bh = 26 + rows * 15 + 10;
+    const row = gPanel(g, 12, H - bh - 30, bw, bh, 'WHAT THE STRIPS ADD UP TO');
+    row(0, 'force on the face, summed', D.F.toFixed(2) + ' N', th.phys);
+    row(1, 'formula', D.Fform.toFixed(2) + ' N', th.ok);
+    row(2, 'horizontal · vertical part', D.Fx.toFixed(1) + ' · ' + D.Fz.toFixed(1) + ' N');
+    row(3, 'centre of pressure above the base', (D.zCp * 100).toFixed(2) + ' cm');
+    if (!narrow) {
+      row(4, 'moment about the bottom edge', D.Mb.toFixed(2) + ' N·m');
+      row(5, 'pressure at the base', (D.pBase / 1000).toFixed(3) + ' kPa');
+    }
+  }
+
+  function drawDrops(S, g) {
+    const ctx = g.ctx, th = g.theme, p = S.p, W = g.w, H = g.h, cam = S.cam, D = S.Dr;
+    const narrow = W < 660;
+    const F = R3.Frame(ctx, cam, { ambient: 0.35, floorZ: null });
+    const B = window.BENCH, sp = 1.6 / Math.max(1, (D.k - 1) * 3), zc = 1.2;    // scene units per r
+    B.table(F, -1.3, 1.3, -0.9, 0.9, 0, { legs: false, tone: '#3E4656', seed: 5, thick: 0.05 });
+    const mNow = dropsAbsorbed(D, S.ts), col = D.Lq.col, metal = p.dliq === 'mercury';
+    const tStep = D.tE / Math.max(1, D.n - 1), fly = Math.min(0.6, 40 * tStep);
+    // a thousand lit balls a frame: each is one pre-shaded sprite, depth-sorted by hand
+    const spr = dropSprite(col, metal), Rm = sp * Math.cbrt(mNow + 1), list = [[0, 0, zc, Rm]];
+    for (let i = mNow + 1; i < D.n; i++) {
+      const ti = i * tStep, f = clamp((S.ts - (ti - fly)) / fly, 0, 1), e = f * f, q = D.pos[i];
+      list.push([q[0] * sp * (1 - e), q[1] * sp * (1 - e), zc + q[2] * sp * (1 - e), sp]);
+    }
+    const ey = cam.eye;
+    list.forEach(d => { d[4] = (d[0] - ey[0]) ** 2 + (d[1] - ey[1]) ** 2 + (d[2] - ey[2]) ** 2; });
+    list.sort((u, v) => v[4] - u[4]);
+    F.push([0, 0, zc], () => {
+      list.forEach(d => {
+        const q = cam.project([d[0], d[1], d[2]]); if (!q.ok) return;
+        const rp = d[3] * q.s; if (rp < 0.3) return;
+        ctx.drawImage(spr, q.x - rp, q.y - rp, 2 * rp, 2 * rp);
+      });
+    }, 0);
+    const E = D.T * (D.A0 - D.area(mNow));
+    R3.label(F, [0, 0, zc + Rm], (mNow + 1) + ' merged', '#F2F6FF', { size: 10, dy: -12 });
+    F.render();
+    header(g, 'Drops merge: surface energy becomes heat',
+      D.n + ' drops of ' + D.Lq.name + ', r = ' + p.rdr.toFixed(2) + ' mm → one of R = ' + (D.R * 1000).toFixed(2) + ' mm · T = ' + (D.T * 1000).toFixed(1) + ' mN/m',
+      'E = T·ΔA = 4πR²T(n^⅓ − 1) · ΔT = (3T/ρc)(1/r − 1/R)', th.text);
+    const rows = narrow ? 4 : 6, bw = narrow ? W - 24 : 292, bh = 26 + rows * 15 + 10;
+    const row = gPanel(g, 12, H - bh - 30, bw, bh, 'SURFACE AREA, SUMMED OVER EVERY DROP');
+    row(0, 'area now · at the start', (D.area(mNow) * 1e4).toFixed(3) + ' · ' + (D.A0 * 1e4).toFixed(3) + ' cm²');
+    row(1, 'energy set free so far', (E * 1e3).toFixed(4) + ' mJ', th.phys);
+    row(2, 'when all have merged · formula', (D.E * 1e3).toFixed(4) + ' · ' + (D.Eform * 1e3).toFixed(4) + ' mJ', th.ok);
+    row(3, 'temperature rise (no loss)', (D.dT * 1e3).toPrecision(4) + ' mK');
+    if (!narrow) {
+      row(4, 'mass of liquid', (D.mass * 1e3).toFixed(3) + ' g');
+      row(5, 'to split it back: work needed', (D.E * 1e3).toFixed(4) + ' mJ');
+    }
+  }
 
   /* the venturi's Cd against Reynolds number, for every flow and both liquids */
   const CDC = {};
@@ -4097,7 +4629,9 @@
   const TNK = S => S.p.mode === 'tank', VEN = S => S.p.mode === 'venturi', BAL = S => S.p.mode === 'ball',
         BUO = S => S.p.mode === 'buoy', CAP = S => S.p.mode === 'cap',
         FRM = S => S.p.mode === 'frame', ACC = S => S.p.mode === 'frame' && S.p.fsub === 'accel', ROT = S => S.p.mode === 'frame' && S.p.fsub === 'rotate',
-        BBL = S => S.p.mode === 'bubbles', UTB = S => S.p.mode === 'utube';
+        BBL = S => S.p.mode === 'bubbles', UTB = S => S.p.mode === 'utube',
+        PSC = S => S.p.mode === 'pascal', LFT = S => S.p.mode === 'pascal' && S.p.psub === 'lift', DAM = S => S.p.mode === 'pascal' && S.p.psub === 'dam',
+        DRP = S => S.p.mode === 'drops';
 
   L.register({
     id: 'fluids', subject: 'physics',
@@ -4106,20 +4640,23 @@
     exams: ['JEE Main', 'JEE Advanced', 'NEET UG'],
     weight: 'Very high yield',
     is3D: true,
-    stageHint: 'Drag to orbit · drag the rings: the hole and the level, the hook on the spring balance',
-    lede: 'Five pieces of fluid apparatus. Each one <b>computes</b> what it shows. The tank <b>drains</b>: its level is integrated ' +
+    stageHint: 'Drag to orbit · drag the rings: the hole and the level, the hook on the spring balance, the pump handle, the water level',
+    lede: 'Every piece of fluid apparatus here <b>computes</b> what it shows. The tank <b>drains</b>: its level is integrated ' +
       'from continuity and Torricelli, and each jet flies as a projectile to where it lands on the rule. The venturimeter ' +
       'marches Bernoulli along the pipe with <b>real friction</b>, so its discharge coefficient comes out below one, and a narrow ' +
       'enough throat will <b>boil cold water</b>. The ball in the viscometer is timed between two light gates, so you can watch ' +
       'Stokes\' law <b>fail</b> as it speeds up. The spring balance and the scale show both halves of Archimedes at once. ' +
-      'The capillaries rise with their own inertia, and a tube that is too short <b>does not overflow</b>.',
+      'The capillaries rise with their own inertia, and a tube that is too short <b>does not overflow</b>. ' +
+      'The hydraulic lift integrates the effort over the whole stroke, the wall sums its pressure over 800 strips, ' +
+      'and a thousand drops merge one by one while their surface area is added up.',
 
     params: { mode: 'tank', H0: 50, y1: 12.5, dmm: 5, Dt: 15, real: false, two: false, hold: false,
               vfluid: 'water', Qlpm: 12, beta: 0.5, loss: true, hback: 25,
               bfluid: 'glycerine', ball: 'steel', rmm: 1, TC: 20, wall: true,
               block: 'aluminium', liq: 'water', lower: 12, cut: false,
               cliq: 'water', waxed: false, crmm: 0.1, Lcm: 16,
-              fsub: 'accel', acc: 3, omg: 12, r1: 2, r2: 4, sig: 0.025, open: false, liq2: 'oil', hoil: 10, slosh: false, run: true },
+              fsub: 'accel', acc: 3, omg: 12, r1: 2, r2: 4, sig: 0.025, open: false, liq2: 'oil', hoil: 10, slosh: false,
+              psub: 'lift', d1: 2, d2: 20, Mkg: 1000, xs: 20, dH: 60, doil: 0, dw: 50, dang: 90, nk: 10, rdr: 1, dliq: 'water', run: true },
 
     presets: [
       { name: 'Torricelli · one hole, 50 cm of water', params: { mode: 'tank', H0: 50, y1: 12.5, dmm: 5, Dt: 15, real: false, two: false, hold: false } },
@@ -4144,7 +4681,14 @@
       { name: 'U-tube · tip it and let go', params: { mode: 'utube', liq2: 'none', hoil: 10, slosh: true } },
       { name: 'Capillaries · water in clean glass', params: { mode: 'cap', cliq: 'water', waxed: false, crmm: 0.1, Lcm: 16 } },
       { name: 'Tube too short · no fountain', params: { mode: 'cap', cliq: 'water', waxed: false, crmm: 0.1, Lcm: 10 } },
-      { name: 'Mercury is pushed down', params: { mode: 'cap', cliq: 'mercury', waxed: false, crmm: 0.25, Lcm: 16 } }
+      { name: 'Mercury is pushed down', params: { mode: 'cap', cliq: 'mercury', waxed: false, crmm: 0.25, Lcm: 16 } },
+      { name: 'Hydraulic lift · 1000 kg on ⌀ 20 cm', params: { mode: 'pascal', psub: 'lift', d1: 2, d2: 20, Mkg: 1000, xs: 20 } },
+      { name: 'Lift · a narrower pump, a longer job', params: { mode: 'pascal', psub: 'lift', d1: 1, d2: 30, Mkg: 1500, xs: 30 } },
+      { name: 'Force on a wall · 60 cm of water', params: { mode: 'pascal', psub: 'dam', dH: 60, doil: 0, dw: 50, dang: 90 } },
+      { name: 'Wall tilted to 60°', params: { mode: 'pascal', psub: 'dam', dH: 60, doil: 0, dw: 50, dang: 60 } },
+      { name: 'Oil on water against a wall', params: { mode: 'pascal', psub: 'dam', dH: 40, doil: 20, dw: 50, dang: 90 } },
+      { name: '1000 water drops merge', params: { mode: 'drops', nk: 10, rdr: 1, dliq: 'water' } },
+      { name: 'Mercury drops · more heat per gram', params: { mode: 'drops', nk: 10, rdr: 1, dliq: 'mercury' } }
     ],
 
     controls: [
@@ -4152,7 +4696,8 @@
         { key: 'mode', type: 'select', label: 'Apparatus', restructure: true, rebuild: true, options: [
           { value: 'tank', label: 'Draining tank' }, { value: 'venturi', label: 'Venturimeter' }, { value: 'ball', label: 'Falling ball' },
           { value: 'buoy', label: 'Archimedes' }, { value: 'cap', label: 'Capillaries' }, { value: 'frame', label: 'Moving frames' },
-          { value: 'bubbles', label: 'Soap bubbles' }, { value: 'utube', label: 'U-tube' }] }
+          { value: 'bubbles', label: 'Soap bubbles' }, { value: 'utube', label: 'U-tube' },
+          { value: 'pascal', label: 'Pascal and walls' }, { value: 'drops', label: 'Merging drops' }] }
       ] },
       { group: 'Tank and orifice', items: [
         { key: 'H0', label: 'Starting water level <i>H</i>', min: 10, max: 70, step: 0.5, unit: 'cm', when: TNK, fmt: v => v.toFixed(1), restructure: true },
@@ -4214,6 +4759,24 @@
         { key: 'hoil', label: 'Its column length', min: 0, max: 20, step: 0.1, unit: 'cm', when: UTB, fmt: v => v.toFixed(1), restructure: true },
         { key: 'slosh', type: 'toggle', label: 'Tip it 4 cm and let go', restructure: true, when: UTB }
       ] },
+      { group: 'Pascal and walls', items: [
+        { key: 'psub', type: 'select', label: 'Apparatus', restructure: true, rebuild: true, when: PSC, options: [
+          { value: 'lift', label: 'Hydraulic lift' }, { value: 'dam', label: 'Force on a wall' }] },
+        { key: 'd1', label: 'Small piston diameter', min: 1, max: 5, step: 0.1, unit: 'cm', when: LFT, fmt: v => v.toFixed(1), restructure: true },
+        { key: 'd2', label: 'Large piston diameter', min: 10, max: 30, step: 0.5, unit: 'cm', when: LFT, fmt: v => v.toFixed(1), restructure: true },
+        { key: 'Mkg', label: 'Load <i>M</i>', min: 100, max: 3000, step: 10, unit: 'kg', when: LFT, fmt: v => v.toFixed(0), restructure: true },
+        { key: 'xs', label: 'Stroke of the small piston', min: 0, max: 30, step: 0.5, unit: 'cm', when: LFT, fmt: v => v.toFixed(1), restructure: true },
+        { key: 'dH', label: 'Water depth', min: 5, max: 80, step: 0.5, unit: 'cm', when: DAM, fmt: v => v.toFixed(1), restructure: true },
+        { key: 'doil', label: 'Oil layer on top (ρ 870)', min: 0, max: 30, step: 0.5, unit: 'cm', when: DAM, fmt: v => v.toFixed(1), restructure: true },
+        { key: 'dw', label: 'Wall width <i>w</i>', min: 20, max: 100, step: 1, unit: 'cm', when: DAM, fmt: v => v.toFixed(0), restructure: true },
+        { key: 'dang', label: 'Wall angle to the floor', min: 45, max: 90, step: 1, unit: '°', when: DAM, fmt: v => v.toFixed(0), restructure: true }
+      ] },
+      { group: 'Merging drops', items: [
+        { key: 'nk', label: 'Drops per side <i>k</i> (n = k³)', min: 2, max: 10, step: 1, unit: '', when: DRP, fmt: v => v.toFixed(0) + ' → ' + Math.pow(Math.round(v), 3), restructure: true },
+        { key: 'rdr', label: 'Drop radius <i>r</i>', min: 0.1, max: 3, step: 0.05, unit: 'mm', when: DRP, fmt: v => v.toFixed(2), restructure: true },
+        { key: 'dliq', type: 'select', label: 'Liquid', restructure: true, when: DRP, options: [
+          { value: 'water', label: 'Water' }, { value: 'mercury', label: 'Mercury' }, { value: 'soapy', label: 'Soapy water' }] }
+      ] },
       { group: 'Display', items: [
         { key: 'run', type: 'toggle', label: 'Let it run' }
       ] }
@@ -4228,6 +4791,8 @@
       else if (p.mode === 'frame') { if (p.fsub === 'accel') S.Ac = runAccel(p); else { S.Rt = runRotate(p); S.spin = S.spin || 0; } }
       else if (p.mode === 'bubbles') { S.Bb = runBubbles(p); }
       else if (p.mode === 'utube') { S.U = runUtube(p); }
+      else if (p.mode === 'pascal') { if (p.dH + p.doil > 100) p.doil = 100 - p.dH; if (p.psub === 'lift') S.Lt = runLift(p); else S.Dm = runDam(p); }
+      else if (p.mode === 'drops') { S.Dr = runDrops(p); }
       else { S.C = runCap(Object.assign({}, p, { rmm: p.crmm })); }
       S.ts = 0; S.hold = 0;
       const views = {
@@ -4238,9 +4803,13 @@
         cap: { theta: -1.48, phi: 0.20, dist: 2.55, target: [0.03, 0, 0.66] },
         frame: { theta: -1.30, phi: 0.30, dist: 3.3, target: [0, 0, 0.55] },
         bubbles: { theta: -1.45, phi: 0.22, dist: 2.7, target: [0, 0, 0.85] },
-        utube: { theta: -1.50, phi: 0.12, dist: 3.4, target: [0, 0, 1.15] }
+        utube: { theta: -1.50, phi: 0.12, dist: 3.4, target: [0, 0, 1.15] },
+        'pascal-lift': { theta: -1.38, phi: 0.20, dist: 4.4, target: [-0.1, 0, 1.05] },
+        'pascal-dam': { theta: -1.22, phi: 0.22, dist: 5.4, target: [0.1, 0, 1.0] },
+        drops: { theta: -1.30, phi: 0.25, dist: 4.4, target: [0, 0, 1.15] }
       };
-      if (!S.cam || S._view !== p.mode) { S.cam = Camera(views[p.mode]); S.cam.minDist = 1.0; S.cam.maxDist = 12; S._view = p.mode; S._narrowCam = false; }
+      const vk = p.mode === 'pascal' ? 'pascal-' + p.psub : p.mode;
+      if (!S.cam || S._view !== vk) { S.cam = Camera(views[vk]); S.cam.minDist = 1.0; S.cam.maxDist = 12; S._view = vk; S._narrowCam = false; }
     },
 
     step(S, dt) {
@@ -4258,6 +4827,8 @@
       }
       else if (p.mode === 'bubbles') { end = p.open ? S.Bb.tEnd : 1e9; rate = p.open ? Math.max(0.2, S.Bb.tEnd / 12) : 1; }
       else if (p.mode === 'utube') { end = p.slosh ? 8 : 1e9; rate = p.slosh ? 0.7 : 1; }
+      else if (p.mode === 'pascal') { end = p.psub === 'lift' ? 3 : 1e9; rate = 1; }
+      else if (p.mode === 'drops') { end = S.Dr.tE; rate = 1; }
       else { end = 1e9; rate = 1; }
       S.ts += dt * rate;
       if (S.ts >= end) { S.ts = end; S.hold = 2.5; }
@@ -4273,6 +4844,8 @@
       else if (md === 'frame') drawFrame(S, g);
       else if (md === 'bubbles') drawBubbles(S, g);
       else if (md === 'utube') drawUtube(S, g);
+      else if (md === 'pascal') { if (S.p.psub === 'lift') drawLift(S, g); else drawDam(S, g); }
+      else if (md === 'drops') drawDrops(S, g);
       else drawCap(S, g);
     },
 
@@ -4281,6 +4854,8 @@
       if (e.id === 'hole' && S._axH) { p.y1 = clamp(p.y1 + along(S._axH) * 100, 1, p.H0 - 1); this.setup(S); }
       else if (e.id === 'lvl' && S._axL) { p.H0 = clamp(p.H0 + along(S._axL) * 100, Math.max(10, p.y1 + 1), 70); this.setup(S); }
       else if (e.id === 'hook' && S._axB) { p.lower = clamp(p.lower + along(S._axB) * 100, 0, 22); this.setup(S); }
+      else if (e.id === 'pst' && S._axP) { p.xs = clamp(p.xs + along(S._axP) * 100, 0, 30); this.setup(S); S.ts = 3; }
+      else if (e.id === 'dlv' && S._axD) { p.dH = clamp(p.dH + along(S._axD) * 100, 5, 80); this.setup(S); }
     },
 
     plots: [
@@ -4288,9 +4863,38 @@
                        bubbles: 'Each bubble\'s radius as the air moves', utube: S.p.slosh ? 'The column\'s swing against time' : 'Pressure down each arm',
                        tank: 'Level and range as the tank drains', venturi: 'Pressure head along the pipe — and the energy line above it',
                        ball: 'The ball\'s speed as it falls', buoy: 'Both readings as the block is lowered',
-                       cap: 'Each column\'s height against time' })[S.p.mode],
+                       cap: 'Each column\'s height against time',
+                       pascal: S.p.psub === 'lift' ? 'The effort through the stroke' : 'Pressure up the wall',
+                       drops: 'Energy set free as the drops merge' })[S.p.mode],
         draw(S, g) {
           const p = S.p, th = g.theme, cy = '#3DD6F5', gr = '#7CF0B0', am = '#F5B451', pk = '#FF8FB0', vi = '#B8A4FF';
+          if (p.mode === 'pascal' && p.psub === 'lift') {
+            const Lt = S.Lt, lo = Lt.F0, hi = Lt.F1(0.30), pad = Math.max((hi - lo) * 0.25, lo * 0.002), xn = Lt.X * clamp(S.ts / 3, 0, 1);
+            const P = g.Plot({ xmin: 0, xmax: 30, ymin: lo - pad, ymax: hi + pad, xlabel: 'stroke x (cm)', ylabel: 'effort F₁ (N)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(2) }).frame();
+            P.clip(() => { P.hline(lo, g.alpha(th['text-2'], .7), [4, 3]); P.line(Lt.pts, gr, 2.2); P.dot(xn * 100, Lt.F1(xn), 5.5, gr, th['ink-950']); });
+            P.tag(0.5, lo, 'Mg·A₁/A₂ alone', th['text-2'], 'left', 12);
+            P.tag(29.5, hi, '+ ρg·x(1 + A₁/A₂)·A₁', gr, 'right', -8);
+            return;
+          }
+          if (p.mode === 'pascal') {
+            const D = S.Dm, pts = [];
+            for (let z = 0; z <= D.H + 1e-9; z += D.H / 200) pts.push([D.pr(D.H - z) / 1000, z * 100]);
+            const P = g.Plot({ xmin: 0, xmax: D.pBase / 1000 * 1.15, ymin: 0, ymax: D.H * 100 * 1.1, xlabel: 'gauge pressure (kPa)', ylabel: 'height above the base (cm)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => { P.area(pts.map(q => [q[0], q[1]]), 0, g.alpha(cy, .15)); P.line(pts, cy, 2.2); P.hline(D.zCp * 100, g.alpha(pk, .8), [4, 3]); if (D.ho > 0) P.hline(D.hw * 100, g.alpha(am, .7), [3, 3]); });
+            P.tag(D.pBase / 1000 * 1.12, D.zCp * 100, 'centre of pressure', pk, 'right', -8);
+            if (D.ho > 0) P.tag(D.pBase / 1000 * 1.12, D.hw * 100, 'oil–water interface: the slope changes', am, 'right', -8);
+            return;
+          }
+          if (p.mode === 'drops') {
+            const D = S.Dr, pts = [], step = Math.max(1, Math.floor((D.n - 1) / 200));
+            for (let k = 0; k <= D.n - 1; k += step) pts.push([k + 1, D.T * (D.A0 - D.area(k)) * 1e3]);
+            pts.push([D.n, D.E * 1e3]);
+            const mNow = dropsAbsorbed(D, S.ts);
+            const P = g.Plot({ xmin: 1, xmax: D.n, ymin: 0, ymax: D.E * 1e3 * 1.12, xlabel: 'drops in the big one', ylabel: 'energy set free (mJ)', xfmt: v => v.toFixed(0), yfmt: v => v.toPrecision(2) }).frame();
+            P.clip(() => { P.line(pts, am, 2.2); P.hline(D.Eform * 1e3, g.alpha(th['text-2'], .7), [4, 3]); P.dot(mNow + 1, D.T * (D.A0 - D.area(mNow)) * 1e3, 5.5, am, th['ink-950']); });
+            P.tag(D.n * 0.02, D.Eform * 1e3, '4πR²T(n^⅓ − 1)', th['text-2'], 'left', -8);
+            return;
+          }
           if (p.mode === 'frame' && p.fsub === 'accel') {
             const A = S.Ac, D = 180 / Math.PI;
             const s1 = A.pts.map(q => [q[0], Math.atan(q[1]) * D]), s2 = A.pts.map(q => [q[0], -q[2] * D]), s3 = A.pts.map(q => [q[0], q[3] * D]);
@@ -4440,9 +5044,44 @@
                        bubbles: 'Excess pressure against size — why the small one loses', utube: 'Level difference against the column poured',
                        tank: 'Range against hole height — for this level', venturi: 'Discharge coefficient against Reynolds number',
                        ball: 'Terminal speed against r² — Stokes\' straight line, and the truth', buoy: 'How much floats under, for every block in every liquid',
-                       cap: 'Jurin\'s law — height against 1/r for four liquids' })[S.p.mode],
+                       cap: 'Jurin\'s law — height against 1/r for four liquids',
+                       pascal: S.p.psub === 'lift' ? 'Work in against energy out, through the stroke' : 'Force against depth — and its horizontal part',
+                       drops: 'Temperature rise against drop size, three liquids' })[S.p.mode],
         draw(S, g) {
           const p = S.p, th = g.theme, cy = '#3DD6F5', gr = '#7CF0B0', am = '#F5B451';
+          if (p.mode === 'pascal' && p.psub === 'lift') {
+            const Lt = S.Lt, win = [[0, 0]], eo = [[0, 0]], el = [[0, 0]];
+            for (let i = 1; i < Lt.pts.length; i++) {
+              const a0 = Lt.pts[i - 1], a1 = Lt.pts[i], dx = (a1[0] - a0[0]) / 100, x = a1[0] / 100, y = x * Lt.r;
+              win.push([a1[0], win[i - 1][1] + (a0[1] + a1[1]) / 2 * dx]);
+              el.push([a1[0], Lt.M * GF * y]); eo.push([a1[0], Lt.M * GF * y + OILH.rho * GF * Lt.A1 * x * (x + y) / 2]);
+            }
+            const hi = win[win.length - 1][1] * 1.1;
+            const P = g.Plot({ xmin: 0, xmax: 30, ymin: 0, ymax: hi, xlabel: 'stroke x (cm)', ylabel: 'energy (J)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(1) }).frame();
+            P.clip(() => { P.line(el, '#FF8FB0', 1.4, [4, 3]); P.line(win, gr, 3.2); P.line(eo, am, 1.6, [2, 2]); P.vline(p.xs, g.alpha(th['text-2'], .6), [3, 3]); });
+            P.tag(1, hi * 0.92, '∫F₁dx (green) = Mgy + oil lifted (amber)', th['text-2'], 'left', 0);
+            P.tag(29, el[el.length - 1][1], 'Mgy alone', '#FF8FB0', 'right', 12);
+            return;
+          }
+          if (p.mode === 'pascal') {
+            const D = S.Dm, rho = LIQ.water.rho, f = [], fx = [];
+            for (let h = 0; h <= 1.0001; h += 0.01) { f.push([h * 100, rho * GF * D.w * h * h / 2 / Math.sin(D.al)]); fx.push([h * 100, rho * GF * D.w * h * h / 2]); }
+            const P = g.Plot({ xmin: 0, xmax: 100, ymin: 0, ymax: f[f.length - 1][1] * 1.05, xlabel: 'depth H (cm), water only', ylabel: 'force (N)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
+            P.clip(() => { P.line(fx, g.alpha(th['text-2'], .8), 1.4, [4, 3]); P.line(f, cy, 2.2); P.dot(D.H * 100, D.F, 5.5, '#FF8FB0', th['ink-950']); P.dot(D.H * 100, D.Fx, 4.5, am, th['ink-950']); });
+            P.tag(4, f[f.length - 1][1] * 0.95, 'F on the face ∝ H² (pink dot: this set-up)', cy, 'left', 0);
+            P.tag(98, fx[fx.length - 1][1], 'horizontal part ρgwH²/2', th['text-2'], 'right', 12);
+            return;
+          }
+          if (p.mode === 'drops') {
+            const D = S.Dr, f = 1 - 1 / Math.cbrt(D.n), cs = { water: cy, mercury: '#C9D2DE', soapy: gr };
+            const curve = l => { const q = []; for (let r = 0.1; r <= 3.0001; r += 0.02) q.push([r, 3 * LIQ[l].sig / (LIQ[l].rho * CSP[l]) * f / (r / 1000) * 1e3]); return q; };
+            const all = ['water', 'mercury', 'soapy'].map(curve), hi = Math.max(...all.map(c => c[0][1])) * 1.05;
+            const P = g.Plot({ xmin: 0.1, xmax: 3, ymin: 0, ymax: hi, xlabel: 'drop radius r (mm)', ylabel: 'ΔT (mK)', xfmt: v => v.toFixed(1), yfmt: v => v.toFixed(1) }).frame();
+            P.clip(() => { ['water', 'mercury', 'soapy'].forEach((l, i) => P.line(all[i], l === p.dliq ? cs[l] : g.alpha(cs[l], .5), l === p.dliq ? 2.4 : 1.2)); P.dot(p.rdr, D.dT * 1e3, 5.5, am, th['ink-950']); });
+            P.tag(2.9, hi * 0.9, 'n = ' + D.n + ' · ΔT ∝ 1/r', th['text-2'], 'right', 0);
+            P.tag(0.5, all[1][20][1], 'mercury: small c', '#C9D2DE', 'left', -8);
+            return;
+          }
           if (p.mode === 'frame' && p.fsub === 'accel') {
             const pts = []; for (let a = -6; a <= 6.0001; a += 0.1) pts.push([a, Math.atan(a / GF) * 180 / Math.PI]);
             const P = g.Plot({ xmin: -6, xmax: 6, ymin: -35, ymax: 35, xlabel: 'a (m/s²)', ylabel: 'steady tilt (°)', xfmt: v => v.toFixed(0), yfmt: v => v.toFixed(0) }).frame();
@@ -4551,6 +5190,39 @@
 
     readouts(S) {
       const p = S.p;
+      if (p.mode === 'pascal' && p.psub === 'lift') {
+        const Lt = S.Lt;
+        return [
+          { label: 'Effort to start, Mg·A₁/A₂', value: Lt.F0.toFixed(2), unit: 'N', flag: 'accent' },
+          { label: 'Mechanical advantage A₂/A₁', value: Lt.MA.toFixed(1), unit: '×' },
+          { label: 'Pressure under the load Mg/A₂', value: (Lt.p0 / 1000).toFixed(2), unit: 'kPa' },
+          { label: 'Load rises', value: (Lt.y * 1000).toFixed(3), unit: 'mm', hint: 'x·A₁/A₂' },
+          { label: 'Work in ∫F₁dx', value: Lt.W.toFixed(4), unit: 'J', hint: 'integrated' },
+          { label: 'Mgy + oil raised', value: (Lt.Eload + Lt.Eoil).toFixed(4), unit: 'J', flag: 'ok' }
+        ];
+      }
+      if (p.mode === 'pascal') {
+        const D = S.Dm;
+        return [
+          { label: 'Force on the wall (800 strips)', value: D.F.toFixed(2), unit: 'N', flag: 'accent' },
+          { label: 'Formula', value: D.Fform.toFixed(2), unit: 'N' },
+          { label: 'Horizontal part', value: D.Fx.toFixed(2), unit: 'N', hint: 'same at any tilt' },
+          { label: 'Vertical part', value: D.Fz.toFixed(2), unit: 'N', hint: 'weight of liquid on the face' },
+          { label: 'Centre of pressure', value: (D.zCp * 100).toFixed(2), unit: 'cm up', hint: D.ho > 0 ? 'not H/3 with two layers' : 'H/3' },
+          { label: 'Moment about the base', value: D.Mb.toFixed(2), unit: 'N·m' }
+        ];
+      }
+      if (p.mode === 'drops') {
+        const D = S.Dr, mNow = dropsAbsorbed(D, S.ts);
+        return [
+          { label: 'Drops n', value: String(D.n), unit: '' },
+          { label: 'Big drop radius R = n^⅓ r', value: (D.R * 1000).toFixed(3), unit: 'mm' },
+          { label: 'Energy set free so far', value: (D.T * (D.A0 - D.area(mNow)) * 1e3).toFixed(4), unit: 'mJ' },
+          { label: 'Total, when merged', value: (D.E * 1e3).toFixed(4), unit: 'mJ', flag: 'accent' },
+          { label: 'Temperature rise', value: (D.dT * 1e3).toPrecision(4), unit: 'mK', hint: '(3T/ρc)(1/r − 1/R)' },
+          { label: 'Area lost', value: ((1 - 1 / Math.cbrt(D.n)) * 100).toFixed(1), unit: '%', hint: '1 − n^(−⅓)' }
+        ];
+      }
       if (p.mode === 'frame' && p.fsub === 'accel') {
         const A = S.Ac;
         return [
@@ -4644,6 +5316,12 @@
 
     equation(S) {
       const p = S.p;
+      if (p.mode === 'pascal' && p.psub === 'lift') return E.v('F') + '₁ ' + E.op('=') + ' ' + E.frac(E.v('A') + '₁', E.v('A') + '₂') + E.v('Mg') + ' ' + E.op('=') + ' ' + E.n(S.Lt.F0, 'N') +
+        ' · ' + E.v('W') + ' ' + E.op('=') + ' ∫' + E.v('F') + '₁' + E.v('dx') + ' ' + E.op('=') + ' ' + E.v('Mgy') + ' ' + E.op('+') + ' oil ' + E.op('=') + ' ' + E.n(S.Lt.W, 'J');
+      if (p.mode === 'pascal') return E.v('F') + ' ' + E.op('=') + ' ∫' + E.v('p') + E.v('w') + ' ' + E.v('ds') + ' ' + E.op('=') + ' ' + E.frac('ρ' + E.v('gw') + E.v('H') + '²', '2 sin α') + ' ' + E.op('=') + ' ' + E.n(S.Dm.F, 'N') +
+        ' · ' + E.v('h') + E.sub('cp') + ' ' + E.op('=') + ' ' + E.n(S.Dm.zCp * 100, 'cm');
+      if (p.mode === 'drops') return E.v('R') + ' ' + E.op('=') + ' ' + E.v('n') + '<sup>1/3</sup>' + E.v('r') + ' · ' + E.v('E') + ' ' + E.op('=') + ' 4π' + E.v('R') + '²' + E.v('T') + '(' + E.v('n') + '<sup>1/3</sup> ' + E.op('−') + ' 1) ' + E.op('=') + ' ' + E.n(S.Dr.E * 1e3, 'mJ') +
+        ' · Δ' + E.v('T') + ' ' + E.op('=') + ' ' + E.frac('3' + E.v('T'), 'ρ' + E.v('c')) + '(' + E.frac('1', E.v('r')) + ' ' + E.op('−') + ' ' + E.frac('1', E.v('R')) + ')';
       if (p.mode === 'frame' && p.fsub === 'accel') return 'tan θ ' + E.op('=') + ' ' + E.frac(E.v('a'), E.v('g')) + ' ' + E.op('=') + ' ' + E.n(S.Ac.a / GF, '') + ' → θ ' + E.op('=') + ' ' + E.n(S.Ac.thEq * 180 / Math.PI, '°') +
         '<br>' + E.v('p') + '(' + E.v('x') + ', ' + E.v('z') + ') ' + E.op('=') + ' ρ(' + E.v('g') + E.v('h') + ' ' + E.op('−') + ' ' + E.v('g') + E.v('z') + ' ' + E.op('−') + ' ' + E.v('a') + E.v('x') + '): its isobars are the tilted surface';
       if (p.mode === 'frame') return E.v('z') + '(' + E.v('r') + ') ' + E.op('=') + ' ' + E.v('z') + '₀ ' + E.op('+') + ' ' + E.frac('ω²' + E.v('r') + '²', '2' + E.v('g')) + ' · rise ' + E.op('=') + ' dip ' + E.op('=') + ' ' + E.frac('ω²' + E.v('R') + '²', '4' + E.v('g')) + ' ' + E.op('=') + ' ' + E.n(S.Rt.w * S.Rt.w * RV.R * RV.R / (4 * GF) * 100, 'cm');
@@ -4772,7 +5450,64 @@
         predict: { label: 'contact angle', unit: '°', tol: 0.02 },
         measure: S => S.C.tubes[0].thetaEff * 180 / Math.PI,
         working: 'The column cannot rise further, so the meniscus flattens until 2πrT cos θ\' holds exactly the 10 cm column: ' +
-          'cos θ\' = 10.0/14.87 = 0.672, θ\' = <b>47.7°</b>. There is no fountain. A capillary is not a perpetual-motion machine.' }
+          'cos θ\' = 10.0/14.87 = 0.672, θ\' = <b>47.7°</b>. There is no fountain. A capillary is not a perpetual-motion machine.' },
+      { source: 'JEE Main pattern · hydraulic lift',
+        q: 'A hydraulic lift has pistons of diameter 2.0 cm and 20 cm. What force on the small piston holds a 1000 kg load at the same level, in N?',
+        params: { mode: 'pascal', psub: 'lift', d1: 2, d2: 20, Mkg: 1000, xs: 20 },
+        predict: { label: 'force', unit: 'N', tol: 0.01 },
+        measure: S => S.Lt.F0,
+        working: 'The pressure is the same at the same level: F₁/A₁ = Mg/A₂, so F₁ = Mg(d₁/d₂)² = 9810 × (2/20)² = <b>98.1 N</b>. ' +
+          'Areas go as the diameter squared: a tenfold diameter gives a hundredfold force.' },
+      { source: 'JEE Advanced pattern · work through a hydraulic lift',
+        q: 'The same lift (2.0 cm and 20 cm pistons, oil ρ = 870 kg/m³, 1000 kg load, both pistons level at the start). The small piston is pushed down 20.0 cm. How much work does the effort do, in J?',
+        params: { mode: 'pascal', psub: 'lift', d1: 2, d2: 20, Mkg: 1000, xs: 20 },
+        predict: { label: 'work', unit: 'J', tol: 0.005 },
+        measure: S => S.Lt.W,
+        working: 'The load rises y = x·A₁/A₂ = 2.00 mm, so Mgy = 19.62 J. But the big piston now stands x(1 + A₁/A₂) = 20.2 cm above the small one, so the effort also holds up that head of oil: ' +
+          'F₁(x) = A₁(Mg/A₂ + ρgx(1 + A₁/A₂)). Integrating, W = Mgy + ρgA₁x²(1 + A₁/A₂)/2 = 19.62 + 0.054 = <b>19.67 J</b>. ' +
+          'Force is multiplied, work is not: the effort moves a hundred times further.' },
+      { source: 'JEE Main pattern · force on a vertical wall',
+        q: 'A tank holds water 60 cm deep against a vertical wall 50 cm wide. Find the total force of the water on the wall, in N.',
+        params: { mode: 'pascal', psub: 'dam', dH: 60, doil: 0, dw: 50, dang: 90 },
+        predict: { label: 'force', unit: 'N', tol: 0.01 },
+        measure: S => S.Dm.F,
+        working: 'The pressure grows linearly with depth, so the average is half the pressure at the bottom: F = ρgH/2 × wH = 998 × 9.81 × 0.36 × 0.5 / 2 = <b>881 N</b>. ' +
+          'The lab sums 800 strips and agrees to the newton. The force acts H/3 = 20 cm above the base, not halfway up.' },
+      { source: 'JEE Advanced pattern · moment on a wall',
+        q: 'For the same wall (water 60 cm deep, 50 cm wide), find the moment of the water force about the bottom edge, in N·m.',
+        params: { mode: 'pascal', psub: 'dam', dH: 60, doil: 0, dw: 50, dang: 90 },
+        predict: { label: 'moment', unit: 'N·m', tol: 0.01 },
+        measure: S => S.Dm.Mb,
+        working: '∫ρg(H − z)w·z dz from 0 to H = ρgwH³/6 = 998 × 9.81 × 0.5 × 0.216 / 6 = <b>176 N·m</b>, which is F × H/3. ' +
+          'It grows as H³: that is why dams are wedges, thick at the bottom.' },
+      { source: 'JEE Advanced pattern · two liquids on a wall',
+        q: 'A wall 50 cm wide holds back 40 cm of water with 20 cm of oil (ρ = 870 kg/m³) floating on it. Find the total force on the wall, in N.',
+        params: { mode: 'pascal', psub: 'dam', dH: 40, doil: 20, dw: 50, dang: 90 },
+        predict: { label: 'force', unit: 'N', tol: 0.01 },
+        measure: S => S.Dm.F,
+        working: 'Split the face. The oil part: ρ_o g h_o²w/2 = 85.3 N. The water part sits under the whole oil layer: (ρ_o g h_o + ρ_w g h_w/2) × h_w w = (1707 + 1958) × 0.2 = 733 N. ' +
+          'Total <b>818 N</b>. Leaving out the oil\'s pressure on the water part is the usual mistake.' },
+      { source: 'JEE Advanced pattern · an inclined wall',
+        q: 'The same 60 cm of water rests on a wall 50 cm wide inclined at 60° to the floor. Find the total (normal) force on the wall, in N.',
+        params: { mode: 'pascal', psub: 'dam', dH: 60, doil: 0, dw: 50, dang: 60 },
+        predict: { label: 'force', unit: 'N', tol: 0.01 },
+        measure: S => S.Dm.F,
+        working: 'The wetted length is H/sin 60°, and the average pressure is still ρgH/2: F = ρgwH²/(2 sin 60°) = 881.1/0.866 = <b>1017 N</b>. ' +
+          'Its horizontal part is still 881 N; the extra is vertical, the weight of the water standing on the slope.' },
+      { source: 'JEE Main pattern · merging drops',
+        q: 'A thousand water drops (T = 0.0728 N/m) of radius 1.00 mm merge into one. How much surface energy is released, in mJ?',
+        params: { mode: 'drops', nk: 10, rdr: 1, dliq: 'water' },
+        predict: { label: 'energy', unit: 'mJ', tol: 0.01 },
+        measure: S => S.Dr.E * 1e3,
+        working: 'Volume is kept: R = n^⅓ r = 10 mm. Area before 1000 × 4π(1 mm)² = 125.7 cm², after 4π(10 mm)² = 12.57 cm². ' +
+          'E = TΔA = 0.0728 × 1.131 × 10⁻² = <b>0.823 mJ</b> = 4πR²T(n^⅓ − 1).' },
+      { source: 'JEE Advanced pattern · heating by coalescence',
+        q: 'A thousand mercury drops (T = 0.485 N/m, ρ = 13 534 kg/m³, c = 140 J/kg·K) of radius 1.00 mm merge. If all the energy stays in the mercury, what is the temperature rise, in mK?',
+        params: { mode: 'drops', nk: 10, rdr: 1, dliq: 'mercury' },
+        predict: { label: 'ΔT', unit: 'mK', tol: 0.01 },
+        measure: S => S.Dr.dT * 1e3,
+        working: 'ΔT = E/(mc) = 4πT(nr² − R²)/((4/3)πR³ρc) = (3T/ρc)(1/r − 1/R) = 3 × 0.485/(13 534 × 140) × (1000 − 100) = <b>0.691 mK</b>. ' +
+          'Water gets only 0.047 mK: its surface tension is lower and its specific heat thirty times bigger.' }
     ],
 
     walkthrough: [
@@ -4826,6 +5561,21 @@
         ask: 'Do the bubbles become equal?',
         reveal: '<b>No: the small one empties into the big one.</b> Its pressure 4T/R is higher, so air leaves it and it gets smaller still, and its pressure rises further. It stops only as a flat cap with the big bubble\'s curvature. The right-hand plot shows why: pressure peaks at a hemisphere.',
         params: { mode: 'bubbles', r1: 2, r2: 4, sig: 0.025, open: true } },
+      { title: '11 · The hydraulic lift',
+        body: 'A 1000 kg load on a 20 cm piston, a 2 cm piston to push. Drag the pump handle down.',
+        ask: 'The pressure is the same everywhere in the oil. Does the effort stay exactly Mg/100 through the stroke?',
+        reveal: '<b>No: it creeps up.</b> The big piston rises while the small one sinks, so the effort also holds a growing head of oil, ρgx(1 + A₁/A₂). The work in equals Mgy plus the oil raised. Force is multiplied, work never is.',
+        params: { mode: 'pascal', psub: 'lift', d1: 2, d2: 20, Mkg: 1000, xs: 20 } },
+      { title: '12 · Push on a wall',
+        body: '60 cm of water against a vertical wall. Then tilt the wall to 60°.',
+        ask: 'Tilting the wall makes the total force bigger. Does the horizontal push on it change?',
+        reveal: '<b>No.</b> The horizontal part is ρgwH²/2 at any tilt: it only depends on the depth. The extra force is vertical, the weight of the water sitting on the slope. The resultant always acts H/3 above the base.',
+        params: { mode: 'pascal', psub: 'dam', dH: 60, doil: 0, dw: 50, dang: 60 } },
+      { title: '13 · A thousand drops become one',
+        body: 'Watch the drops join the central one, nearest first, while the surface area is added up.',
+        ask: 'The volume is fixed. What fraction of the surface disappears?',
+        reveal: '<b>90%.</b> The area goes from n·4πr² to 4π(n^⅓r)², a factor n^⅓ = 10 smaller. That energy, T times the lost area, becomes heat. Splitting a drop into a spray costs exactly the same energy.',
+        params: { mode: 'drops', nk: 10, rdr: 1, dliq: 'water' } },
     ],
 
     quiz: [
@@ -4855,7 +5605,16 @@
         why: 'The water pushes the block up with 1.2 N, so the block pushes the water down with 1.2 N ≈ 122 g-weight. The block\'s own weight is carried by the spring, not the scale.' },
       { q: 'A capillary tube shorter than the rise height is dipped in water. The water:',
         options: ['Rises to the top and stops, with a flatter meniscus', 'Overflows as a fountain', 'Does not rise at all', 'Rises and falls forever'], answer: 0,
-        why: 'The meniscus adjusts its contact angle until 2πrT cos θ\' equals the weight of the shorter column. Energy cannot be extracted from surface tension this way.' }
+        why: 'The meniscus adjusts its contact angle until 2πrT cos θ\' equals the weight of the shorter column. Energy cannot be extracted from surface tension this way.' },
+      { q: 'In a hydraulic lift the small piston moves down 10 cm. If the area ratio is 1 : 50, the load rises:',
+        options: ['2 mm', '10 cm', '5 m', '0.2 mm'], answer: 0,
+        why: 'The oil is incompressible, so A₁x₁ = A₂x₂ and x₂ = 10 cm/50 = 2 mm. The force is 50 times bigger, the distance 50 times smaller: the work is the same.' },
+      { q: 'Water of depth H presses on a vertical wall. The resultant force acts at a height above the base of:',
+        options: ['H/3', 'H/2', '2H/3', 'H/4'], answer: 0,
+        why: 'The pressure grows linearly with depth: a triangle of load with its centroid a third of the way up from the base. The dam plot shows the triangle.' },
+      { q: 'n identical drops merge into one. The energy released is proportional to:',
+        options: ['n − n^(2/3)', 'n − 1', 'n^(1/3) − 1 only, independent of r', 'n²'], answer: 0,
+        why: 'E = 4πr²T(n − n^(2/3)) = 4πR²T(n^⅓ − 1). The first form counts areas; the second uses the big drop.' }
     ],
 
     notes: '<b>Where this shows up in the paper.</b><ul>' +
@@ -4863,7 +5622,9 @@
       '<li><b>Bernoulli and continuity</b>: venturimeter, aerofoil lift, the atomiser, and "which tube is higher" questions.</li>' +
       '<li><b>Viscosity</b>: Stokes\' law 6πηrv, terminal velocity ∝ r², Poiseuille flow, Reynolds number and the laminar–turbulent boundary.</li>' +
       '<li><b>Buoyancy</b>: apparent weight, fraction submerged = ρ_body/ρ_liquid, reading changes on a scale under the vessel.</li>' +
-      '<li><b>Surface tension</b>: Jurin\'s law h = 2T cos θ/ρgr, excess pressure 2T/r, mercury depression, insufficient-length tubes.</li></ul>' +
+      '<li><b>Surface tension</b>: Jurin\'s law h = 2T cos θ/ρgr, excess pressure 2T/r, mercury depression, insufficient-length tubes.</li>' +
+      '<li><b>Pascal and walls</b>: hydraulic lift F₁/A₁ = F₂/A₂ with equal work; force on a wall ρgwH²/2 acting at H/3; moment ρgwH³/6; layered liquids; inclined faces.</li>' +
+      '<li><b>Drops</b>: merging releases 4πR²T(n^⅓ − 1), ΔT = (3T/ρc)(1/r − 1/R); splitting costs the same.</li></ul>' +
       '<div class="pyq"><em>Trap to avoid</em> — "the balance under the beaker reads the same, because the block is held by the string." It does not. It rises by exactly the upthrust. Newton\'s third law is part of every Archimedes problem.</div>' +
       '<div class="pyq"><em>Trap to avoid</em> — using Stokes\' law without checking Re. A steel ball in water falls about twenty times slower than Stokes predicts. The formula belongs to small, slow balls in thick liquids.</div>'
   });

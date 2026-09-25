@@ -101,7 +101,7 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v9 (shipped)
+## 4. Insight Smart Lab — v10 (shipped)
 
 Source: [`smartlab/`](./smartlab). **Forty-two experiments across twenty-seven chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
@@ -250,10 +250,17 @@ and each exam result is **read off the run**.
   read on a scale 5 m away. The lab works out G from turning points exactly as a student does. The
   textbook formula comes out 7.5% low because of the far spheres; with the far-sphere and damping
   corrections it returns **6.674 × 10⁻¹¹**.
+- **Shapes and superposition** (JEE Advanced): a ring, disc, shell, solid sphere, sphere with a
+  cavity, or n point masses, each built from up to 3000 point masses and summed by brute force. g and
+  V along the axis are plotted as the sum (dots) against the formula (dashes). The ring's field peaks
+  at the measured 0.707 R = R/√2. The field inside a cavity is uniform and parallel, 0.502 against
+  the formula's 0.500. Four masses on a square have U = −(4 + √2)Gm²/a. Drag the probe anywhere.
+- **Dropped from h = R**: set the launch speed to zero and the integrated impact speed (7.91 km/s)
+  is shown beside the wrong √(2gh) = 11.19 km/s.
 
 ### Physics · Mechanical Properties of Fluids
 **Fluids — Pressure, Flow, Viscosity and Surface Tension**
-Five pieces of apparatus.
+Twelve set-ups, each computing what it shows.
 - **A draining tank** with real jets landing on a rule. Two holes at y and H − y hit the same spot, and
   the drain time matches (A/a)√(2H/g) to the second.
 - **A venturimeter** with five manometer tubes, and the pressure and energy lines drawn on a
@@ -274,6 +281,14 @@ Five pieces of apparatus.
   oscillates with T = 2π√(L/2g).
 - **Capillary rise** in three tubes, integrated with inertia: the wide tube overshoots and rings. A
   tube that is too short does **not** overflow; its contact angle gives way instead.
+- **Hydraulic lift** (Pascal): drag the pump handle. The effort is A₁(Mg/A₂ + ρgx(1 + A₁/A₂)): it
+  creeps up because the big piston rises as the small one sinks. The work is integrated over the
+  stroke and equals Mgy plus the oil raised (19.674 J for 1000 kg, 2 cm and 20 cm pistons, 20 cm stroke).
+- **Force on a wall**: the wetted face is summed over 800 strips (881.13 N for 60 cm of water on a
+  50 cm wall, acting H/3 up, moment ρgwH³/6). An oil layer on top (818.35 N) and an inclined wall
+  (1017.4 N at 60°) are included; the horizontal part never changes.
+- **Merging drops**: 1000 drops join the central one nearest first, while the surface area is summed
+  every frame. Water releases 0.8233 mJ = 4πR²T(n^⅓ − 1); mercury heats by 0.691 mK.
 
 ### Physics · System of Particles & Rotational Motion
 **27 · Rolling, Slipping and the Moment of Inertia**
