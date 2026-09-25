@@ -742,6 +742,26 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-25 (e)** — **Client: "a lot of upgrade needed in this [batch 4], specially JEE Mains and Advanced".** Added
+  JEE Advanced physics, each result computed and verified:
+  - **Nuclei**: a decay series (applying the rules, not a lookup); Rutherford scattering; neutron moderation (Monte
+    Carlo); carbon dating with counting statistics; an endothermic threshold.
+  - **Thermal**: a heating curve; thermal stress; radial conduction; ice growth on a lake (enthalpy method); planet
+    equilibrium with a greenhouse layer.
+  - 11 new problems, all measured within tolerance.
+  **Techniques:**
+  - Rutherford in units of d₀ is universal: integrate θ(b) once, then scale by d₀ for any energy and target.
+  - Start the orbit at r₀ = 3000 d₀ with v = √(1 − 1/r₀). Starting at 80 d₀ with v = 1 made the closest
+    approach 1.2% low.
+  - Compare Monte Carlo bins with the formula INTEGRATED over each bin. Normalising at the first bin's centre was
+    off by 20%.
+  - Hydrogen's mean collision count is ln(E₀/E)/ξ + 1: the last collision overshoots.
+  **Bugs:**
+  - Two parameters with the same name in one lab (rod material `r1` and shell radius `r1`) crashed the audit.
+    Every new parameter name must be checked against the whole lab's params.
+  - An LCD lower on a face than the box's centre was hidden again (the carbon-dating blank counter). Stand every
+    meter 0.6 cm proud of its box.
+
 - **2026-09-25 (d)** — **Client: "continue to batch 4".** Built **Nuclei** and **Thermal Properties** in
   `sims-physics12.js` (both labs in one IIFE, 44 sims now).
   **New techniques, reusable:**

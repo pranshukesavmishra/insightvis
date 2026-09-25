@@ -101,7 +101,7 @@ Every experiment is held to this bar:
 
 ---
 
-## 4. Insight Smart Lab — v11 (shipped)
+## 4. Insight Smart Lab — v12 (shipped)
 
 Source: [`smartlab/`](./smartlab). **Forty-four experiments across twenty-nine chapters.**
 **Animal Kingdom carries nine**, because it is the highest-preference topic for this client, and
@@ -315,6 +315,20 @@ Four set-ups. No curve on them is drawn from a formula.
   - It uses one-group benchmark data (Sood et al., LA-13511) scaled to Godiva.
   - It counts k generation by generation and finds the critical radius: 8.72 cm and 52 kg (Godiva is 52 kg).
   - A reflector brings the critical mass down to 18 kg, and doubling the density quarters it.
+- **Decay series on the N–Z chart** (U-238, Th-232, U-235): a 3D skyline where each nuclide's height is its log
+  half-life. The walk applies only the decay rules and counts 8 α and 6 β⁻ (checked against ΔA/4 and 2n_α − ΔZ).
+  Secular equilibrium gives 0.34 g of Ra per tonne of U.
+- **Rutherford scattering**:
+  - α orbits are integrated in the Coulomb field; the head-on closest approach is 45.50 fm for 5 MeV on gold.
+  - The impact parameter follows b = (d₀/2)cot(θ/2) to 0.03°.
+  - A 300 000-α Monte Carlo fills the angle bins, and every bin matches 1/sin⁴(θ/2) within √N.
+  - 30 MeV α on aluminium reach the nucleus, and the formula fails.
+- **Moderation**: neutrons from 2 MeV are scattered elastically, collision by collision. Hydrogen takes 19.3
+  collisions, graphite 116 and lead 1890; the head-on energy transfer is 4A/(1 + A)².
+- **Carbon dating**: sample and blank counts carry ±√N, so the age comes with an error bar (17 214 ± 26 yr for 1/8
+  of the living activity), and very old samples sink into the background.
+- **An endothermic reaction**: for ¹⁴N(α, p)¹⁷O, Q = −1.192 MeV from masses. The threshold is 1.533 MeV, because
+  the centre of mass must keep moving.
 
 ### Physics · Thermal Properties of Matter
 **Heat — Calorimetry, Expansion, Conduction and Radiation**
@@ -337,6 +351,16 @@ Four set-ups. No curve on them is drawn from a formula.
   - A blackened and a polished sphere cool by εσT⁴ plus convection (RK4). Newton's average-temperature estimate holds for the polished one and misses by 3% for the black one.
   - The black-body spectrum comes from Planck's law: the peak is found numerically (λT = 2.8978 × 10⁻³) and the power integrated (σ = 5.6704 × 10⁻⁸).
   - The body's colour is computed from the CIE 1931 curves.
+- **Heating curve**: ice on a heater at constant power. The boiling plateau divided by the melting plateau is
+  6.754 = L_v/L_f, and the ice line's slope is twice the water line's (c_w/c_ice).
+- **Thermal stress**: a rod between rigid walls expands freely until its gap closes, then σ = Y(LαΔT − gap)/L
+  (140 MPa for steel).
+- **Radial conduction** through a spherical shell or a pipe, solved in r: the heat current matches
+  4πKr₁r₂ΔT/(r₂ − r₁) to 5 digits, and the mid-wall temperature is 33.3 °C, not 50.
+- **Ice on a lake**: the Stefan problem by the enthalpy method. The ice grows as √t, and doubling the thickness
+  takes 3.95× as long (4 in the quasi-steady limit).
+- **A planet in sunlight**: integrated to equilibrium. The solar constant is 1361 W/m² and the Earth sits at 254 K,
+  or 302 K with a greenhouse layer (×2^¼).
 
 ### Physics · System of Particles & Rotational Motion
 **27 · Rolling, Slipping and the Moment of Inertia**
