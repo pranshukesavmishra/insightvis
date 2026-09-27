@@ -379,97 +379,170 @@
     return { va, vB, vr, r0, tStar, dMinF, dMin: sep((a + b) / 2), tMin: (a + b) / 2, out, tEnd };
   }
 
-  /* a boat or ship: a hull pointing along heading d (unit, in the x–y plane) at c */
+  /* ---------- shared pieces for the kinematics benches ---------- */
+  // a boat or ship: a hull pointing along heading d (unit, x–y plane) at c
   function hull(F, c, d, len, wid, col, deck) {
     const s = [-d[1], d[0], 0], dd = [d[0], d[1], 0];
-    R3.box(F, V.add(c, [0, 0, 0.02]), [len, wid, 0.04], col, { shadow: false, axes: [dd, s, [0, 0, 1]] });
-    const bow = V.add(c, V.mul(dd, len / 2 + len * 0.18));
-    flatPoly(F, [V.add(V.add(c, V.mul(dd, len / 2)), V.mul(s, wid / 2)).map((v, i) => i === 2 ? 0.042 : v), [bow[0], bow[1], 0.042], V.add(V.add(c, V.mul(dd, len / 2)), V.mul(s, -wid / 2)).map((v, i) => i === 2 ? 0.042 : v)], col, { bias: -0.01 });
-    R3.box(F, V.add(c, V.add(V.mul(dd, -len * 0.12), [0, 0, 0.06])), [len * 0.35, wid * 0.7, 0.05], deck || '#DCE3EE', { shadow: false, axes: [dd, s, [0, 0, 1]] });
+    R3.box(F, V.add(c, [0, 0, 0.03]), [len, wid, 0.06], col, { shadow: false, axes: [dd, s, [0, 0, 1]] });
+    const b0 = V.add(c, V.mul(dd, len / 2)), bow = V.add(c, V.mul(dd, len / 2 + len * 0.22));
+    flatPoly(F, [V.add(V.add(b0, V.mul(s, wid / 2)), [0, 0, 0.061]), [bow[0], bow[1], 0.061], V.add(V.add(b0, V.mul(s, -wid / 2)), [0, 0, 0.061])], col, { bias: -0.01 });
+    flatPoly(F, [V.add(V.add(b0, V.mul(s, wid / 2)), [0, 0, 0.001]), [bow[0], bow[1], 0.03], V.add(V.add(b0, V.mul(s, -wid / 2)), [0, 0, 0.001])], RX.mix(col, '#000000', 0.3), { bias: -0.005 });
+    R3.box(F, V.add(c, V.add(V.mul(dd, -len * 0.12), [0, 0, 0.1])), [len * 0.34, wid * 0.72, 0.08], deck || '#E8EDF5', { shadow: false, axes: [dd, s, [0, 0, 1]] });
+    R3.cylinder(F, V.add(c, V.add(V.mul(dd, -len * 0.18), [0, 0, 0.14])), V.add(c, V.add(V.mul(dd, -len * 0.18), [0, 0, 0.22])), wid * 0.12, '#39414F', { segments: 10, shadow: false });
   }
+  // a small car on a road along +x: body, cabin, four wheels turned by the distance rolled
+  function car(F, X, z0, dirSign, rolled, col) {
+    const SC = 1.35, r = 0.055 * SC, ang = rolled / r, B = (c, sz, cl, o) => R3.box(F, [X + (c[0] - X) * SC, c[1] * SC, z0 + (c[2] - z0) * SC], sz.map(v => v * SC), cl, o);
+    B([X, 0, z0 + 0.1], [0.46, 0.2, 0.1], col, { shadow: true });
+    B([X - 0.04 * dirSign, 0, z0 + 0.19], [0.24, 0.18, 0.09], RX.mix(col, '#0B1020', 0.35), { shadow: false });
+    B([X + 0.085 * dirSign, 0, z0 + 0.19], [0.02, 0.17, 0.075], '#9FD8FF', { shadow: false });
+    [[-0.15, -0.1], [0.15, -0.1], [-0.15, 0.1], [0.15, 0.1]].forEach(q => R3.cylinder(F, [X + q[0] * SC, (q[1] - 0.02) * SC, z0 + r], [X + q[0] * SC, (q[1] + 0.02) * SC, z0 + r], r, '#1E222A', { segments: 16, spokes: 4, phase: ang, shadow: false, capColour: '#5A6478' }));
+    R3.sphere(F, [X + 0.31 * dirSign, -0.08, z0 + 0.15], 0.02, '#FFE9A0', { shadow: false, vivid: true });
+    R3.sphere(F, [X + 0.31 * dirSign, 0.08, z0 + 0.15], 0.02, '#FFE9A0', { shadow: false, vivid: true });
+  }
+  // a screen-space inset box with a title
+  function inset(g, x, y, w, h, title) {
+    const ctx = g.ctx; ctx.save(); ctx.fillStyle = 'rgba(8,12,22,.92)'; ctx.strokeStyle = g.theme.line; ctx.lineWidth = 1;
+    ctx.fillRect(x, y, w, h); ctx.strokeRect(x + .5, y + .5, w, h);
+    ctx.fillStyle = '#8FA4CE'; ctx.font = '600 10px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.fillText(title, x + 8, y + 14); ctx.restore();
+  }
+  function arrow2(ctx, x0, y0, x1, y1, col, w, lab, lx, ly) {
+    const a = Math.atan2(y1 - y0, x1 - x0), L = Math.hypot(x1 - x0, y1 - y0), hd = Math.min(9, L * 0.35);
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = w || 2.2; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1 - hd * 0.6 * Math.cos(a), y1 - hd * 0.6 * Math.sin(a)); ctx.stroke();
+    if (L > 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - hd * Math.cos(a - 0.4), y1 - hd * Math.sin(a - 0.4)); ctx.lineTo(x1 - hd * Math.cos(a + 0.4), y1 - hd * Math.sin(a + 0.4)); ctx.closePath(); ctx.fill(); }
+    if (lab) { ctx.font = '600 11px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.fillText(lab, lx, ly); }
+  }
+  const at01 = (out, tt, dtS) => out[Math.min(out.length - 1, Math.max(0, Math.round(tt / dtS)))];
 
   /* ======================= 27.1 · straight-line motion and its graphs ======================= */
   function drawGraphs(S, g) {
     const ctx = g.ctx, th = g.theme, p = S.p, cam = S.cam, Gr = S.Gr;
-    const F = R3.Frame(ctx, cam, { ambient: 0.36, floorZ: 0 });
-    const tt = S.ts % (Gr.tEnd + 1), i = Math.min(Gr.out.length - 1, Math.round(Math.min(tt, Gr.tEnd) / 0.01)), o = Gr.out[i];
+    const F = R3.Frame(ctx, cam, { ambient: 0.38, floorZ: 0 });
+    const tt = Math.min(S.ts % (Gr.tEnd + 1.5), Gr.tEnd), o = at01(Gr.out, tt, 0.01), nS = 12, dS = Gr.tEnd / nS;
+    const strobe = []; for (let k = 0; k <= nS && k * dS <= tt + 1e-9; k++) strobe.push(at01(Gr.out, k * dS, 0.01));
     if (p.prof === 'drop') {
-      const ks = 1.6 / Math.max(0.5, p.hdrop);
-      R3.box(F, [0, 0, -0.02], [1.4, 0.8, 0.04], '#39414F', { shadow: false });
-      B3.rule(F, [-0.18, 0.05, 0], [0, 0, 1], p.hdrop, { k: ks, up: [0, -1, 0] });
-      const trail = Gr.out.filter((q, j) => j <= i && j % 3 === 0).map(q => [0.12 + q[0] * 0.02, 0, q[1] * ks + 0.05]);
-      if (trail.length > 1) path3(F, trail, '#FF8A7A', { alpha: 0.35, width: 1.2, chunk: 4 });
-      R3.sphere(F, [0, 0, o[1] * ks + 0.05], 0.05, '#E0453A', { shadow: true, vivid: true });
-      if (Math.abs(o[2]) > 0.05) R3.arrow(F, [0.12, 0, o[1] * ks + 0.05], [0.12, 0, o[1] * ks + 0.05 + o[2] * 0.06], 0.009, '#7FD0FF', { vivid: true });
-      R3.label(F, [0.2, 0, o[1] * ks + 0.12], 'v = ' + o[2].toFixed(2) + ' m/s', '#7FD0FF', { size: 10, align: 'left' });
+      const ks = 2.6 / Math.max(0.5, p.hdrop), zb = h => 0.06 + h * ks;
+      R3.box(F, [0, 0.2, -0.03], [1.6, 1.0, 0.06], '#3A3F4A', { shadow: false });
+      R3.box(F, [0, 0.45, zb(p.hdrop) / 2 + 0.1], [1.4, 0.04, zb(p.hdrop) + 0.3], '#252C3A', { shadow: false });
+      B3.rule(F, [-0.35, 0.42, 0.06], [0, 0, 1], p.hdrop, { k: ks, up: [0, -1, 0] });
+      // strobe: where the ball was at equal intervals (they bunch where it is slow)
+      const sp = sprite('#E0453A'), list = strobe.slice(0, -1).map(q => [0.18, 0, zb(q[1]), 0.045, sp]);
+      if (list.length) ballCloud(F, list, [0.18, 0, 1], 0.2);
+      strobe.slice(0, -1).forEach((q, k) => R3.label(F, [0.3, 0, zb(q[1])], 't = ' + (k * dS).toFixed(2) + ' s', '#8FA4CE', { size: 8.5, align: 'left' }));
+      R3.sphere(F, [0, 0, zb(o[1])], 0.07, '#E0453A', { shadow: true, vivid: true });
+      if (Math.abs(o[2]) > 0.05) R3.arrow(F, [-0.14, 0, zb(o[1])], [-0.14, 0, zb(o[1]) + o[2] * 0.07], 0.012, '#7FD0FF', { vivid: true });
+      R3.label(F, [-0.2, 0, zb(o[1]) + 0.1], 'v = ' + o[2].toFixed(2) + ' m/s', '#7FD0FF', { size: 10, align: 'right' });
+      F.render();
     } else {
-      const xs = Gr.out.map(q => q[1]), lo = Math.min(...xs), hi = Math.max(...xs), ks = 3.4 / Math.max(1, hi - lo), x0 = -1.7 - lo * ks;
-      R3.box(F, [0, 0, -0.03], [4.2, 0.6, 0.06], '#3A3F4A', { shadow: false });
-      for (let m = Math.ceil(lo); m <= hi; m += Math.max(1, Math.round((hi - lo) / 10))) { const X = x0 + m * ks; path3(F, [[X, -0.3, 0.002], [X, -0.22, 0.002]], '#DCE6F8', { alpha: 0.8, width: 1.2, chunk: 1 }); R3.label(F, [X, -0.38, 0.01], m + ' m', '#8FA4CE', { size: 9 }); }
-      path3(F, [[-2.1, 0, 0.002], [2.1, 0, 0.002]], '#E8D060', { alpha: 0.5, width: 1.5, dash: [8, 6], chunk: 1 });
-      const X = x0 + o[1] * ks, dir = o[2] >= 0 ? 1 : -1;
-      R3.box(F, [X, 0, 0.09], [0.34, 0.18, 0.1], '#3A6FB8', { shadow: true });
-      R3.box(F, [X - 0.03 * dir, 0, 0.17], [0.18, 0.16, 0.07], '#2A4F88', { shadow: false });
-      [[-0.1, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.1, 0.1]].forEach(q => R3.cylinder(F, [X + q[0], q[1] - 0.015, 0.04], [X + q[0], q[1] + 0.015, 0.04], 0.04, '#1E222A', { segments: 12, shadow: false }));
-      if (Math.abs(o[2]) > 1e-3) R3.arrow(F, [X, 0, 0.3], [X + o[2] * 0.08, 0, 0.3], 0.01, '#7FD0FF', { vivid: true });
-      if (Math.abs(o[3]) > 1e-3) R3.arrow(F, [X, 0, 0.42], [X + o[3] * 0.12, 0, 0.42], 0.01, '#F5B451', { vivid: true });
-      R3.label(F, [X, 0, 0.55], 'v = ' + o[2].toFixed(2) + ' m/s · a = ' + o[3].toFixed(2) + ' m/s²', '#DCE3EE', { size: 10 });
+      const xs = Gr.out.map(q => q[1]), lo = Math.min(0, ...xs), hi = Math.max(...xs), span = Math.max(1, hi - lo), ks = 4.4 / span, X = x => -2.2 + (x - lo) * ks;
+      R3.box(F, [0, 0, -0.03], [5.2, 0.9, 0.06], '#2E333D', { shadow: false });
+      R3.box(F, [0, -0.52, -0.05], [5.4, 0.12, 0.04], '#4A6A3A', { shadow: false }); R3.box(F, [0, 0.52, -0.05], [5.4, 0.12, 0.04], '#4A6A3A', { shadow: false });
+      for (let k = -12; k <= 12; k++) path3(F, [[k * 0.22, 0, 0.002], [k * 0.22 + 0.1, 0, 0.002]], '#E8D060', { alpha: 0.8, width: 2, chunk: 1 });
+      const step = span > 60 ? 20 : span > 25 ? 10 : span > 10 ? 4 : 2;
+      for (let m = Math.ceil(lo / step) * step; m <= hi + 1e-9; m += step) { const x = X(m); path3(F, [[x, -0.45, 0.003], [x, -0.33, 0.003]], '#DCE6F8', { alpha: 0.9, width: 1.5, chunk: 1 }); R3.label(F, [x, -0.62, 0.02], m + ' m', '#AFC2E6', { size: 9.5 }); }
+      // start flag
+      R3.cylinder(F, [X(0), 0.4, 0], [X(0), 0.4, 0.5], 0.01, '#DCE3EE', { segments: 8, shadow: false });
+      flatPoly(F, [[X(0), 0.4, 0.5], [X(0) + 0.18, 0.4, 0.44], [X(0), 0.4, 0.38]], '#7CF0B0');
+      R3.label(F, [X(0), 0.4, 0.6], 'start', '#7CF0B0', { size: 9.5 });
+      // ticker tape: the car's position at equal time intervals — close together = slow, far apart = fast
+      const sp = sprite('#FFD36B'); ballCloud(F, strobe.map(q => [X(q[1]), -0.25, 0.02, 0.028, sp]), [0, -0.25, 0], 0.1);
+      strobe.forEach((q, k) => { if (k % 3 === 0) R3.label(F, [X(q[1]), -0.3, 0.1], (k * dS).toFixed(1) + ' s', '#FFD36B', { size: 8.5 }); });
+      Gr.turns.forEach(t => { if (t <= tt) { const q = at01(Gr.out, t, 0.01); R3.label(F, [X(q[1]), 0.25, 0.42], '↺ turns here (v = 0)', '#FF8FB0', { size: 9.5 }); path3(F, [[X(q[1]), 0.25, 0.01], [X(q[1]), 0.25, 0.35]], '#FF8FB0', { alpha: 0.8, width: 1.4, dash: [3, 3], chunk: 1 }); } });
+      const Xc = X(o[1]), dir = o[2] >= 0 ? 1 : -1;
+      car(F, Xc, 0, dir, o[4] * ks, '#3A6FB8');
+      // velocity (blue) and acceleration (amber) arrows above the car; the displacement arrow along the kerb
+      if (Math.abs(o[2]) > 1e-3) R3.arrow(F, [Xc, 0, 0.42], [Xc + o[2] * 0.12, 0, 0.42], 0.016, '#7FD0FF', { vivid: true });
+      if (Math.abs(o[3]) > 1e-3) R3.arrow(F, [Xc, 0, 0.58], [Xc + o[3] * 0.2, 0, 0.58], 0.016, '#F5B451', { vivid: true });
+      R3.label(F, [Xc + o[2] * 0.12 + (o[2] >= 0 ? 0.08 : -0.08), 0, 0.42], 'v ' + o[2].toFixed(2), '#7FD0FF', { size: 10, align: o[2] >= 0 ? 'left' : 'right' });
+      R3.label(F, [Xc + o[3] * 0.2 + (o[3] >= 0 ? 0.08 : -0.08), 0, 0.58], 'a ' + o[3].toFixed(2), '#F5B451', { size: 10, align: o[3] >= 0 ? 'left' : 'right' });
+      if (Math.abs(o[1]) > 0.02 * span) { R3.arrow(F, [X(0), 0.3, 0.02], [Xc, 0.3, 0.02], 0.012, '#7CF0B0', { vivid: true }); R3.label(F, [(X(0) + Xc) / 2, 0.3, 0.12], 'displacement ' + o[1].toFixed(2) + ' m', '#7CF0B0', { size: 9.5 }); }
+      F.render();
     }
-    F.render();
+    // the odometer and the clock, as dials in the corner
+    const iy = g.h - 128; inset(g, g.w - 214, iy, 200, 86, 'CLOCK · ODOMETER');
+    ctx.save(); ctx.font = '700 22px "IBM Plex Mono",monospace'; ctx.fillStyle = '#DCE3EE'; ctx.textAlign = 'left';
+    ctx.fillText(o[0].toFixed(2) + ' s', g.w - 204, iy + 40); ctx.fillStyle = '#FFD36B'; ctx.fillText(o[4].toFixed(2) + ' m', g.w - 204, iy + 72);
+    ctx.font = '10px "IBM Plex Mono",monospace'; ctx.fillStyle = '#8FA4CE'; ctx.fillText('distance', g.w - 64, iy + 72); ctx.restore();
     const nm = { const: 'constant acceleration', brake: 'speed up, then brake to rest', sine: 'an acceleration that swings back and forth', drop: 'a ball dropped, bouncing with e = ' + p.ebn.toFixed(2) }[p.prof];
     header(g, 'Straight-line motion: ' + nm, 't = ' + o[0].toFixed(2) + ' s · x = ' + o[1].toFixed(3) + ' m · v = ' + o[2].toFixed(3) + ' m/s · a = ' + o[3].toFixed(3) + ' m/s²',
-      'slope of x–t = v · slope of v–t = a · area under v–t = displacement (signed); distance adds the areas without sign', th.text);
+      'the dots are snapshots at equal times (every ' + dS.toFixed(2) + ' s): spreading = speeding up, bunching = slowing down', th.text);
     panel(g, 'DISPLACEMENT AND DISTANCE', [
       ['displacement (end − start)', Gr.disp.toFixed(4) + ' m', th.phys],
       ['distance travelled', Gr.dist.toFixed(4) + ' m', th.phys],
       [p.prof === 'drop' ? 'comes to rest at' : 'turns round at', p.prof === 'drop' ? (isFinite(Gr.tRest) ? Gr.tRest.toFixed(3) + ' s (' + Gr.bounces + ' bounces)' : '—') : (Gr.turns.length ? Gr.turns.map(q => q.toFixed(3)).join(', ') + ' s' : 'never')],
-      ['distance so far', o[4].toFixed(3) + ' m']
+      ['average velocity · average speed', (Gr.disp / Gr.tEnd).toFixed(3) + ' · ' + (Gr.dist / Gr.tEnd).toFixed(3) + ' m/s']
     ]);
   }
 
   /* ======================= 27.2 · projectiles ======================= */
   function drawProj(S, g) {
     const ctx = g.ctx, th = g.theme, p = S.p, cam = S.cam, Pj = S.Pj;
-    const F = R3.Frame(ctx, cam, { ambient: 0.36, floorZ: null });
-    const tt = S.ts % (Pj.T + 1.2), i = Math.min(Pj.out.length - 1, Math.round(Math.min(tt, Pj.T) / 0.01)), o = Pj.out[i];
-    const ext = Math.max(Pj.Rx, S.vac.Rx || 0, Pj.yMax * 1.6, 2), ks = 3.4 / ext, al = Pj.al, X = x => -1.6 + x * ks;
-    // the ground (or the incline) as a slab, with metre marks along it
-    const gl = ext * 1.15, e1 = [Math.cos(al), 0, Math.sin(al)];
-    const g0 = [X(-0.1 * ext), -0.5, -0.1 * ext * Math.tan(al) * ks], g1 = [X(gl), -0.5, gl * Math.tan(al) * ks];
-    flatPoly(F, [g0, g1, [g1[0], 0.5, g1[2]], [g0[0], 0.5, g0[2]]], F.shade('#4E6A3A', [-Math.sin(al), 0, Math.cos(al)], { ambient: 0.55 }), { bias: F.GROUND });
-    const step = ext > 60 ? 10 : ext > 20 ? 5 : ext > 8 ? 2 : 1;
-    for (let m = 0; m <= gl; m += step) { const P = [X(m), -0.5, m * Math.tan(al) * ks]; path3(F, [P, V.add(P, [0, 0.08, 0])], '#DCE6F8', { alpha: 0.7, width: 1, chunk: 1 }); R3.label(F, V.add(P, [0, -0.08, -0.04]), m + ' m', '#AFC2A0', { size: 8.5 }); }
-    // the launcher
-    const base = [X(0), 0, p.h0 * ks];
-    if (p.h0 > 0) R3.box(F, [X(0) - 0.1, 0, p.h0 * ks / 2], [0.25, 0.25, p.h0 * ks], '#5A6478', { shadow: false });
-    R3.cylinder(F, base, V.add(base, [0.22 * Math.cos(Pj.th), 0, 0.22 * Math.sin(Pj.th)]), 0.03, '#39414F', { segments: 14, shadow: false });
-    // the vacuum path (ghost) and the path so far
-    if (p.drag !== 'none' && S.vac) path3(F, S.vac.out.filter((q, j) => j % 3 === 0).map(q => [X(q[1]), 0, q[2] * ks]), '#DCE3EE', { alpha: 0.3, width: 1.2, dash: [4, 4], chunk: 4 });
-    const tr = Pj.out.filter((q, j) => j <= i && j % 2 === 0).map(q => [X(q[1]), 0, q[2] * ks]);
-    if (tr.length > 1) path3(F, tr, '#FF8A7A', { alpha: 0.9, width: 2, chunk: 4 });
-    const c = [X(o[1]), 0, o[2] * ks];
-    R3.sphere(F, c, 0.05, '#E0453A', { shadow: false, vivid: true });
-    const sv = 0.04;
-    R3.arrow(F, c, V.add(c, [o[3] * sv, 0, 0]), 0.008, '#7FD0FF', { vivid: true });
-    R3.arrow(F, c, V.add(c, [0, 0, o[4] * sv]), 0.008, '#7CF0B0', { vivid: true });
-    R3.label(F, V.add(c, [o[3] * sv + 0.06, 0, 0]), 'vx ' + o[3].toFixed(1), '#7FD0FF', { size: 9, align: 'left' });
-    R3.label(F, V.add(c, [0.04, 0, o[4] * sv + (o[4] > 0 ? 0.05 : -0.05)]), 'vy ' + o[4].toFixed(1), '#7CF0B0', { size: 9, align: 'left' });
-    const top = Pj.out.reduce((b, q) => q[2] > b[2] ? q : b, Pj.out[0]);
-    R3.label(F, [X(top[1]), 0, top[2] * ks + 0.12], 'H = ' + Pj.yMax.toFixed(2) + ' m', '#FFD36B', { size: 9.5 });
-    const land = Pj.out[Pj.out.length - 1]; R3.sphere(F, [X(land[1]), 0, land[2] * ks], 0.025, '#FFD36B', { shadow: false, vivid: true });
-    R3.label(F, [X(land[1]), 0, land[2] * ks + 0.14], 'lands: ' + (al ? Pj.Ralong.toFixed(2) + ' m up the slope' : 'R = ' + Pj.Rx.toFixed(2) + ' m'), '#FFD36B', { size: 9.5 });
+    const F = R3.Frame(ctx, cam, { ambient: 0.4, floorZ: null });
+    const tt = Math.min(S.ts % (Pj.T + 1.5), Pj.T), o = at01(Pj.out, tt, 0.01);
+    const K = S.kp, X = x => S.x0 + x * K, Z = y => y * K, al = Pj.al;
+    // ground: a grass slab; on a slope a solid wedge rising from the launch point
+    const gx0 = X(-0.15 * S.ext), gx1 = X(S.ext * 1.12);
+    if (!al) { R3.box(F, [(gx0 + gx1) / 2, 0.2, -0.04], [gx1 - gx0, 1.2, 0.08], '#3F6A30', { shadow: false }); }
+    else {
+      const top = (gx1 - X(0)) * Math.tan(al), A0 = [X(0), -0.4, 0], A1 = [gx1, -0.4, top], A2 = [gx1, -0.4, 0], B0 = [X(0), 0.8, 0], B1 = [gx1, 0.8, top], B2 = [gx1, 0.8, 0];
+      flatPoly(F, [A0, A1, B1, B0], F.shade('#4E7A3A', [-Math.sin(al), 0, Math.cos(al)], { ambient: 0.55 }), { bias: F.GROUND });
+      flatPoly(F, [A0, A2, A1], F.shade('#6B5236', [0, -1, 0], { ambient: 0.5 }), { bias: F.GROUND });
+      R3.box(F, [(gx0 + X(0)) / 2, 0.2, -0.04], [X(0) - gx0, 1.2, 0.08], '#3F6A30', { shadow: false });
+    }
+    // distance marks along the ground (or the slope)
+    const step = S.ext > 80 ? 20 : S.ext > 30 ? 10 : S.ext > 12 ? 5 : 2;
+    for (let m = step; m <= S.ext * 1.1; m += step) { const P = [X(m * Math.cos(al)), -0.4, Z(m * Math.sin(al)) + 0.003]; path3(F, [P, V.add(P, [0, 0.12, 0])], '#F2F6FF', { alpha: 0.85, width: 1.5, chunk: 1 }); R3.label(F, V.add(P, [0, -0.1, 0.02]), m + ' m', '#CFE3BF', { size: 9 }); }
+    // the launcher: a tower (if raised) and a cannon on wheels
+    const base = [X(0), 0, Z(p.h0)];
+    if (p.h0 > 0) { R3.box(F, [X(0) - 0.12, 0.2, Z(p.h0) / 2], [0.36, 0.7, Z(p.h0)], '#6A6F7A', { shadow: false }); for (let m = 0; m <= p.h0 + 1e-9; m += p.h0 > 20 ? 10 : 5) { path3(F, [[X(0) + 0.06, -0.16, Z(m)], [X(0) + 0.14, -0.16, Z(m)]], '#DCE3EE', { alpha: 0.9, width: 1.4, chunk: 1 }); R3.label(F, [X(0) + 0.17, -0.16, Z(m)], m + ' m', '#AFC2E6', { size: 8.5, align: 'left' }); } }
+    const bd = [Math.cos(Pj.th), 0, Math.sin(Pj.th)];
+    R3.cylinder(F, V.add(base, V.mul(bd, -0.08)), V.add(base, V.mul(bd, 0.28)), 0.045, '#2F3540', { segments: 16, shadow: false });
+    [-0.08, 0.08].forEach(y => R3.cylinder(F, V.add(base, [-0.02, y - 0.015, -0.02]), V.add(base, [-0.02, y + 0.015, -0.02]), 0.07, '#6B4A2C', { segments: 14, spokes: 5, shadow: false }));
+    // the vacuum path as a ghost when there is drag
+    if (p.drag !== 'none' && S.vac) path3(F, S.vac.out.filter((q, j) => j % 3 === 0).map(q => [X(q[1]), 0, Z(q[2])]), '#DCE3EE', { alpha: 0.35, width: 1.4, dash: [5, 4], chunk: 4 });
+    // the path so far
+    const tr = Pj.out.filter((q, j) => q[0] <= tt && j % 2 === 0).map(q => [X(q[1]), 0, Z(q[2])]);
+    if (tr.length > 1) path3(F, tr, '#FF8A7A', { alpha: 0.9, width: 2.2, chunk: 4 });
+    // strobe: the ball at equal time intervals; their shadows on the ground (even spacing: vx is constant in vacuum)
+    // and on the back wall (bunched near the top: vy changes steadily)
+    const nS = 10, dS = Pj.T / nS, sB = sprite('#E0453A'), sG = sprite('#7FD0FF'), sW = sprite('#7CF0B0'), list = [], wallX = X(0) - (p.h0 > 0 ? 0.75 : 0.45);
+    R3.box(F, [wallX - 0.02, 0.3, Z(Pj.yMax) / 2 + 0.2], [0.02, 1.0, Z(Pj.yMax) + 0.5], '#2C3445', { shadow: false });
+    for (let k = 0; k <= nS && k * dS <= tt + 1e-9; k++) { const q = at01(Pj.out, k * dS, 0.01);
+      list.push([X(q[1]), 0, Z(q[2]), 0.04, sB]); list.push([X(q[1]), 0.45, Z(q[1] * Math.tan(al)) + 0.01, 0.028, sG]); list.push([wallX, 0.3, Z(q[2]), 0.028, sW]);
+      path3(F, [[X(q[1]), 0, Z(q[2])], [X(q[1]), 0.45, Z(q[1] * Math.tan(al)) + 0.01]], '#7FD0FF', { alpha: 0.18, width: 1, chunk: 1 }); }
+    ballCloud(F, list, [X(S.ext / 2), 0.2, Z(Pj.yMax / 2)], 0.05);
+    R3.label(F, [X(S.ext * 0.55), 0.45, 0.12], 'shadow on the ground: equal steps (vx constant)', '#7FD0FF', { size: 9 });
+    R3.label(F, [wallX, 0.3, Z(Pj.yMax) + 0.35], 'shadow on the wall: vertical motion', '#7CF0B0', { size: 9 });
+    // the ball now, with its velocity and components
+    const c = [X(o[1]), 0, Z(o[2])], sv = 0.028;
+    R3.sphere(F, c, 0.06, '#E0453A', { shadow: false, vivid: true });
+    R3.arrow(F, c, V.add(c, [o[3] * sv, 0, o[4] * sv]), 0.012, '#FFFFFF', { vivid: true });
+    R3.arrow(F, c, V.add(c, [o[3] * sv, 0, 0]), 0.009, '#7FD0FF', {});
+    R3.arrow(F, c, V.add(c, [0, 0, o[4] * sv]), 0.009, '#7CF0B0', {});
+    R3.label(F, V.add(c, [o[3] * sv + 0.06, 0, o[4] * sv]), Math.hypot(o[3], o[4]).toFixed(1) + ' m/s', '#FFFFFF', { size: 10, align: 'left' });
+    // H and R brackets
+    const top = Pj.out.reduce((b, q) => q[2] > b[2] ? q : b, Pj.out[0]), land = Pj.out[Pj.out.length - 1];
+    path3(F, [[X(top[1]), -0.02, Z(top[2])], [X(top[1]), -0.02, Z(top[1] * Math.tan(al))]], '#FFD36B', { alpha: 0.7, width: 1.4, dash: [4, 3], chunk: 1 });
+    R3.label(F, [X(top[1]) + 0.08, -0.02, Z(top[2]) + 0.12], 'H = ' + Pj.yMax.toFixed(2) + ' m', '#FFD36B', { size: 10, align: 'left' });
+    R3.sphere(F, [X(land[1]), 0, Z(land[2])], 0.03, '#FFD36B', { shadow: false, vivid: true });
+    R3.label(F, [X(land[1]), -0.3, Z(land[2]) + 0.2], (al ? 'R = ' + Pj.Ralong.toFixed(2) + ' m up the slope' : 'R = ' + Pj.Rx.toFixed(2) + ' m'), '#FFD36B', { size: 10 });
     F.render();
-    const dn = { none: 'in vacuum', lin: 'with linear drag (k = ' + p.kd.toFixed(3) + ' /s)', quad: 'with quadratic drag (k = ' + p.kd.toFixed(4) + ' /m)' }[p.drag];
+    // velocity components as a screen inset: vx flat (vacuum), vy falling in a straight line
+    const bx = g.w - 214, by = 84; inset(g, bx, by, 200, 92, 'VELOCITY NOW');
+    ctx.save(); const sc = 58 / Math.max(1, p.up), ox = bx + 44, oy = by + 56;
+    arrow2(ctx, ox, oy, ox + o[3] * sc, oy, '#7FD0FF', 2); arrow2(ctx, ox, oy, ox, oy - o[4] * sc, '#7CF0B0', 2); arrow2(ctx, ox, oy, ox + o[3] * sc, oy - o[4] * sc, '#FFFFFF', 2.4);
+    ctx.font = '10px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.fillStyle = '#7FD0FF'; ctx.fillText('vx ' + o[3].toFixed(2), bx + 120, by + 38); ctx.fillStyle = '#7CF0B0'; ctx.fillText('vy ' + o[4].toFixed(2), bx + 120, by + 54); ctx.fillStyle = '#FFFFFF'; ctx.fillText('|v| ' + Math.hypot(o[3], o[4]).toFixed(2), bx + 120, by + 70); ctx.restore();
+    const dn = { none: 'in vacuum', lin: 'with linear drag', quad: 'with quadratic drag' }[p.drag];
     header(g, 'A projectile at ' + p.up.toFixed(1) + ' m/s, ' + p.ang.toFixed(1) + '° ' + dn + (p.slope ? ' · onto a ' + p.slope.toFixed(0) + '° slope' : '') + (p.h0 ? ' · from ' + p.h0.toFixed(1) + ' m up' : ''),
-      't = ' + o[0].toFixed(2) + ' s · x = ' + o[1].toFixed(2) + ' m, y = ' + o[2].toFixed(2) + ' m · speed ' + Math.hypot(o[3], o[4]).toFixed(2) + ' m/s',
-      'RK4 with the drag force; the landing is interpolated inside the step · in vacuum vx never changes and vy falls at g', th.text);
-    const V0 = S.pv;
+      't = ' + o[0].toFixed(2) + ' s of ' + Pj.T.toFixed(2) + ' s · x = ' + o[1].toFixed(2) + ' m, y = ' + o[2].toFixed(2) + ' m',
+      'red: the ball every ' + dS.toFixed(2) + ' s · blue: its shadow on the ground · green: its shadow on the wall — two independent motions', th.text);
+    const V0 = S.pv, ok = p.h0 === 0 && p.drag === 'none';
     panel(g, 'THE FLIGHT', [
       ['range (the run)', (al ? Pj.Ralong : Pj.Rx).toFixed(4) + ' m', th.phys],
       ['range in vacuum (formula)', p.h0 === 0 ? V0.Ral.toFixed(4) + ' m' : '—', th.ok],
       ['time of flight · formula', Pj.T.toFixed(4) + ' · ' + (p.h0 === 0 ? V0.T.toFixed(4) : '—') + ' s'],
       ['greatest height', Pj.yMax.toFixed(4) + ' m'],
-      [p.h0 === 0 && p.drag === 'none' ? 'best angle (searched) · 45° + α/2' : 'best angle (searched) · 45° + α/2 would say', S.best.ang.toFixed(2) + '° · ' + V0.thBest.toFixed(1) + '°' + (p.h0 === 0 && p.drag === 'none' ? '' : ' (not valid here)'), p.h0 === 0 && p.drag === 'none' ? th.ok : null],
+      [ok ? 'best angle (searched) · 45° + α/2' : 'best angle (searched)', S.best.ang.toFixed(2) + '°' + (ok ? ' · ' + V0.thBest.toFixed(1) + '°' : ''), th.ok],
       ['range at the best angle', S.best.R.toFixed(3) + ' m']
     ]);
   }
@@ -477,39 +550,46 @@
   /* ======================= 27.3 · the river ======================= */
   function drawRiver(S, g) {
     const ctx = g.ctx, th = g.theme, p = S.p, cam = S.cam, Rv = S.Rv;
-    const F = R3.Frame(ctx, cam, { ambient: 0.4, floorZ: null });
-    const ext = Math.max(p.dw, Math.abs(isFinite(Rv.drift) ? Rv.drift : 0) + p.dw * 0.3), ks = 2.6 / ext, W = p.dw * ks, y0 = -W / 2;
-    const xl = -1.6, xr = 1.9;
-    flatPoly(F, [[xl, y0, 0], [xr, y0, 0], [xr, y0 + W, 0], [xl, y0 + W, 0]], '#1F4E7A', { bias: F.GROUND });
-    [[y0 - 0.25, y0], [y0 + W, y0 + W + 0.25]].forEach(([a, b]) => R3.box(F, [(xl + xr) / 2, (a + b) / 2, 0.02], [xr - xl, b - a, 0.06], '#3E6B33', { shadow: false }));
-    // the flow: streaks drifting downstream at the local speed; arrows show the profile
-    const tt = S.ts;
-    for (let k = 1; k < 9; k++) { const yy = k / 9 * p.dw, u = flowAt(p, yy), Y = y0 + yy * ks;
-      for (let j = 0; j < 5; j++) { const xx = xl + ((j * 0.8 + u * ks * tt * 0.5) % (xr - xl)); path3(F, [[xx, Y, 0.004], [Math.min(xr, xx + 0.12 + u * 0.03), Y, 0.004]], '#9FD8FF', { alpha: 0.5, width: 1.2, chunk: 1 }); }
-      R3.arrow(F, [xl + 0.05, Y, 0.01], [xl + 0.05 + u * 0.08, Y, 0.01], 0.006, '#9FD8FF', {}); }
-    // the boat along its path
-    const T = Rv.T, tb = isFinite(T) ? (S.ts % (T + 1.5)) : 0, out = Rv.out;
-    const i = out.length ? Math.min(out.length - 1, out.findIndex(q => q[0] >= Math.min(tb, T)) >>> 0) : 0;
-    const q = out[Math.min(out.length - 1, Math.max(0, i))] || [0, 0, 0], c = [q[1] * ks - 1.0, y0 + q[2] * ks, 0];
-    const hd = [-Math.sin(Rv.ph), Math.cos(Rv.ph)];
-    hull(F, c, hd, 0.2, 0.08, '#C9824A');
-    const tr = out.filter((r, j) => j <= i && j % 3 === 0).map(r => [r[1] * ks - 1.0, y0 + r[2] * ks, 0.006]);
-    if (tr.length > 1) path3(F, tr, '#FFE2B8', { alpha: 0.85, width: 1.8, chunk: 4 });
-    // velocities at the boat: relative to water, the flow there, the resultant
-    const u = flowAt(p, q[2]), sc = 0.07, vb = [-p.vb * Math.sin(Rv.ph), p.vb * Math.cos(Rv.ph)], vres = [vb[0] + u, vb[1]], z = 0.08;
-    R3.arrow(F, V.add(c, [0, 0, z]), V.add(c, [vb[0] * sc, vb[1] * sc, z]), 0.008, '#F5B451', { vivid: true });
-    R3.arrow(F, V.add(c, [vb[0] * sc, vb[1] * sc, z]), V.add(c, [vres[0] * sc, vres[1] * sc, z]), 0.008, '#9FD8FF', { vivid: true });
-    R3.arrow(F, V.add(c, [0, 0, z + 0.01]), V.add(c, [vres[0] * sc, vres[1] * sc, z + 0.01]), 0.009, '#7CF0B0', { vivid: true });
-    R3.label(F, V.add(c, [vres[0] * sc + 0.06, vres[1] * sc, z]), 'ground velocity', '#7CF0B0', { size: 9, align: 'left' });
-    // start, the point straight across, and where it lands
-    R3.sphere(F, [-1.0, y0, 0.02], 0.02, '#FFFFFF', { shadow: false });
-    R3.sphere(F, [-1.0, y0 + W, 0.02], 0.025, '#FFD36B', { shadow: false, vivid: true }); R3.label(F, [-1.0, y0 + W + 0.1, 0.03], Math.abs(Rv.drift) <= 0.03 * p.dw ? 'lands straight across' : 'straight across', '#FFD36B', { size: 9 });
-    if (isFinite(Rv.drift) && Math.abs(Rv.drift) > 0.03 * p.dw) { R3.sphere(F, [Rv.drift * ks - 1.0, y0 + W, 0.02], 0.025, '#FF8FB0', { shadow: false, vivid: true }); R3.label(F, [Rv.drift * ks - 1.0, y0 + W + 0.18, 0.03], 'lands ' + Rv.drift.toFixed(1) + ' m ' + (Rv.drift >= 0 ? 'downstream' : 'upstream'), '#FF8FB0', { size: 9 }); }
-    R3.label(F, [xr - 0.1, y0 - 0.12, 0.05], 'flow →', '#9FD8FF', { size: 10, align: 'right' });
+    const F = R3.Frame(ctx, cam, { ambient: 0.45, floorZ: null });
+    const drift = isFinite(Rv.drift) ? Rv.drift : 0, ext = Math.max(p.dw * 0.9, Math.abs(drift) * 1.1 + p.dw * 0.25), ks = 3.2 / ext, W = p.dw * ks;
+    const xs = drift >= 0 ? -1.3 : 1.3, y0 = -W / 2, xl = -2.1, xr = 2.1;
+    // water, banks with a strip of beach, and a few trees
+    flatPoly(F, [[xl, y0, 0], [xr, y0, 0], [xr, y0 + W, 0], [xl, y0 + W, 0]], '#1F5584', { bias: F.GROUND });
+    [[y0 - 0.5, y0], [y0 + W, y0 + W + 0.5]].forEach(([a, b]) => { R3.box(F, [0, (a + b) / 2, 0.03], [xr - xl, b - a, 0.06], '#4A7A3A', { shadow: false }); });
+    R3.box(F, [0, y0 - 0.04, 0.02], [xr - xl, 0.08, 0.05], '#C8B27A', { shadow: false }); R3.box(F, [0, y0 + W + 0.04, 0.02], [xr - xl, 0.08, 0.05], '#C8B27A', { shadow: false });
+    [-1.8, -0.6, 0.7, 1.7].forEach((x, k) => { const yy = k % 2 ? y0 + W + 0.32 : y0 + W + 0.38; R3.cylinder(F, [x, yy, 0.06], [x, yy, 0.22], 0.02, '#6B4A2C', { segments: 8, shadow: false }); R3.sphere(F, [x, yy, 0.3], 0.11, '#2F6A2A', { shadow: false }); });
+    // the flow: streaks carried at the local speed; arrows at the left show the profile across the river
+    for (let k = 1; k < 10; k++) { const yy = k / 10 * p.dw, u = flowAt(p, yy), Y = y0 + yy * ks;
+      for (let j = 0; j < 6; j++) { const xx = xl + ((j * 0.7 + u * ks * S.ts) % (xr - xl) + (xr - xl)) % (xr - xl); path3(F, [[xx, Y, 0.004], [Math.min(xr, xx + 0.08 + u * ks * 0.35), Y, 0.004]], '#A8DCFF', { alpha: 0.45, width: 1.3, chunk: 1 }); }
+      R3.arrow(F, [xl + 0.1, Y, 0.012], [xl + 0.1 + u * 0.09, Y, 0.012], 0.008, '#A8DCFF', {}); }
+    R3.label(F, [xl + 0.2, y0 - 0.2, 0.08], 'flow →', '#A8DCFF', { size: 10, align: 'left' });
+    // start, straight across, landing
+    const T = Rv.T, tb = isFinite(T) ? Math.min(S.ts % (T + 2), T) : 0, out = Rv.out;
+    const i = out.length ? Math.max(0, out.findIndex(q => q[0] >= tb)) : 0, q = out[Math.min(out.length - 1, i)] || [0, 0, 0];
+    const P = r => [xs + r[1] * ks, y0 + r[2] * ks, 0.01];
+    R3.label(F, [xs, y0 - 0.2, 0.1], 'start', '#FFFFFF', { size: 10 });
+    R3.sphere(F, [xs, y0 + W, 0.04], 0.035, '#FFD36B', { shadow: false, vivid: true }); R3.label(F, [xs, y0 + W + 0.18, 0.1], 'straight across', '#FFD36B', { size: 9.5 });
+    path3(F, [[xs, y0, 0.006], [xs, y0 + W, 0.006]], '#FFD36B', { alpha: 0.45, width: 1.2, dash: [4, 4], chunk: 1 });
+    if (isFinite(Rv.drift) && Math.abs(Rv.drift) > 0.02 * p.dw) { const L2 = P([0, Rv.drift, p.dw]); R3.sphere(F, [L2[0], L2[1], 0.04], 0.035, '#FF8FB0', { shadow: false, vivid: true }); R3.label(F, [L2[0], L2[1] + 0.2, 0.1], 'lands ' + Math.abs(Rv.drift).toFixed(1) + ' m ' + (Rv.drift >= 0 ? 'downstream' : 'upstream'), '#FF8FB0', { size: 9.5 }); }
+    // the track, and snapshots of the boat at equal times
+    const tr = out.filter(r => r[0] <= tb).map(P); if (tr.length > 1) path3(F, tr, '#FFE2B8', { alpha: 0.9, width: 2, chunk: 4 });
+    const hd = [-Math.sin(Rv.ph), Math.cos(Rv.ph)], nS = 8, sp = sprite('#FFE2B8'), list = [];
+    for (let k = 1; k < nS && isFinite(T) && k * T / nS <= tb; k++) { const r = out[Math.max(0, out.findIndex(z => z[0] >= k * T / nS))]; list.push([P(r)[0], P(r)[1], 0.03, 0.03, sp]); }
+    if (list.length) ballCloud(F, list, [0, 0, 0], 0.02);
+    const c = P(q); hull(F, c, hd, 0.34, 0.12, '#C9824A');
+    R3.label(F, V.add(c, [0, 0, 0.36]), 'heading ' + p.head.toFixed(1) + '° upstream', '#F5B451', { size: 9.5 });
     F.render();
+    // the velocity triangle, big, in the corner: boat relative to water + water = boat relative to ground
+    const u = flowAt(p, q[2]), vb = [-p.vb * Math.sin(Rv.ph), p.vb * Math.cos(Rv.ph)], vg = [vb[0] + u, vb[1]];
+    const bx = g.w - 234, by = 84, bw = 220, bh = 170; inset(g, bx, by, bw, bh, 'VELOCITY TRIANGLE (at the boat)');
+    ctx.save(); const m = Math.max(p.vb, p.vr, Math.hypot(vg[0], vg[1])), sc = 100 / Math.max(1e-6, m), ox = bx + bw / 2 - (vg[0] * sc) / 2, oy = by + bh - 22;
+    arrow2(ctx, ox, oy, ox + vb[0] * sc, oy - vb[1] * sc, '#F5B451', 2.4, 'boat in water ' + p.vb.toFixed(1), Math.min(ox + vb[0] * sc, ox) - 4, oy - vb[1] * sc - 6);
+    arrow2(ctx, ox + vb[0] * sc, oy - vb[1] * sc, ox + vg[0] * sc, oy - vg[1] * sc, '#A8DCFF', 2.4, 'water ' + u.toFixed(1), ox + vg[0] * sc + 4, oy - vg[1] * sc + 12);
+    arrow2(ctx, ox, oy, ox + vg[0] * sc, oy - vg[1] * sc, '#7CF0B0', 2.8, 'ground ' + Math.hypot(vg[0], vg[1]).toFixed(2), ox + vg[0] * sc / 2 + 6, oy - vg[1] * sc / 2 + 16);
+    ctx.restore();
     header(g, 'River ' + p.dw.toFixed(0) + ' m · boat ' + p.vb.toFixed(1) + ' m/s · flow ' + p.vr.toFixed(1) + ' m/s' + (p.profile === 'uniform' ? '' : ' (mean)') + ' · heading ' + p.head.toFixed(1) + '° upstream',
-      isFinite(T) ? 't = ' + Math.min(tb, T).toFixed(1) + ' s of ' + T.toFixed(2) + ' s' : 'heading too far upstream: it never gets across',
-      'amber: the boat relative to the water · blue: the water · green: the sum, relative to the ground', th.text);
+      isFinite(T) ? 't = ' + tb.toFixed(1) + ' s of ' + T.toFixed(2) + ' s · dots: the boat every ' + (T / nS).toFixed(1) + ' s' : 'heading too far upstream: it never gets across',
+      'time depends only on the speed ACROSS (v_b cos φ) · drift on the speed ALONG (v_r − v_b sin φ)', th.text);
     panel(g, 'TIME AND DRIFT', [
       ['time to cross', isFinite(T) ? T.toFixed(3) + ' s' : '—', th.phys],
       ['drift downstream', isFinite(Rv.drift) ? (Math.abs(Rv.drift) < 5e-4 ? 0 : Rv.drift).toFixed(3) + ' m' : '—', th.phys],
@@ -522,33 +602,47 @@
   /* ======================= 27.4 · two ships ======================= */
   function drawShips(S, g) {
     const ctx = g.ctx, th = g.theme, p = S.p, cam = S.cam, Sh = S.Sh;
-    const F = R3.Frame(ctx, cam, { ambient: 0.4, floorZ: null });
-    const all = Sh.out.flatMap(q => [q[1], q[2], q[3], q[4]]), ext = Math.max(...all.map(Math.abs), 10), ks = 1.7 / ext;
-    flatPoly(F, [[-2.2, -2.2, 0], [2.2, -2.2, 0], [2.2, 2.2, 0], [-2.2, 2.2, 0]], '#173F63', { bias: F.GROUND });
-    for (let k = -4; k <= 4; k++) { path3(F, [[k * 0.5, -2.2, 0.002], [k * 0.5, 2.2, 0.002]], '#2F6090', { alpha: 0.5, width: 1, chunk: 1 }); path3(F, [[-2.2, k * 0.5, 0.002], [2.2, k * 0.5, 0.002]], '#2F6090', { alpha: 0.5, width: 1, chunk: 1 }); }
-    R3.label(F, [0, 2.1, 0.02], 'N ↑', '#9FD8FF', { size: 10 });
-    const tt = S.ts % (Sh.tEnd + 1), i = Math.min(Sh.out.length - 1, Math.round(Math.min(tt, Sh.tEnd) / Sh.tEnd * 2000)), o = Sh.out[i];
-    const A = [o[1] * ks, o[2] * ks, 0], B = [o[3] * ks, o[4] * ks, 0];
-    const wake = k => Sh.out.filter((q, j) => j <= i && j % 20 === 0).map(q => [q[k] * ks, q[k + 1] * ks, 0.004]);
-    [[1, '#F5B451'], [3, '#FF8FB0']].forEach(([k, c]) => { const w = wake(k); if (w.length > 1) path3(F, w, c, { alpha: 0.6, width: 1.6, chunk: 4 }); });
-    const nA = V.norm([Sh.va[0], Sh.va[1], 0]), nB = V.norm([Sh.vB[0], Sh.vB[1], 0]);
-    hull(F, A, [nA[0], nA[1]], 0.22, 0.08, '#E0A040'); hull(F, B, [nB[0], nB[1]], 0.22, 0.08, '#E06080');
-    R3.label(F, V.add(A, [0, 0, 0.16]), 'A', '#F5B451', { size: 11 }); R3.label(F, V.add(B, [0, 0, 0.16]), 'B', '#FF8FB0', { size: 11 });
-    path3(F, [V.add(A, [0, 0, 0.05]), V.add(B, [0, 0, 0.05])], '#DCE3EE', { alpha: 0.7, width: 1.2, dash: [4, 3], chunk: 1 });
-    R3.label(F, V.add(V.mul(V.add(A, B), 0.5), [0, 0, 0.1]), o[5].toFixed(1) + ' m', '#DCE3EE', { size: 10 });
-    // where they are at the closest moment
-    const Am = [Sh.va[0] * Sh.tMin * ks, Sh.va[1] * Sh.tMin * ks, 0.01], Bm = [(Sh.r0[0] + Sh.vB[0] * Sh.tMin) * ks, (Sh.r0[1] + Sh.vB[1] * Sh.tMin) * ks, 0.01];
-    path3(F, [Am, Bm], '#7CF0B0', { alpha: 0.9, width: 2, chunk: 1 });
-    R3.label(F, V.add(V.mul(V.add(Am, Bm), 0.5), [0, 0, 0.12]), 'closest: ' + Sh.dMin.toFixed(2) + ' m', '#7CF0B0', { size: 10 });
+    const F = R3.Frame(ctx, cam, { ambient: 0.45, floorZ: null });
+    const all = Sh.out.flatMap(q => [q[1], q[2], q[3], q[4]]), mn = [Math.min(...Sh.out.flatMap(q => [q[1], q[3]])), Math.min(...Sh.out.flatMap(q => [q[2], q[4]]))], mx = [Math.max(...Sh.out.flatMap(q => [q[1], q[3]])), Math.max(...Sh.out.flatMap(q => [q[2], q[4]]))];
+    const ext = Math.max(mx[0] - mn[0], mx[1] - mn[1], 10), ks = 3.0 / ext, cx = (mn[0] + mx[0]) / 2, cy = (mn[1] + mx[1]) / 2, M = (x, y) => [(x - cx) * ks, (y - cy) * ks, 0];
+    void all;
+    flatPoly(F, [[-2.4, -2.1, 0], [2.4, -2.1, 0], [2.4, 2.1, 0], [-2.4, 2.1, 0]], '#1A4870', { bias: F.GROUND });
+    for (let k = -8; k <= 8; k++) { path3(F, [[k * 0.3, -2.1, 0.002], [k * 0.3, 2.1, 0.002]], '#2F6090', { alpha: 0.35, width: 1, chunk: 1 }); if (Math.abs(k) <= 7) path3(F, [[-2.4, k * 0.3, 0.002], [2.4, k * 0.3, 0.002]], '#2F6090', { alpha: 0.35, width: 1, chunk: 1 }); }
+    R3.label(F, [2.2, 1.9, 0.05], 'N ↑', '#A8DCFF', { size: 11 });
+    const tt = Math.min(S.ts % (Sh.tEnd + 1.5), Sh.tEnd), i = Math.min(Sh.out.length - 1, Math.round(tt / Sh.tEnd * 2000)), o = Sh.out[i];
+    // snapshots at equal times: ship positions and the line joining them (the classic figure)
+    const nS = 8, sA = sprite('#F5B451'), sB = sprite('#FF8FB0'), list = [];
+    for (let k = 0; k <= nS; k++) { const t = Sh.tEnd * k / nS; if (t > tt + 1e-9) break; const q = Sh.out[Math.round(t / Sh.tEnd * 2000)];
+      list.push([...M(q[1], q[2]).slice(0, 2), 0.02, 0.035, sA], [...M(q[3], q[4]).slice(0, 2), 0.02, 0.035, sB]);
+      path3(F, [V.add(M(q[1], q[2]), [0, 0, 0.01]), V.add(M(q[3], q[4]), [0, 0, 0.01])], '#DCE3EE', { alpha: 0.25, width: 1, chunk: 1 });
+      R3.label(F, V.add(M(q[1], q[2]), [0, 0, 0.09]), t.toFixed(1) + ' s', '#C9A260', { size: 8 }); }
+    ballCloud(F, list, [0, 0, 0], 0.02);
+    const wake = k => Sh.out.filter((q, j) => j <= i && j % 10 === 0).map(q => V.add(M(q[k], q[k + 1]), [0, 0, 0.004]));
+    [[1, '#F5B451'], [3, '#FF8FB0']].forEach(([k, c2]) => { const w = wake(k); if (w.length > 1) path3(F, w, c2, { alpha: 0.7, width: 2, chunk: 4 }); });
+    const A = M(o[1], o[2]), B = M(o[3], o[4]), nA = V.norm([Sh.va[0] || 1e-9, Sh.va[1], 0]), nB = V.norm([Sh.vB[0] || 1e-9, Sh.vB[1], 0]);
+    hull(F, A, [nA[0], nA[1]], 0.36, 0.12, '#D89A3A'); hull(F, B, [nB[0], nB[1]], 0.36, 0.12, '#D0507A');
+    R3.label(F, V.add(A, [0, 0, 0.34]), 'A', '#F5B451', { size: 13 }); R3.label(F, V.add(B, [0, 0, 0.34]), 'B', '#FF8FB0', { size: 13 });
+    path3(F, [V.add(A, [0, 0, 0.08]), V.add(B, [0, 0, 0.08])], '#FFFFFF', { alpha: 0.85, width: 1.6, dash: [5, 4], chunk: 1 });
+    R3.label(F, V.add(V.mul(V.add(A, B), 0.5), [0, 0, 0.18]), o[5].toFixed(1) + ' m apart', '#FFFFFF', { size: 10.5 });
+    const Am = M(Sh.va[0] * Sh.tMin, Sh.va[1] * Sh.tMin), Bm = M(Sh.r0[0] + Sh.vB[0] * Sh.tMin, Sh.r0[1] + Sh.vB[1] * Sh.tMin);
+    path3(F, [V.add(Am, [0, 0, 0.02]), V.add(Bm, [0, 0, 0.02])], '#7CF0B0', { alpha: 0.95, width: 2.6, chunk: 1 });
+    R3.label(F, V.add(V.mul(V.add(Am, Bm), 0.5), [0, 0, 0.14]), 'closest ' + Sh.dMin.toFixed(1) + ' m at ' + Sh.tMin.toFixed(1) + ' s', '#7CF0B0', { size: 10 });
     F.render();
+    // the relative-velocity construction: v_B − v_A, drawn as a triangle
+    const bx = g.w - 214, by = 84, bw = 200, bh = 150; inset(g, bx, by, bw, bh, 'v_B − v_A (B as seen from A)');
+    ctx.save(); const m = Math.max(1, Math.hypot(...Sh.va), Math.hypot(...Sh.vB), Math.hypot(...Sh.vr)), sc = 56 / m, ox = bx + bw / 2, oy = by + bh / 2 + 8;
+    arrow2(ctx, ox, oy, ox + Sh.vB[0] * sc, oy - Sh.vB[1] * sc, '#FF8FB0', 2.2, 'v_B', ox + Sh.vB[0] * sc + 4, oy - Sh.vB[1] * sc);
+    arrow2(ctx, ox + Sh.vB[0] * sc, oy - Sh.vB[1] * sc, ox + Sh.vr[0] * sc, oy - Sh.vr[1] * sc, '#F5B451', 2.2, '−v_A', ox + Sh.vr[0] * sc + 4, oy - Sh.vr[1] * sc + 12);
+    arrow2(ctx, ox, oy, ox + Sh.vr[0] * sc, oy - Sh.vr[1] * sc, '#7CF0B0', 2.8, 'v_rel ' + Math.hypot(...Sh.vr).toFixed(2), bx + 8, by + bh - 8);
+    ctx.restore();
     header(g, 'Two ships · A: ' + p.vA.toFixed(1) + ' m/s at ' + p.hA.toFixed(0) + '° · B: ' + p.vB.toFixed(1) + ' m/s at ' + p.hB.toFixed(0) + '°, from (' + p.xB.toFixed(0) + ', ' + p.yB.toFixed(0) + ') m',
-      't = ' + o[0].toFixed(2) + ' s · separation ' + o[5].toFixed(2) + ' m',
+      't = ' + o[0].toFixed(2) + ' s · separation ' + o[5].toFixed(2) + ' m · faint lines join the two ships at equal times',
       'seen from A, B moves in a straight line with v_B − v_A: the closest approach is the perpendicular from A to that line', th.text);
     panel(g, 'CLOSEST APPROACH', [
       ['least separation (the run)', Sh.dMin.toFixed(4) + ' m', th.phys],
       ['|r₀ × v_rel| / |v_rel|', Sh.dMinF.toFixed(4) + ' m', th.ok],
       ['when (the run) · −r₀·v_rel/|v_rel|²', Sh.tMin.toFixed(3) + ' · ' + Sh.tStar.toFixed(3) + ' s'],
-      ['relative velocity of B', '(' + Sh.vr[0].toFixed(2) + ', ' + Sh.vr[1].toFixed(2) + ') m/s, ' + Math.hypot(Sh.vr[0], Sh.vr[1]).toFixed(2) + ' m/s']
+      ['relative speed of B', Math.hypot(Sh.vr[0], Sh.vr[1]).toFixed(3) + ' m/s']
     ]);
   }
 
@@ -643,18 +737,21 @@
       const p = S.p;
       if (p.mode === 'graphs') S.Gr = runGraphs(p);
       else if (p.mode === 'proj') { S.Pj = runProj(p); S.vac = p.drag === 'none' ? S.Pj : runProj(Object.assign({}, p, { drag: 'none' })); S.pv = projVac(p); S.best = bestAngle(p);
+        const xs = S.Pj.out.concat(S.vac.out).map(q => q[1]), ys = S.Pj.out.concat(S.vac.out).map(q => q[2]);
+        S.ext = Math.max(2, ...xs); const H = Math.max(1, ...ys);
+        S.kp = Math.min(3.4 / S.ext, 1.9 / H); S.x0 = -1.35; const Wd = S.ext * S.kp, Hd = (H + Math.max(0, S.ext * Math.tan(p.slope * Math.PI / 180))) * S.kp; S.projDist = 1.3 + 0.8 * Math.max(Wd, 1.7 * Hd); S.projTarget = [S.x0 + Wd * 0.46 - (p.h0 > 0 ? 0.2 : 0), 0, Hd * 0.5 - 0.1];
         S.rangeCurve = []; for (let a = Math.max(p.slope + 1, 2); a <= 88; a += 3) S.rangeCurve.push([a, runProj(p, a, true).Ralong, runProj(Object.assign({}, p, { drag: 'none' }), a, true).Ralong]); }
       else if (p.mode === 'river') { S.Rv = runRiver(p); S.minDrift = leastDrift(p);
         S.riverCurve = []; for (let h = -80; h <= 85; h += 1) { const r = runRiver(p, h, true); if (!r.never) S.riverCurve.push([h, r.T, r.drift]); } }
       else S.Sh = runShips(p);
       S.ts = 0;
       const views = {
-        graphs: p.prof === 'drop' ? { theta: -1.5, phi: 0.15, dist: 3, target: [0, 0, 0.8] } : { theta: -1.4, phi: 0.35, dist: 3.1, target: [0, 0, 0.15] },
-        proj: { theta: -1.57, phi: 0.12, dist: 4.3, target: [0.1, 0, 0.8] },
-        river: { theta: -1.57, phi: 1.0, dist: 4.2, target: [0.1, 0, 0] },
-        ships: { theta: -1.57, phi: 1.15, dist: 3.4, target: [0, 0, 0] }
+        graphs: p.prof === 'drop' ? { theta: -1.4, phi: 0.12, dist: 5.4, target: [0.1, 0, 1.2] } : { theta: -1.5, phi: 0.34, dist: 3.4, target: [0.05, 0, -0.12] },
+        proj: { theta: -1.52, phi: 0.16, dist: S.projDist || 4, target: S.projTarget || [0, 0, 0.5] },
+        river: { theta: -1.57, phi: 1.0, dist: 5.9, target: [0.4, 0.05, 0] },
+        ships: { theta: -1.57, phi: 1.2, dist: 5.4, target: [0.45, 0.35, 0] }
       };
-      const vk = p.mode + (p.mode === 'graphs' && p.prof === 'drop' ? 'd' : '');
+      const vk = p.mode + (p.mode === 'graphs' && p.prof === 'drop' ? 'd' : '') + (p.mode === 'proj' ? JSON.stringify(S.projTarget.map(v => v.toFixed(2))) : '');
       if (!S.cam || S._view !== vk) { S.cam = Camera(views[p.mode]); S.cam.minDist = 0.8; S.cam.maxDist = 14; S._view = vk; S._narrowCam = false; }
     },
 
@@ -1011,24 +1108,39 @@
   /* ======================= 28.1 · bands and carriers ======================= */
   function drawBands(S, g) {
     const ctx = g.ctx, th = g.theme, p = S.p, cam = S.cam, Cr = S.Cr;
-    const F = R3.Frame(ctx, cam, { ambient: 0.4, floorZ: null });
-    // a crystal slab: a lattice of atoms (Si/Ge), a few dopant atoms, and mobile carriers drifting in a field
-    const N = 7, sp = 0.26, rnd = rng(7), L = (N - 1) * sp, list = [];
-    const sAt = sprite('#8A93A8'), sDop = sprite(p.dop === 'n' ? '#FF8A5A' : '#8A7AFF'), sE = sprite('#3DD6F5', { glow: true }), sH = sprite('#FF8FB0');
-    const bonds = [];
-    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) for (let k = 0; k < 3; k++) {
-      const pos = [(i - (N - 1) / 2) * sp, (j - (N - 1) / 2) * sp, k * sp + 0.1], isDop = p.dop !== 'i' && ((i * 7 + j * 3 + k * 5) % 9 === 0);
-      list.push([pos[0], pos[1], pos[2], isDop ? 0.045 : 0.035, isDop ? sDop : sAt]);
-      if (k === 0) { if (i < N - 1) bonds.push([pos, V.add(pos, [sp, 0, 0])]); if (j < N - 1) bonds.push([pos, V.add(pos, [0, sp, 0])]); }
+    const F = R3.Frame(ctx, cam, { ambient: 0.42, floorZ: null });
+    // the covalent lattice, as NCERT draws it: each atom shares one electron pair with each of its four neighbours
+    const NX = 8, NY = 5, sp = 0.42, x0 = -(NX - 1) * sp / 2, y0 = -(NY - 1) * sp / 2, rnd = rng(11);
+    R3.box(F, [0, 0, -0.03], [NX * sp + 0.2, NY * sp + 0.2, 0.04], '#141C2C', { shadow: false });
+    const isDop = (i, j) => p.dop !== 'i' && ((i === 2 && j === 1) || (i === 5 && j === 3) || (i === 6 && j === 0));
+    const sAt = sprite('#8A93A8'), sDn = sprite('#FF8A5A'), sAc = sprite('#8A7AFF'), sPair = sprite('#3DD6F5'), sE = sprite('#3DD6F5', { glow: true }), sH = sprite('#FF8FB0', { glow: true });
+    const list = [], bonds = [];
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) {
+      const P = [x0 + i * sp, y0 + j * sp, 0.06], d = isDop(i, j);
+      list.push([P[0], P[1], P[2], 0.075, d ? (p.dop === 'n' ? sDn : sAc) : sAt]);
+      R3.label(F, [P[0], P[1], 0.2], d ? (p.dop === 'n' ? (p.mat === 'Si' ? 'P' : 'As') : 'B') : p.mat, d ? (p.dop === 'n' ? '#FFB08A' : '#B8A8FF') : '#AEB6C4', { size: 8.5 });
+      if (i < NX - 1) bonds.push([P, [P[0] + sp, P[1], 0.06], i, j, 'x']);
+      if (j < NY - 1) bonds.push([P, [P[0], P[1] + sp, 0.06], i, j, 'y']);
     }
-    for (let k = 0; k < 3; k++) bonds.forEach(b => path3(F, b.map(q => V.add(q, [0, 0, k * sp])), '#5A6478', { alpha: 0.35, width: 1, chunk: 1 }));
-    // carriers: numbers scaled logarithmically to their densities, drifting (electrons against E, holes with it)
-    const nE = Math.round(clamp(4 * Math.log10(Cr.n / 1e8), 0, 40)), nH = Math.round(clamp(4 * Math.log10(Cr.p / 1e8), 0, 40));
-    const wrap = x => ((x % L) + L) % L - L / 2;
-    for (let k = 0; k < nE; k++) { const x0 = rnd() * L, y = (rnd() - 0.5) * L, z = rnd() * 2 * sp + 0.1; list.push([wrap(x0 - 0.25 * S.ts), y, z, 0.024, sE]); }
-    for (let k = 0; k < nH; k++) { const x0 = rnd() * L, y = (rnd() - 0.5) * L, z = rnd() * 2 * sp + 0.1; list.push([wrap(x0 + 0.12 * S.ts), y, z, 0.024, sH]); }
-    ballCloud(F, list, [0, 0, 0.35], 0);
-    R3.arrow(F, [-L / 2, -L / 2 - 0.2, 0.3], [L / 2, -L / 2 - 0.2, 0.3], 0.01, '#FFD36B', { vivid: true }); R3.label(F, [0, -L / 2 - 0.3, 0.38], 'applied field E →', '#FFD36B', { size: 9.5 });
+    // holes: bond sites missing one electron. Their number follows p (log scale); under the field an electron from the
+    // neighbouring bond hops in, so the hole steps along +E (to the right) — the "hole current"
+    const nH = Math.round(clamp(2.4 * Math.log10(Math.max(1, Cr.p) / 1e8), 0, 12)), nE = Math.round(clamp(2.4 * Math.log10(Math.max(1, Cr.n) / 1e8), 0, 12));
+    const xb = bonds.filter(b => b[4] === 'x'), holes = new Set();
+    for (let k = 0; k < nH; k++) { const row = Math.floor(rnd() * NY), start = Math.floor(rnd() * (NX - 1)), hop = Math.floor(S.ts * 0.9 + rnd() * 3);
+      holes.add(row + ':' + ((start + hop) % (NX - 1))); }
+    xb.forEach(b => { const key = b[3] + ':' + b[2], m = V.mul(V.add(b[0], b[1]), 0.5);
+      path3(F, [b[0], b[1]], '#3A4458', { alpha: 0.9, width: 3, chunk: 1 });
+      if (holes.has(key)) { list.push([m[0], m[1] - 0.03, 0.07, 0.03, sPair]); list.push([m[0], m[1] + 0.03, 0.07, 0.04, sH]); }
+      else { list.push([m[0], m[1] - 0.03, 0.07, 0.03, sPair]); list.push([m[0], m[1] + 0.03, 0.07, 0.03, sPair]); } });
+    bonds.filter(b => b[4] === 'y').forEach(b => { const m = V.mul(V.add(b[0], b[1]), 0.5); path3(F, [b[0], b[1]], '#3A4458', { alpha: 0.9, width: 3, chunk: 1 });
+      list.push([m[0] - 0.03, m[1], 0.07, 0.03, sPair]); list.push([m[0] + 0.03, m[1], 0.07, 0.03, sPair]); });
+    // free electrons in the conduction band: they wander between the atoms and drift against E (to the left)
+    const W = NX * sp, wrap = x => ((x + W / 2) % W + W) % W - W / 2;
+    for (let k = 0; k < nE; k++) { const xs0 = rnd() * W, ys0 = y0 + (Math.floor(rnd() * (NY - 1)) + 0.5) * sp, ph = rnd() * TAU;
+      list.push([wrap(xs0 - 0.28 * S.ts) , ys0 + 0.08 * Math.sin(S.ts * 3 + ph), 0.16, 0.042, sE]); }
+    ballCloud(F, list, [0, 0, 0.1], 0);
+    R3.arrow(F, [x0, y0 - 0.38, 0.05], [-x0, y0 - 0.38, 0.05], 0.012, '#FFD36B', { vivid: true }); R3.label(F, [0, y0 - 0.52, 0.08], 'applied field E →  (electrons drift ←, holes drift →)', '#FFD36B', { size: 9.5 });
+    if (p.dop !== 'i') R3.label(F, [x0 + 2 * sp, y0 + sp, 0.34], p.dop === 'n' ? '5th electron given away → +ion' : 'one electron short → hole', p.dop === 'n' ? '#FFB08A' : '#B8A8FF', { size: 9 });
     F.render();
     // the band diagram, drawn in screen space on the right
     const bx = g.w - 250, by = 90, bw = 230, bh = 250; ctx.save();
@@ -1047,7 +1159,7 @@
     ctx.fillStyle = '#DCE3EE'; ctx.fillText('E_g = ' + Cr.Eg.toFixed(3) + ' eV', bx + 60, (Ec + Ev) / 2 + 30);
     ctx.fillText('band diagram', bx + 8, by + 12); ctx.restore();
     header(g, p.mat + ' at ' + p.Tk.toFixed(0) + ' K · ' + (p.dop === 'i' ? 'intrinsic' : (p.dop === 'n' ? 'n-type, N_D = ' : 'p-type, N_A = ') + p.Ndop.toExponential(1) + ' cm⁻³'),
-      'n = ' + Cr.n.toExponential(3) + ' · p = ' + Cr.p.toExponential(3) + ' cm⁻³ · blue dots: electrons (drift against E) · pink rings: holes (drift with E)',
+      'n = ' + Cr.n.toExponential(3) + ' · p = ' + Cr.p.toExponential(3) + ' cm⁻³ · small blue pairs: bonds · glowing blue: free electrons · pink: holes (numbers ∝ log density)',
       'n_i = √(N_c N_v) e^(−E_g/2kT) · charge neutrality n + N_A = p + N_D with n·p = n_i² gives both densities', th.text);
     panel(g, 'THE MASS-ACTION LAW', [
       ['n_i', Cr.ni.toExponential(4) + ' cm⁻³', th.phys], ['n · p', (Cr.n * Cr.p).toExponential(4), th.phys], ['n_i²', (Cr.ni * Cr.ni).toExponential(4), th.ok],
@@ -1085,13 +1197,34 @@
     wire(F, [[-L / 2, 0, 0], [-L / 2 - 0.2, 0, 0], [-L / 2 - 0.2, 0, -0.7], [L / 2 + 0.2, 0, -0.7], [L / 2 + 0.2, 0, 0], [L / 2, 0, 0]].map(q => [q[0], q[1], q[2] - 0.012]));
     R3.box(F, [0, 0, -0.7], [0.3, 0.14, 0.14], '#2C3445', { shadow: false }); R3.label(F, [0, 0, -0.55], 'V = ' + p.Vapp.toFixed(3) + ' V', p.Vapp >= 0 ? '#7CF0B0' : '#FF8FB0', { size: 10 });
     F.render();
+    // the three standard diagrams across the junction: charge density, field and potential (drawn to scale in x)
+    { const bx = g.w - 250, by = 84, bw = 236, h1 = 62, gap = 8, xpv = J.xp * 1e4, xnv = J.xn * 1e4, span = Math.max(xpv, xnv) * 1.6 + 1e-6;
+      const X = x => bx + bw / 2 + x / span * (bw / 2 - 12);
+      inset(g, bx, by, bw, 3 * (h1 + gap) + 22, 'ACROSS THE JUNCTION');
+      const rows = [
+        ['ρ(x)', x => x < -xpv || x > xnv ? 0 : x < 0 ? -p.NA / Math.max(p.NA, p.ND) : p.ND / Math.max(p.NA, p.ND), '#FFB08A'],
+        ['E(x)', x => x < -xpv || x > xnv ? 0 : x < 0 ? -(x + xpv) / xpv : -(xnv - x) / xnv, '#FFD36B'],
+        ['V(x)', x => x <= -xpv ? 0 : x >= xnv ? 1 : x < 0 ? (xpv / (xpv + xnv)) * Math.pow((x + xpv) / xpv, 2) : 1 - (xnv / (xpv + xnv)) * Math.pow((xnv - x) / xnv, 2), '#7CF0B0']
+      ];
+      ctx.save();
+      rows.forEach(([lab, f, col], r) => { const y0 = by + 22 + r * (h1 + gap), mid = r === 2 ? y0 + h1 - 6 : y0 + h1 / 2, amp = r === 2 ? h1 - 12 : h1 / 2 - 6;
+        ctx.strokeStyle = 'rgba(143,164,206,.35)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(bx + 8, mid); ctx.lineTo(bx + bw - 8, mid); ctx.stroke();
+        ctx.setLineDash([2, 3]); [-xpv, 0, xnv].forEach(x => { ctx.beginPath(); ctx.moveTo(X(x), y0); ctx.lineTo(X(x), y0 + h1); ctx.stroke(); }); ctx.setLineDash([]);
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath();
+        for (let k = 0; k <= 200; k++) { const x = -span + 2 * span * k / 200, v = f(x), px = X(x), py = mid - v * amp; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.stroke();
+        ctx.fillStyle = col; ctx.font = '600 10px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.fillText(lab, bx + 8, y0 + 12); });
+      ctx.fillStyle = '#8FA4CE'; ctx.font = '9px "IBM Plex Mono",monospace'; ctx.textAlign = 'center';
+      ctx.fillText('−x_p', X(-xpv), by + 22 + 3 * (h1 + gap) - 2); ctx.fillText('x_n', X(xnv), by + 22 + 3 * (h1 + gap) - 2);
+      ctx.textAlign = 'right'; ctx.fillStyle = '#7CF0B0'; ctx.fillText('barrier ' + (J.Vbi - Math.min(J.op.Vd, J.Vbi - 0.02)).toFixed(3) + ' V', bx + bw - 8, by + 22 + 2 * (h1 + gap) + 12);
+      ctx.restore(); }
+
     const bias = p.Vapp > 0.05 ? 'forward bias' : p.Vapp < -0.05 ? (p.Vapp <= -p.VZ ? 'REVERSE BREAKDOWN' : 'reverse bias') : 'no bias';
     header(g, 'A ' + p.mat + ' p–n junction · N_A = ' + p.NA.toExponential(0) + ', N_D = ' + p.ND.toExponential(0) + ' cm⁻³ · ' + bias,
       'applied ' + p.Vapp.toFixed(3) + ' V · across the junction ' + J.op.Vd.toFixed(3) + ' V · I = ' + (Math.abs(J.op.I) < 1e-3 ? (J.op.I * 1e6).toFixed(3) + ' µA' : (J.op.I * 1000).toFixed(3) + ' mA'),
       'forward bias narrows the depletion layer and carriers flood across; reverse bias widens it and only a tiny saturation current leaks', th.text);
     panel(g, 'THE JUNCTION', [
       ['built-in potential V_bi', J.Vbi.toFixed(4) + ' V', th.phys], ['depletion width now · at V = 0', (J.W * 1e4).toFixed(4) + ' · ' + (J.W0 * 1e4).toFixed(4) + ' µm'],
-      ['it reaches 1 mA at', isFinite(J.knee) ? J.knee.toFixed(3) + ' V' : '—', th.ok], ['dynamic resistance dV/dI here', J.rd < 1e6 ? J.rd.toFixed(2) + ' Ω' : (J.rd / 1e6).toExponential(2) + ' MΩ'],
+      ['it reaches 1 mA at', isFinite(J.knee) ? J.knee.toFixed(3) + ' V' : '—', th.ok], ['dynamic resistance dV/dI here', !isFinite(J.rd) || J.rd > 1e12 ? '> 10¹² Ω (open)' : J.rd < 1e6 ? J.rd.toFixed(2) + ' Ω' : (J.rd / 1e6).toExponential(2) + ' MΩ'],
       ['current', (J.op.I * 1000).toExponential(3) + ' mA'], ['thermal voltage kT/q', (J.Vt * 1000).toFixed(2) + ' mV']
     ]);
   }
@@ -1213,9 +1346,9 @@
       { name: 'n-type silicon (10¹⁶ donors)', params: { mode: 'bands', mat: 'Si', Tk: 300, dop: 'n', dE: 16 } },
       { name: 'p-type germanium', params: { mode: 'bands', mat: 'Ge', Tk: 300, dop: 'p', dE: 15 } },
       { name: 'Hot doped silicon: turns intrinsic', params: { mode: 'bands', mat: 'Si', Tk: 650, dop: 'n', dE: 15 } },
-      { name: 'Junction · forward bias', params: { mode: 'junction', Vapp: 0.7 } },
-      { name: 'Junction · reverse bias', params: { mode: 'junction', Vapp: -3 } },
-      { name: 'Junction · Zener breakdown', params: { mode: 'junction', Vapp: -6.5 } },
+      { name: 'Junction · forward bias', params: { mode: 'junction', mat: 'Si', Vapp: 0.7 } },
+      { name: 'Junction · reverse bias', params: { mode: 'junction', mat: 'Si', Vapp: -3 } },
+      { name: 'Junction · Zener breakdown', params: { mode: 'junction', mat: 'Si', Vapp: -6.5 } },
       { name: 'Half-wave rectifier, no capacitor', params: { mode: 'rect', rect: 'half', Cf: 0 } },
       { name: 'Bridge rectifier, no capacitor', params: { mode: 'rect', rect: 'bridge', Cf: 0 } },
       { name: 'Bridge with a 470 µF capacitor', params: { mode: 'rect', rect: 'bridge', Cf: 470 } },
@@ -1279,7 +1412,7 @@
       else S.Gt = runGates(p);
       S.ts = 0;
       const views = {
-        bands: { theta: -1.1, phi: 0.45, dist: 3.6, target: [-0.35, 0, 0.3] },
+        bands: { theta: -1.57, phi: 1.05, dist: 3.9, target: [0.7, -0.5, 0] },
         junction: { theta: -1.45, phi: 0.35, dist: 3.4, target: [0, 0, -0.1] },
         rect: { theta: -1.57, phi: 0.95, dist: 3.3, target: [0.3, 0.25, 0] },
         zener: { theta: -1.57, phi: 0.9, dist: 2.7, target: [-0.1, -0.05, 0] },
@@ -1454,7 +1587,7 @@
         body: 'The same junction forward-biased, then reverse-biased.',
         ask: 'What happens to the depletion layer?',
         reveal: '<b>It narrows in forward bias and widens in reverse.</b> W ∝ √(V_bi − V): forward bias lowers the barrier, and carriers flood across.',
-        params: { mode: 'junction', Vapp: -3 } },
+        params: { mode: 'junction', mat: 'Si', Vapp: -3 } },
       { title: '4 · From AC to DC',
         body: 'A bridge rectifier, then a capacitor added.',
         ask: 'What does the capacitor do between the peaks?',

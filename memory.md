@@ -742,6 +742,28 @@ Append only. Never rewrite history.
 
 ## 13. Session log
 
+- **2026-09-27 (k)** — **Client: "both are too unsatisfied, especially the kinematics working is so much bad".** Reworked
+  the kinematics and semiconductor stages. The physics was unchanged; all 14 problems give the same values.
+  **Kinematics:**
+  - **Motion graphs.** A strobe (ticker-tape) diagram: snapshots at equal times, spreading when speeding up, bunching when
+    slowing. A bigger car (×1.35), a start flag, a displacement arrow, and a "turns here" marker. A clock/odometer inset at
+    bottom-right. Dropped ball: strobe balls with times.
+  - **Projectiles.** Strobe balls, their shadows on the ground (equal steps, since vx is constant) and on a back wall
+    (vertical motion), velocity plus components, and a velocity-now inset. A cannon, a solid slope wedge, and H and R
+    markers. The camera is fitted to the flight (S.kp, S.x0, S.projDist, S.projTarget) so small flights fill the stage.
+  - **River.** The start is no longer hidden under the panel, the boat is bigger, snapshots are taken at equal times, a large
+    velocity-triangle inset is added, and there are banks with trees.
+  - **Ships.** Bigger hulls, positions at equal times joined by lines (the textbook figure), and a v_B − v_A triangle inset.
+  **Semiconductors:**
+  - The abstract dot cloud is replaced by the NCERT covalent lattice: atoms, shared electron pairs on every bond, and labelled
+    dopant atoms (P/B). Free electrons drift against E and holes hop bond-to-bond along E, both as ballCloud sprites (60 fps).
+  - Junction: an inset with ρ(x), E(x) and V(x) across the depletion layer, drawn to scale.
+  - Junction presets now set mat: 'Si', because Ge was leaking from the bands presets.
+  **Lessons:**
+  - A lab can be correct and still feel bad: kinematics needs the motion diagram (equal-time snapshots) and must be framed so
+    the action is never under the bottom-left panel.
+  - `B3.rule` over tens of metres (thousands of cm ticks) costs about 40 fps; use a few tick marks instead.
+
 - **2026-09-25 (j)** — **Client: "continue next batch".** Batch 5 in `sims-physics15.js` (built by `_build15.sh`:
   `_s0` header, `_r0` helpers, `_s1`–`_s6`; 50 sims):
   - `kinematics`: graphs, projectiles, river, ships.
